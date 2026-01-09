@@ -11,7 +11,7 @@ echo "=================================================="
 # Configuration
 APP_USER="mycase"
 APP_DIR="/opt/jcs-mycase"
-REPO_URL="https://github.com/YOUR_USERNAME/jcs-mycase-automation.git"
+REPO_URL="https://github.com/marcstein/jcs-dashboard.git"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
