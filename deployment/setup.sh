@@ -24,9 +24,15 @@ apt-get update
 apt-get upgrade -y
 
 echo "[2/8] Installing dependencies..."
+# Add deadsnakes PPA for Python 3.11
+apt-get install -y software-properties-common
+add-apt-repository -y ppa:deadsnakes/ppa
+apt-get update
+
 apt-get install -y \
     python3.11 \
     python3.11-venv \
+    python3.11-dev \
     python3-pip \
     git \
     nginx \
