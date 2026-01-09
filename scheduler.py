@@ -61,15 +61,15 @@ DAILY_TASKS = [
         name="sync_data",
         description="Sync all data from MyCase (invoices, tasks, events)",
         frequency=TaskFrequency.DAILY,
-        command="run --sync --no-collections --no-deadlines --dry-run",
-        run_at=time(5, 0),  # 5:00 AM - before events report at 6 AM
+        command="run --sync --no-collections --no-deadlines",
+        run_at=time(6, 0),  # 6:00 AM daily sync
     ),
     ScheduledTask(
         name="events_report",
         description="Send daily upcoming events report to managing partner",
         frequency=TaskFrequency.DAILY,
         command="notify events-report john@jcsattorney.com --days 7 --cc marc.stein@gmail.com",
-        run_at=time(6, 0),  # 6:00 AM - weekdays only (cron handles day filter)
+        run_at=time(6, 15),  # 6:15 AM - after sync completes
         owner="John Schleiffarth",
     ),
     ScheduledTask(
@@ -530,34 +530,45 @@ class Scheduler:
 
             existing = result.stdout
 
-            # Remove our entries
+            # Remove our entries - filter out any line related to our scheduler
             lines = existing.split("\n")
             new_lines = []
-            skip = False
+            in_our_block = False
 
             for line in lines:
-                if "# MyCase Automation Scheduler" in line:
-                    skip = True
+                # Start of our block
+                if "MyCase Automation Scheduler" in line:
+                    in_our_block = True
                     continue
-                if skip and line.startswith("#"):
+                # Skip lines that are part of our scheduler config
+                if in_our_block:
+                    # Skip comments and empty lines in our block
+                    if line.startswith("#") or not line.strip():
+                        continue
+                    # Skip scheduler.py lines
+                    if "scheduler.py" in line:
+                        continue
+                    # Non-scheduler line means we've exited our block
+                    in_our_block = False
+                # Also skip any orphaned scheduler.py entries
+                if "scheduler.py" in line:
                     continue
-                if skip and not line.strip():
-                    skip = False
-                    continue
-                if skip and "scheduler.py" in line:
-                    continue
-                skip = False
                 new_lines.append(line)
 
-            new_crontab = "\n".join(new_lines)
+            # Clean up multiple blank lines
+            new_crontab = "\n".join(new_lines).strip()
 
             # Install cleaned crontab
-            process = subprocess.Popen(
-                ["crontab", "-"],
-                stdin=subprocess.PIPE,
-                text=True,
-            )
-            process.communicate(input=new_crontab)
+            if new_crontab:
+                process = subprocess.Popen(
+                    ["crontab", "-"],
+                    stdin=subprocess.PIPE,
+                    text=True,
+                )
+                process.communicate(input=new_crontab + "\n")
+            else:
+                # If no entries left, remove crontab entirely
+                subprocess.run(["crontab", "-r"], capture_output=True)
 
             return "Cron entries removed"
 
