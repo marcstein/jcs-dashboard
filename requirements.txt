@@ -39,3 +39,6 @@ itsdangerous>=2.1.0
 
 # Security utilities (password hashing)
 werkzeug>=3.0.0
+
+# AI/LLM
+anthropic>=0.30.0
