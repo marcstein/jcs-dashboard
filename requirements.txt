@@ -36,3 +36,6 @@ sqlite-utils>=3.35
 
 # Session management
 itsdangerous>=2.1.0
+
+# Security utilities (password hashing)
+werkzeug>=3.0.0
