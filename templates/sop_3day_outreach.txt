@@ -1,0 +1,35 @@
+Subject: Welcome to {{ firm_name }} - Your Case: {{ case_name }}
+
+Dear {{ client_name }},
+
+Thank you for choosing {{ firm_name }} to represent you. My name is {{ attorney_name }}, and I will be the lead attorney on your case.
+
+I wanted to reach out personally within the first few days to:
+
+1. INTRODUCE MYSELF and confirm I am actively working on your matter
+2. ANSWER any immediate questions you may have
+3. EXPLAIN our process and what you can expect going forward
+4. CONFIRM your contact information is correct
+
+YOUR CASE INFORMATION:
+Case Name: {{ case_name }}
+Case Type: {{ case_type }}
+Lead Attorney: {{ attorney_name }}
+Your Legal Assistant: {{ paralegal_name }}
+
+NEXT STEPS:
+{{ next_steps }}
+
+HOW TO REACH US:
+- For case updates: Use your Client Portal or contact {{ paralegal_name }}
+- For legal questions: I'm available at {{ attorney_phone }} or {{ attorney_email }}
+- For billing questions: Contact our billing department at {{ firm_phone }}
+
+Please don't hesitate to reach out with any questions or concerns. We're committed to providing you with excellent representation and keeping you informed throughout your case.
+
+Best regards,
+
+{{ attorney_name }}
+{{ firm_name }}
+{{ attorney_phone }}
+{{ attorney_email }}

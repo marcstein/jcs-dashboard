@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}A/R Dashboard - MyCase{% endblock %}
+
+{% block content %}
+<h1>Accounts Receivable</h1>
+
+<div class="stats-grid">
+    <div class="stat-card stat-large">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_ar or 0) }}</div>
+        <div class="stat-label">Total A/R Balance</div>
+    </div>
+    <div class="stat-card {% if (summary.aging_over_60_pct or 0) > 25 %}stat-danger{% endif %}">
+        <div class="stat-value">{{ "{:.1f}".format(summary.aging_over_60_pct or 0) }}%</div>
+        <div class="stat-label">Over 60 Days</div>
+        <div class="stat-target">Target: &lt;25%</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.delinquent_accounts or 0 }}</div>
+        <div class="stat-label">Delinquent Accounts</div>
+    </div>
+</div>
+
+<section class="section">
+    <h2>Aging Breakdown</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Aging Bucket</th>
+                <th>Amount</th>
+                <th>% of Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set total = summary.total_ar or 1 %}
+            <tr>
+                <td>0-30 Days</td>
+                <td>${{ "{:,.0f}".format(summary.ar_0_30 or 0) }}</td>
+                <td>{{ "{:.1f}".format(((summary.ar_0_30 or 0) / total) * 100) }}%</td>
+            </tr>
+            <tr>
+                <td>31-60 Days</td>
+                <td>${{ "{:,.0f}".format(summary.ar_31_60 or 0) }}</td>
+                <td>{{ "{:.1f}".format(((summary.ar_31_60 or 0) / total) * 100) }}%</td>
+            </tr>
+            <tr class="{% if (summary.ar_61_90 or 0) > 0 %}row-warning{% endif %}">
+                <td>61-90 Days</td>
+                <td>${{ "{:,.0f}".format(summary.ar_61_90 or 0) }}</td>
+                <td>{{ "{:.1f}".format(((summary.ar_61_90 or 0) / total) * 100) }}%</td>
+            </tr>
+            <tr class="{% if (summary.ar_90_plus or 0) > 0 %}row-danger{% endif %}">
+                <td>90+ Days</td>
+                <td>${{ "{:,.0f}".format(summary.ar_90_plus or 0) }}</td>
+                <td>{{ "{:.1f}".format(((summary.ar_90_plus or 0) / total) * 100) }}%</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<section class="section">
+    <h2>Payment Plans</h2>
+    <div class="stats-grid stats-small">
+        <div class="stat-card">
+            <div class="stat-value">{{ plans.active_count or 0 }}</div>
+            <div class="stat-label">Active Plans</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${{ "{:,.0f}".format(plans.active_total or 0) }}</div>
+            <div class="stat-label">Total on Plans</div>
+        </div>
+        <div class="stat-card {% if (plans.delinquent_count or 0) > 0 %}stat-danger{% endif %}">
+            <div class="stat-value">{{ plans.delinquent_count or 0 }}</div>
+            <div class="stat-label">Delinquent</div>
+        </div>
+        <div class="stat-card stat-success">
+            <div class="stat-value">{{ plans.completed_month or 0 }}</div>
+            <div class="stat-label">Completed (Month)</div>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <h2>Today's Collections</h2>
+    <div class="collection-summary">
+        <div class="collection-stat">
+            <span class="collection-amount">${{ "{:,.0f}".format(summary.cash_received or 0) }}</span>
+            <span class="collection-label">Cash Received</span>
+        </div>
+        <div class="collection-stat">
+            <span class="collection-count">{{ summary.payment_count or 0 }}</span>
+            <span class="collection-label">Payments</span>
+        </div>
+    </div>
+</section>
+{% endblock %}

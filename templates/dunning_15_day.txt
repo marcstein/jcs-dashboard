@@ -1,0 +1,17 @@
+Dear {{ client_name }},
+
+This is a friendly reminder that Invoice #{{ invoice_number }} dated {{ invoice_date | date }}
+for {{ invoice_amount | currency }} is now 15 days past due.
+
+Case: {{ case_name }}
+Original Due Date: {{ due_date | date }}
+Amount Due: {{ balance_due | currency }}
+
+Please remit payment at your earliest convenience. If you have already sent payment,
+please disregard this notice.
+
+If you have any questions about this invoice, please don't hesitate to contact our office.
+
+Sincerely,
+{{ firm_name }}
+{{ firm_phone }}

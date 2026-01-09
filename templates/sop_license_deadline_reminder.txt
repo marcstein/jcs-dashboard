@@ -1,0 +1,46 @@
+Subject: URGENT: License Filing Deadline Approaching - {{ case_name }}
+
+INTERNAL NOTIFICATION - LEGAL ASSISTANT ACTION REQUIRED
+
+Case: {{ case_name }}
+Client: {{ client_name }}
+Assigned To: {{ assignee_name }}
+Date: {{ current_date }}
+
+⚠️ LICENSE FILING DEADLINE ALERT ⚠️
+
+Filing Type: {{ filing_type }}
+Arrest Date: {{ arrest_date }}
+Deadline: {{ deadline_date }}
+Days Remaining: {{ days_remaining }}
+
+REQUIRED ACTION:
+{% if filing_type == "DOR" %}
+File Administrative Hearing Request with DOR
+- Must be filed within 15 days of arrest
+- Client did NOT refuse the test
+- Use DOR Administrative Hearing form
+{% elif filing_type == "PFR" %}
+File Petition for Review (PFR)
+- Must be filed within 30 days of arrest
+- Client REFUSED the test
+- File in Circuit Court
+{% endif %}
+
+CHECKLIST:
+[ ] Verify arrest date and test refusal status
+[ ] Prepare filing documents
+[ ] File with appropriate agency/court
+[ ] Calendar hearing date when received
+[ ] Update MyCase with filing confirmation
+[ ] Notify attorney of filing
+
+ESCALATION:
+If you cannot complete this filing before the deadline, IMMEDIATELY notify:
+- Tiffany (Senior Paralegal)
+- {{ attorney_name }} (Lead Attorney)
+
+Missing this deadline could result in automatic license revocation for the client.
+
+---
+This is an automated reminder from the MyCase automation system.

@@ -1,0 +1,468 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - MyCase{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <span class="firm-name">JCS Law Firm</span>
+    <h1>Dashboard</h1>
+</div>
+
+{% if stats.no_data %}
+<div class="alert alert-warning">
+    No data synced yet. Click "Sync Now" or run <code>uv run python agent.py sync</code> to populate the dashboard.
+</div>
+{% endif %}
+
+<div class="sync-bar">
+    <span class="sync-info">Last sync: {{ stats.last_sync }}</span>
+    <button id="syncBtn" class="btn btn-primary" onclick="startSync()">Sync Now</button>
+    <span id="syncStatus" class="sync-status"></span>
+</div>
+
+<!-- A/R Collections Widget (Full Width) -->
+<h2>A/R Collections</h2>
+<div class="sop-widget sop-widget-ar">
+    <div class="sop-header">
+        <h3>2025 Invoice Aging</h3>
+        <span class="sop-status {% if melissa_sop.aging_compliant %}status-ok{% else %}status-alert{% endif %}">
+            {% if melissa_sop.aging_compliant %}On Track{% else %}{{ "{:.0f}".format(melissa_sop.aging_over_60_pct or 0) }}% &gt;60 Days{% endif %}
+        </span>
+    </div>
+    <div class="sop-metrics sop-metrics-ar">
+        <div class="sop-metric" style="background: #d1fae5;">
+            <span class="metric-value">${{ "{:,.0f}".format(melissa_sop.total_collected or 0) }}</span>
+            <span class="metric-label">Collected</span>
+        </div>
+        <div class="sop-metric {% if (melissa_sop.collection_rate or 0) >= 85 %}metric-success{% elif (melissa_sop.collection_rate or 0) >= 75 %}metric-warning{% else %}metric-alert{% endif %}">
+            <span class="metric-value">{{ "{:.1f}".format(melissa_sop.collection_rate or 0) }}%</span>
+            <span class="metric-label">Collection Rate</span>
+        </div>
+        <div class="sop-metric">
+            <span class="metric-value">${{ "{:,.0f}".format(melissa_sop.ar_current or 0) }}</span>
+            <span class="metric-label">Current</span>
+        </div>
+        <div class="sop-metric">
+            <span class="metric-value">${{ "{:,.0f}".format(melissa_sop.ar_0_30 or 0) }}</span>
+            <span class="metric-label">0-30 Days</span>
+        </div>
+        <div class="sop-metric metric-warning">
+            <span class="metric-value">${{ "{:,.0f}".format(melissa_sop.ar_31_60 or 0) }}</span>
+            <span class="metric-label">31-60 Days</span>
+        </div>
+        <div class="sop-metric metric-alert">
+            <span class="metric-value">${{ "{:,.0f}".format(melissa_sop.ar_61_90 or 0) }}</span>
+            <span class="metric-label">61-90 Days</span>
+        </div>
+        <div class="sop-metric metric-alert">
+            <span class="metric-value">${{ "{:,.0f}".format(melissa_sop.ar_91_120 or 0) }}</span>
+            <span class="metric-label">91-120 Days</span>
+        </div>
+        <div class="sop-metric metric-alert" style="background: #fecaca;">
+            <span class="metric-value">${{ "{:,.0f}".format(melissa_sop.ar_120_plus or 0) }}</span>
+            <span class="metric-label">&gt;120 Days</span>
+        </div>
+    </div>
+    <div class="sop-actions">
+        <a href="/ar" class="btn btn-secondary btn-sm">A/R Detail</a>
+        <a href="/noiw" class="btn btn-secondary btn-sm">NOIW Pipeline ({{ melissa_sop.noiw_count }})</a>
+    </div>
+</div>
+
+<!-- SOP Widgets Grid -->
+<h2>SOP Compliance by Role</h2>
+<div class="sop-widgets">
+    <!-- Ty - Intake Lead -->
+    <div class="sop-widget">
+        <div class="sop-header">
+            <h3>Ty - Intake Lead</h3>
+            <span class="sop-status {% if ty_sop.attorney_compliant %}status-ok{% else %}status-alert{% endif %}">
+                {% if ty_sop.attorney_compliant %}On Track{% else %}Needs Attention{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics">
+            <div class="sop-metric">
+                <span class="metric-value">{{ ty_sop.new_cases_week }}</span>
+                <span class="metric-label">New This Week</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ ty_sop.new_cases_month }}</span>
+                <span class="metric-label">New This Month</span>
+            </div>
+            <div class="sop-metric {% if not ty_sop.attorney_compliant %}metric-alert{% endif %}">
+                <span class="metric-value">{{ "{:.0f}".format(ty_sop.attorney_assignment_rate or 0) }}%</span>
+                <span class="metric-label">Attorney Assigned</span>
+                <span class="metric-target">Target: 100%</span>
+            </div>
+        </div>
+        {% if ty_sop.case_types %}
+        <div class="sop-breakdown">
+            <span class="breakdown-label">Case Types:</span>
+            {% for ct in ty_sop.case_types[:3] %}
+            <span class="breakdown-item">{{ ct.type }} ({{ ct.count }})</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Tiffany Willis - Sr. Paralegal (Personal Tasks) -->
+    <a href="/staff/Tiffany" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Tiffany Willis<span class="sop-title">Paralegal</span></h3>
+            <span class="sop-status {% if tiffany_personal_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if tiffany_personal_sop.overdue_count == 0 %}On Track{% else %}{{ tiffany_personal_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ tiffany_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ tiffany_caseload.tasks_done }}/{{ tiffany_caseload.tasks_total }}</span>
+                <span class="metric-label">Tasks Done</span>
+            </div>
+            <div class="sop-metric {% if tiffany_personal_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ tiffany_personal_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Alison - Legal Assistant -->
+    <a href="/staff/Alison" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Alison Ehrhard<span class="sop-title">Paralegal</span></h3>
+            <span class="sop-status {% if alison_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if alison_sop.overdue_count == 0 %}On Track{% else %}{{ alison_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ alison_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ alison_caseload.tasks_done }}/{{ alison_caseload.tasks_total }}</span>
+                <span class="metric-label">Tasks Done</span>
+            </div>
+            <div class="sop-metric {% if alison_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ alison_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Cole - Legal Assistant -->
+    <a href="/staff/Cole" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Cole Chadderdon<span class="sop-title">Paralegal</span></h3>
+            <span class="sop-status {% if cole_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if cole_sop.overdue_count == 0 %}On Track{% else %}{{ cole_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ cole_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ cole_caseload.tasks_done }}/{{ cole_caseload.tasks_total }}</span>
+                <span class="metric-label">Tasks Done</span>
+            </div>
+            <div class="sop-metric {% if cole_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ cole_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Heidi Leopold - Task Owner -->
+    <a href="/staff/Heidi" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Heidi Leopold<span class="sop-title">Associate Attorney</span></h3>
+            <span class="sop-status {% if heidi_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if heidi_sop.overdue_count == 0 %}On Track{% else %}{{ heidi_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ heidi_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ heidi_caseload.closed_cases }}</span>
+                <span class="metric-label">Closed Cases</span>
+            </div>
+            <div class="sop-metric {% if heidi_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ heidi_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Anthony Muhlenkamp - Task Owner -->
+    <a href="/staff/Anthony" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Anthony Muhlenkamp<span class="sop-title">Attorney</span></h3>
+            <span class="sop-status {% if anthony_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if anthony_sop.overdue_count == 0 %}On Track{% else %}{{ anthony_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ anthony_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ anthony_caseload.closed_cases }}</span>
+                <span class="metric-label">Closed Cases</span>
+            </div>
+            <div class="sop-metric {% if anthony_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ anthony_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Melinda Gorman - Task Owner -->
+    <a href="/staff/Melinda" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Melinda Gorman<span class="sop-title">Associate Attorney</span></h3>
+            <span class="sop-status {% if melinda_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if melinda_sop.overdue_count == 0 %}On Track{% else %}{{ melinda_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ melinda_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ melinda_caseload.closed_cases }}</span>
+                <span class="metric-label">Closed Cases</span>
+            </div>
+            <div class="sop-metric {% if melinda_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ melinda_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Attorney Productivity Summary Widget -->
+    <a href="/attorneys" class="sop-widget-link">
+    <div class="sop-widget sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Attorney Productivity</h3>
+            <span class="sop-status {% if attorney_summary.dpd_61_90 + attorney_summary.dpd_91_120 == 0 %}status-ok{% elif attorney_summary.dpd_61_90 + attorney_summary.dpd_91_120 < 20 %}status-warning{% else %}status-alert{% endif %}">
+                {% if attorney_summary.dpd_61_90 + attorney_summary.dpd_91_120 > 0 %}{{ attorney_summary.dpd_61_90 + attorney_summary.dpd_91_120 }} Need Calls{% else %}All Current{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics">
+            <div class="sop-metric">
+                <span class="metric-value">{{ attorney_summary.total_active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ attorney_summary.paid_full }}</span>
+                <span class="metric-label">Current</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ attorney_summary.dpd_1_30 + attorney_summary.dpd_31_60 }}</span>
+                <span class="metric-label">30-60 DPD</span>
+            </div>
+            <div class="sop-metric {% if attorney_summary.dpd_61_90 > 0 %}metric-warning{% endif %}">
+                <span class="metric-value">{{ attorney_summary.dpd_61_90 }}</span>
+                <span class="metric-label">61-90 DPD</span>
+            </div>
+            <div class="sop-metric {% if attorney_summary.dpd_91_120 > 0 %}metric-warning{% endif %}">
+                <span class="metric-value">{{ attorney_summary.dpd_91_120 }}</span>
+                <span class="metric-label">91-120 DPD</span>
+            </div>
+        </div>
+        {% if attorney_summary.top_attorneys %}
+        <div class="sop-breakdown">
+            <span class="breakdown-label">Top Caseloads:</span>
+            {% for atty in attorney_summary.top_attorneys[:3] %}
+            <span class="breakdown-item">{{ atty.name.split(' ')[0] }} ({{ atty.cases }})</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    </a>
+</div>
+
+<!-- Original Stats Grid -->
+<h2>Key Metrics</h2>
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(stats.ar_under_180 or 0) }}</div>
+        <div class="stat-label">A/R &lt; 180 Days</div>
+        <div class="stat-detail">Actionable</div>
+    </div>
+    <div class="stat-card stat-muted">
+        <div class="stat-value">${{ "{:,.0f}".format(stats.ar_over_180 or 0) }}</div>
+        <div class="stat-label">A/R &gt; 180 Days</div>
+        <div class="stat-detail">Likely uncollectible</div>
+    </div>
+    <div class="stat-card {% if (stats.aging_60_to_120_pct or 0) > 0 %}stat-warning{% endif %}">
+        <div class="stat-value">{{ "{:.1f}".format(stats.aging_60_to_120_pct or 0) }}%</div>
+        <div class="stat-label">60-120 Days</div>
+        <div class="stat-target">Target: 0%</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(stats.today_collected or 0) }}</div>
+        <div class="stat-label">Collected Today</div>
+        <div class="stat-detail">{{ stats.payment_count or 0 }} payments</div>
+    </div>
+    <div class="stat-card {% if (stats.delinquent_plans or 0) > 0 %}stat-warning{% endif %}">
+        <div class="stat-value">{{ stats.active_plans or 0 }}</div>
+        <div class="stat-label">Active Plans</div>
+        <div class="stat-detail">{{ stats.delinquent_plans or 0 }} delinquent</div>
+    </div>
+    <div class="stat-card {% if (stats.noiw_pipeline or 0) > 0 %}stat-warning{% endif %}">
+        <div class="stat-value">{{ stats.noiw_pipeline or 0 }}</div>
+        <div class="stat-label">NOIW Pipeline</div>
+    </div>
+    <div class="stat-card {% if (stats.overdue_tasks or 0) > 0 %}stat-warning{% endif %}">
+        <div class="stat-value">{{ stats.overdue_tasks or 0 }}</div>
+        <div class="stat-label">Overdue Tasks</div>
+    </div>
+</div>
+
+<div class="dashboard-sections">
+    <section class="section">
+        <h2>A/R Aging Breakdown</h2>
+        <div class="aging-chart">
+            {% for bucket, amount in ar_aging.items() %}
+            <div class="aging-bar">
+                <div class="aging-label">{{ bucket }}</div>
+                <div class="aging-amount">${{ "{:,.0f}".format(amount or 0) }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section">
+        <h2>Recent Reports</h2>
+        {% if recent_reports %}
+        <ul class="report-list">
+            {% for report in recent_reports %}
+            <li>
+                <a href="/reports/{{ report.name }}">{{ report.name }}</a>
+                <span class="report-date">{{ report.modified.strftime('%m/%d %H:%M') }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        <a href="/reports" class="btn btn-secondary">View All Reports</a>
+        {% else %}
+        <p class="empty-state">No reports generated yet.</p>
+        {% endif %}
+    </section>
+</div>
+
+<div class="quick-actions">
+    <h2>Quick Links</h2>
+    <div class="action-grid">
+        <a href="/ar" class="action-card">
+            <div class="action-icon">$</div>
+            <div class="action-label">A/R Details</div>
+        </a>
+        <a href="/noiw" class="action-card">
+            <div class="action-icon">!</div>
+            <div class="action-label">NOIW Pipeline</div>
+        </a>
+        <a href="/wonky" class="action-card">
+            <div class="action-icon">?</div>
+            <div class="action-label">Wonky Invoices</div>
+        </a>
+        <a href="/reports" class="action-card">
+            <div class="action-icon">R</div>
+            <div class="action-label">All Reports</div>
+        </a>
+    </div>
+</div>
+
+<script>
+let syncCheckInterval = null;
+
+async function startSync() {
+    const btn = document.getElementById('syncBtn');
+    const status = document.getElementById('syncStatus');
+
+    btn.disabled = true;
+    btn.textContent = 'Syncing...';
+    status.textContent = 'Starting sync...';
+    status.className = 'sync-status syncing';
+
+    try {
+        const response = await fetch('/api/sync', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.status === 'started') {
+            // Poll for status
+            syncCheckInterval = setInterval(checkSyncStatus, 2000);
+        } else if (data.status === 'already_running') {
+            status.textContent = 'Sync already in progress...';
+            syncCheckInterval = setInterval(checkSyncStatus, 2000);
+        }
+    } catch (err) {
+        status.textContent = 'Error starting sync: ' + err.message;
+        status.className = 'sync-status sync-error';
+        btn.disabled = false;
+        btn.textContent = 'Sync Now';
+    }
+}
+
+async function checkSyncStatus() {
+    const btn = document.getElementById('syncBtn');
+    const status = document.getElementById('syncStatus');
+
+    try {
+        const response = await fetch('/api/sync/status');
+        const data = await response.json();
+
+        if (data.running) {
+            status.textContent = 'Syncing from MyCase API...';
+        } else {
+            clearInterval(syncCheckInterval);
+            syncCheckInterval = null;
+            btn.disabled = false;
+            btn.textContent = 'Sync Now';
+
+            if (data.error) {
+                status.textContent = 'Sync failed: ' + data.error;
+                status.className = 'sync-status sync-error';
+            } else if (data.last_result) {
+                const changes = data.last_result.total_changes;
+                const errors = data.last_result.total_errors;
+                if (errors > 0) {
+                    status.textContent = `Sync completed with ${errors} errors. ${changes} changes.`;
+                    status.className = 'sync-status sync-warning';
+                } else {
+                    status.textContent = `Sync completed. ${changes} changes.`;
+                    status.className = 'sync-status sync-success';
+                }
+                // Reload page after short delay to show new data
+                setTimeout(() => location.reload(), 1500);
+            }
+        }
+    } catch (err) {
+        status.textContent = 'Error checking status';
+        status.className = 'sync-status sync-error';
+    }
+}
+</script>
+{% endblock %}

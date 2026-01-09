@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}NOIW Pipeline - MyCase{% endblock %}
+
+{% block content %}
+<h1>NOIW Pipeline</h1>
+<p class="page-description">Notice of Intent to Withdraw - cases with significant delinquency requiring action.</p>
+
+{% if pipeline %}
+<div class="stats-grid stats-small">
+    <div class="stat-card">
+        <div class="stat-value">{{ pipeline|length }}</div>
+        <div class="stat-label">Cases in Pipeline</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(pipeline|sum(attribute='balance_due')) }}</div>
+        <div class="stat-label">Total Balance</div>
+    </div>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Case</th>
+            <th>Client</th>
+            <th>Balance Due</th>
+            <th>Days Delinquent</th>
+            <th>Initiated</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for case in pipeline %}
+        <tr class="{% if case.days_delinquent > 60 %}row-danger{% elif case.days_delinquent > 30 %}row-warning{% endif %}">
+            <td>{{ case.case_name or case.case_id }}</td>
+            <td>{{ case.contact_name or 'N/A' }}</td>
+            <td>${{ "{:,.0f}".format(case.balance_due or 0) }}</td>
+            <td>{{ case.days_delinquent or 0 }} days</td>
+            <td>{{ case.initiated_date or 'N/A' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No cases in NOIW pipeline.</p>
+</div>
+{% endif %}
+{% endblock %}

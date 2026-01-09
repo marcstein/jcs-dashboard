@@ -1,0 +1,44 @@
+Subject: Payment Plan Confirmation - {{ case_name }}
+
+Dear {{ client_name }},
+
+Thank you for setting up a payment plan with {{ firm_name }}. This letter confirms the terms of your payment arrangement.
+
+PAYMENT PLAN DETAILS:
+Case: {{ case_name }}
+Total Fee: ${{ total_amount | round(2) }}
+Down Payment: ${{ down_payment | round(2) }}
+Remaining Balance: ${{ remaining_balance | round(2) }}
+
+PAYMENT SCHEDULE:
+Installment Amount: ${{ installment_amount | round(2) }}
+Payment Frequency: {{ frequency }}
+First Payment Due: {{ first_payment_date }}
+Final Payment Due: {{ final_payment_date }}
+Number of Payments: {{ total_payments }}
+
+PAYMENT METHODS:
+{{ payment_methods }}
+
+IMPORTANT TERMS:
+1. Payments must be received by the due date
+2. A grace period of 3 days is allowed before late fees apply
+3. If a payment is missed, please contact us immediately
+4. Failure to maintain the payment plan may result in:
+   - Late fees
+   - Suspension of work on your case
+   - Potential withdrawal of representation
+
+AUTOPAY (RECOMMENDED):
+To ensure you never miss a payment, we recommend setting up automatic payments. Contact our billing department to enroll.
+
+If your financial situation changes, please contact us BEFORE missing a payment. We may be able to modify your plan.
+
+Questions? Contact our billing department:
+Phone: {{ firm_phone }}
+Email: {{ firm_email }}
+
+Thank you for your cooperation.
+
+{{ firm_name }}
+Billing Department

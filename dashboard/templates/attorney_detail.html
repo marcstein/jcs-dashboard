@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}{{ attorney.attorney_name }} - Attorney Detail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="/attorneys" class="back-link">&larr; Back to Attorneys</a>
+    <h1>{{ attorney.attorney_name }}</h1>
+</div>
+
+{% if attorney.error %}
+<div class="error-message">{{ attorney.error }}</div>
+{% else %}
+
+<!-- Productivity Summary -->
+<div class="attorney-summary-row">
+    <div class="summary-stat">
+        <div class="summary-value">{{ attorney.productivity.active_cases or 0 }}</div>
+        <div class="summary-label">Active Cases</div>
+    </div>
+    <div class="summary-stat">
+        <div class="summary-value">{{ attorney.productivity.closed_mtd or 0 }}</div>
+        <div class="summary-label">Closed MTD</div>
+    </div>
+    <div class="summary-stat">
+        <div class="summary-value">{{ attorney.productivity.closed_ytd or 0 }}</div>
+        <div class="summary-label">Closed YTD</div>
+    </div>
+    <div class="summary-stat">
+        <div class="summary-value">${{ "{:,.0f}".format(attorney.productivity.total_billed or 0) }}</div>
+        <div class="summary-label">Total Billed</div>
+    </div>
+    <div class="summary-stat">
+        <div class="summary-value">${{ "{:,.0f}".format(attorney.productivity.total_collected or 0) }}</div>
+        <div class="summary-label">Collected</div>
+    </div>
+    <div class="summary-stat">
+        <div class="summary-value {% if attorney.productivity.collection_rate >= 80 %}text-success{% elif attorney.productivity.collection_rate >= 60 %}text-warning{% else %}text-danger{% endif %}">
+            {{ "{:.1f}".format(attorney.productivity.collection_rate or 0) }}%
+        </div>
+        <div class="summary-label">Collection Rate</div>
+    </div>
+</div>
+
+<!-- Invoice Aging Breakdown -->
+<div class="section">
+    <h2>Invoice Aging Breakdown</h2>
+    <div class="aging-grid">
+        <div class="aging-card">
+            <div class="aging-count">{{ attorney.aging.paid_full or 0 }}</div>
+            <div class="aging-label">Paid in Full</div>
+            <div class="aging-pct">{{ attorney.aging.paid_full_pct or 0 }}%</div>
+        </div>
+        <div class="aging-card">
+            <div class="aging-count">{{ attorney.aging.current or 0 }}</div>
+            <div class="aging-label">Current</div>
+        </div>
+        <div class="aging-card">
+            <div class="aging-count">{{ attorney.aging.dpd_1_30 or 0 }}</div>
+            <div class="aging-label">1-30 DPD</div>
+        </div>
+        <div class="aging-card">
+            <div class="aging-count">{{ attorney.aging.dpd_31_60 or 0 }}</div>
+            <div class="aging-label">31-60 DPD</div>
+        </div>
+        <div class="aging-card warning">
+            <div class="aging-count">{{ attorney.aging.dpd_61_90 or 0 }}</div>
+            <div class="aging-label">61-90 DPD</div>
+            <div class="aging-note">Needs Call</div>
+        </div>
+        <div class="aging-card warning">
+            <div class="aging-count">{{ attorney.aging.dpd_91_120 or 0 }}</div>
+            <div class="aging-label">91-120 DPD</div>
+            <div class="aging-note">Needs Call</div>
+        </div>
+        <div class="aging-card warning">
+            <div class="aging-count">{{ attorney.aging.dpd_121_180 or 0 }}</div>
+            <div class="aging-label">121-180 DPD</div>
+            <div class="aging-note">Needs Call</div>
+        </div>
+        <div class="aging-card danger">
+            <div class="aging-count">{{ attorney.aging.dpd_over_180 or 0 }}</div>
+            <div class="aging-label">180+ DPD</div>
+            <div class="aging-note">Unlikely</div>
+        </div>
+    </div>
+</div>
+
+<!-- Call List: 60+ DPD Invoices -->
+{% if attorney.call_list %}
+<div class="section">
+    <h2>Collection Call List (60-180 Days Past Due)</h2>
+    <div class="call-list-summary">
+        <span class="badge success">{{ attorney.call_list_count }} Viable (60-180 DPD)</span>
+        <span class="badge">Total: ${{ "{:,.0f}".format(attorney.aging.amount_60_to_180 or 0) }}</span>
+    </div>
+    <table class="call-list-table">
+        <thead>
+            <tr>
+                <th>Invoice #</th>
+                <th>Case</th>
+                <th>Client</th>
+                <th>Contact</th>
+                <th class="text-right">Balance</th>
+                <th class="text-center">Days Overdue</th>
+                <th class="text-center">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inv in attorney.call_list %}
+            <tr class="{% if not inv.collectible %}row-danger{% elif inv.days_overdue > 90 %}row-warning{% endif %}">
+                <td>{{ inv.invoice_number }}</td>
+                <td class="case-name">{{ inv.case_name[:50] }}{% if inv.case_name|length > 50 %}...{% endif %}</td>
+                <td>{{ inv.contact_name or 'Unknown' }}</td>
+                <td>
+                    {% if inv.contact_phone %}
+                    <a href="tel:{{ inv.contact_phone }}" class="contact-link">{{ inv.contact_phone }}</a>
+                    {% endif %}
+                    {% if inv.contact_email %}
+                    <a href="mailto:{{ inv.contact_email }}" class="contact-link">{{ inv.contact_email }}</a>
+                    {% endif %}
+                </td>
+                <td class="text-right">${{ "{:,.2f}".format(inv.balance_due) }}</td>
+                <td class="text-center days-overdue">{{ inv.days_overdue }}</td>
+                <td class="text-center">
+                    {% if inv.collectible %}
+                    <span class="status-badge viable">Viable</span>
+                    {% else %}
+                    <span class="status-badge unlikely">Unlikely</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="section">
+    <h2>Collection Call List</h2>
+    <p class="no-data">No invoices 60+ days past due.</p>
+</div>
+{% endif %}
+
+<!-- Active Cases -->
+{% if attorney.active_cases %}
+<div class="section">
+    <h2>Active Cases ({{ attorney.active_cases|length }})</h2>
+    <table class="cases-table">
+        <thead>
+            <tr>
+                <th>Case Name</th>
+                <th>Case Number</th>
+                <th>Practice Area</th>
+                <th>Opened</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for case in attorney.active_cases %}
+            <tr>
+                <td>{{ case.name[:60] }}{% if case.name|length > 60 %}...{% endif %}</td>
+                <td>{{ case.case_number or '-' }}</td>
+                <td>{{ case.practice_area or '-' }}</td>
+                <td>{{ case.date_opened or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

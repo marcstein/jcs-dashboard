@@ -1,0 +1,33 @@
+Subject: IMPORTANT: Payment Required - {{ case_name }}
+
+Dear {{ client_name }},
+
+This notice is to inform you that your account with {{ firm_name }} is currently {{ days_overdue }} days past due. The outstanding balance of ${{ balance_due | round(2) }} for {{ case_name }} requires your immediate attention.
+
+ACCOUNT SUMMARY:
+Invoice Number: {{ invoice_number }}
+Original Amount: ${{ invoice_amount | round(2) }}
+Balance Due: ${{ balance_due | round(2) }}
+Days Past Due: {{ days_overdue }}
+
+Per the terms of your Engagement Agreement, payment is required within 10 days of this notice. Failure to bring your account current may result in:
+
+1. Suspension of work on your case
+2. Filing of a Notice of Intent to Withdraw as counsel
+3. Potential referral to collections
+
+We value our relationship with you and want to continue representing you effectively. However, we cannot do so without timely payment.
+
+If you are experiencing financial hardship, please contact us IMMEDIATELY at {{ firm_phone }} to discuss modified payment arrangements before this deadline.
+
+To make a payment:
+- Client Portal: [Portal Link]
+- Phone: {{ firm_phone }}
+
+This is a serious matter that requires your prompt response.
+
+Sincerely,
+{{ firm_name }}
+Billing Department
+{{ firm_phone }}
+{{ firm_email }}

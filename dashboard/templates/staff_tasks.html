@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}{{ staff.staff_name }} - Tasks{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="/" class="back-link">&larr; Back to Dashboard</a>
+    <h1>{{ staff.staff_name }}</h1>
+</div>
+
+<div class="staff-summary">
+    <div class="summary-stat">
+        <span class="stat-number">{{ active_cases|length }}</span>
+        <span class="stat-label">Active Cases</span>
+    </div>
+    <div class="summary-stat {% if staff.overdue_count > 0 %}stat-alert{% endif %}">
+        <span class="stat-number">{{ staff.overdue_count }}</span>
+        <span class="stat-label">Overdue Tasks</span>
+    </div>
+    <div class="summary-stat">
+        <span class="stat-number">{{ staff.due_today_count }}</span>
+        <span class="stat-label">Due Today</span>
+    </div>
+    <div class="summary-stat">
+        <span class="stat-number">{{ staff.upcoming_count }}</span>
+        <span class="stat-label">Next 7 Days</span>
+    </div>
+</div>
+
+{% if active_cases %}
+<section class="task-section">
+    <h2 class="section-title">Active Cases ({{ active_cases|length }})</h2>
+    <table class="task-table">
+        <thead>
+            <tr>
+                <th>Case</th>
+                <th>Type</th>
+                <th>Case #</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for case in active_cases %}
+            <tr>
+                <td>{{ case.name }}</td>
+                <td>{{ case.case_type or '-' }}</td>
+                <td>{{ case.case_number or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+{% if staff.overdue_tasks %}
+<section class="task-section">
+    <h2 class="section-title section-alert">Overdue Tasks ({{ staff.overdue_count }})</h2>
+    <table class="task-table">
+        <thead>
+            <tr>
+                <th>Task</th>
+                <th>Case</th>
+                <th>Due Date</th>
+                <th>Days Overdue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in staff.overdue_tasks %}
+            <tr class="{% if task.days_overdue > 7 %}row-critical{% elif task.days_overdue > 3 %}row-warning{% endif %}">
+                <td>{{ task.task_name }}</td>
+                <td>{{ task.case_name }}</td>
+                <td>{{ task.due_date }}</td>
+                <td class="days-overdue">{{ task.days_overdue }} days</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+{% if staff.due_today %}
+<section class="task-section">
+    <h2 class="section-title section-warning">Due Today ({{ staff.due_today_count }})</h2>
+    <table class="task-table">
+        <thead>
+            <tr>
+                <th>Task</th>
+                <th>Case</th>
+                <th>Priority</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in staff.due_today %}
+            <tr>
+                <td>{{ task.task_name }}</td>
+                <td>{{ task.case_name }}</td>
+                <td>{{ task.priority or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+{% if staff.upcoming %}
+<section class="task-section">
+    <h2 class="section-title">Upcoming (Next 7 Days)</h2>
+    <table class="task-table">
+        <thead>
+            <tr>
+                <th>Task</th>
+                <th>Case</th>
+                <th>Due Date</th>
+                <th>Days Until</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in staff.upcoming %}
+            <tr>
+                <td>{{ task.task_name }}</td>
+                <td>{{ task.case_name }}</td>
+                <td>{{ task.due_date }}</td>
+                <td>{{ task.days_until }} days</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+{% if not staff.overdue_tasks and not staff.due_today and not staff.upcoming %}
+<div class="empty-state">
+    <p>No pending tasks found for {{ staff.staff_name }}.</p>
+</div>
+{% endif %}
+
+{% endblock %}

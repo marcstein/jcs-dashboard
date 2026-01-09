@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - MyCase{% endblock %}
+
+{% block content %}
+<h1>Reports</h1>
+
+{% if reports %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Report Name</th>
+            <th>Size</th>
+            <th>Generated</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for report in reports %}
+        <tr>
+            <td><a href="/reports/{{ report.name }}">{{ report.name }}</a></td>
+            <td>{{ "{:,.0f}".format(report.size / 1024) }} KB</td>
+            <td>{{ report.modified.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No reports generated yet.</p>
+    <p>Run CLI commands to generate reports:</p>
+    <code>uv run python agent.py sop melissa</code>
+</div>
+{% endif %}
+{% endblock %}

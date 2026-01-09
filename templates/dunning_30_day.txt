@@ -1,0 +1,18 @@
+Dear {{ client_name }},
+
+Our records indicate that Invoice #{{ invoice_number }} for {{ invoice_amount | currency }}
+is now 30 days past due.
+
+Case: {{ case_name }}
+Original Due Date: {{ due_date | date }}
+Current Balance Due: {{ balance_due | currency }}
+
+We kindly request that you submit payment within the next 7 days to avoid any
+further collection activity.
+
+If you are experiencing financial difficulties, please contact our office to discuss
+payment arrangements.
+
+Sincerely,
+{{ firm_name }}
+{{ firm_phone }}

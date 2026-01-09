@@ -1,0 +1,19 @@
+FINAL NOTICE - IMMEDIATE ACTION REQUIRED
+
+Dear {{ client_name }},
+
+Despite our previous communications, Invoice #{{ invoice_number }} remains unpaid
+and is now 90 days past due.
+
+Case: {{ case_name }}
+Total Amount Due: {{ balance_due | currency }}
+
+This is our final notice before we pursue additional collection measures, which may
+include referral to a collection agency and potential legal action.
+
+To avoid these actions, please submit full payment within 5 business days of this notice,
+or contact our office immediately to make payment arrangements.
+
+{{ firm_name }}
+{{ firm_phone }}
+{{ firm_email }}

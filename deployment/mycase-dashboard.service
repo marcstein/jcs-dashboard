@@ -1,0 +1,23 @@
+[Unit]
+Description=JCS MyCase Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=mycase
+Group=mycase
+WorkingDirectory=/opt/jcs-mycase
+Environment="PATH=/opt/jcs-mycase/.venv/bin"
+EnvironmentFile=/opt/jcs-mycase/.env
+ExecStart=/opt/jcs-mycase/.venv/bin/python -m uvicorn dashboard.app:app --host 0.0.0.0 --port 3000
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/jcs-mycase/data /opt/jcs-mycase/logs
+
+[Install]
+WantedBy=multi-user.target

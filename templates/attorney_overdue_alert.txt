@@ -1,0 +1,17 @@
+OVERDUE ALERT
+
+Attorney: {{ attorney_name }}
+
+The following items are OVERDUE and require immediate attention:
+
+{% for item in overdue_items %}
+Case: {{ item.case_name }}
+Item: {{ item.name }}
+Due Date: {{ item.due_date | date }}
+Days Overdue: {{ item.days_overdue }}
+---
+{% endfor %}
+
+Please update the status of these items as soon as possible.
+
+This is an automated alert from the MyCase automation system.

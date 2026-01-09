@@ -1,0 +1,118 @@
+{
+  "dunning_15_day": {
+    "filename": "dunning_15_day.txt",
+    "type": "dunning",
+    "description": "First reminder - 15 days past due",
+    "variables": [
+      "client_name",
+      "invoice_number",
+      "invoice_date",
+      "invoice_amount",
+      "case_name",
+      "due_date",
+      "balance_due",
+      "firm_name",
+      "firm_phone"
+    ],
+    "created_at": "2025-12-20T11:51:09.281809",
+    "updated_at": "2025-12-20T11:51:09.281823"
+  },
+  "dunning_30_day": {
+    "filename": "dunning_30_day.txt",
+    "type": "dunning",
+    "description": "Second reminder - 30 days past due",
+    "variables": [
+      "client_name",
+      "invoice_number",
+      "invoice_amount",
+      "case_name",
+      "due_date",
+      "balance_due",
+      "firm_name",
+      "firm_phone"
+    ],
+    "created_at": "2025-12-20T11:51:09.282294",
+    "updated_at": "2025-12-20T11:51:09.282297"
+  },
+  "dunning_60_day": {
+    "filename": "dunning_60_day.txt",
+    "type": "dunning",
+    "description": "Third reminder - 60 days past due",
+    "variables": [
+      "client_name",
+      "invoice_number",
+      "case_name",
+      "invoice_amount",
+      "balance_due",
+      "firm_name",
+      "firm_phone",
+      "firm_email"
+    ],
+    "created_at": "2025-12-20T11:51:09.282830",
+    "updated_at": "2025-12-20T11:51:09.282834"
+  },
+  "dunning_90_day": {
+    "filename": "dunning_90_day.txt",
+    "type": "dunning",
+    "description": "Final notice - 90 days past due",
+    "variables": [
+      "client_name",
+      "invoice_number",
+      "case_name",
+      "balance_due",
+      "firm_name",
+      "firm_phone",
+      "firm_email"
+    ],
+    "created_at": "2025-12-20T11:51:09.283348",
+    "updated_at": "2025-12-20T11:51:09.283350"
+  },
+  "attorney_deadline_reminder": {
+    "filename": "attorney_deadline_reminder.txt",
+    "type": "attorney_notice",
+    "description": "Reminder to attorney about upcoming case deadline",
+    "variables": [
+      "attorney_name",
+      "case_name",
+      "case_number",
+      "client_name",
+      "deadline_name",
+      "deadline_date",
+      "days_until_due",
+      "deadline_description",
+      "related_tasks"
+    ],
+    "created_at": "2025-12-20T11:51:09.283826",
+    "updated_at": "2025-12-20T11:51:09.283828"
+  },
+  "attorney_overdue_alert": {
+    "filename": "attorney_overdue_alert.txt",
+    "type": "attorney_notice",
+    "description": "Alert for overdue tasks or missed deadlines",
+    "variables": [
+      "attorney_name",
+      "overdue_items"
+    ],
+    "created_at": "2025-12-20T11:51:09.284298",
+    "updated_at": "2025-12-20T11:51:09.284299"
+  },
+  "client_case_update": {
+    "filename": "client_case_update.txt",
+    "type": "client_notice",
+    "description": "General case status update for client",
+    "variables": [
+      "client_name",
+      "case_name",
+      "case_number",
+      "case_status",
+      "update_message",
+      "next_steps",
+      "upcoming_dates",
+      "attorney_name",
+      "firm_name",
+      "firm_phone"
+    ],
+    "created_at": "2025-12-20T11:51:09.284842",
+    "updated_at": "2025-12-20T11:51:09.284844"
+  }
+}

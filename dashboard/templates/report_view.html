@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}{{ filename }} - MyCase{% endblock %}
+
+{% block content %}
+<div class="report-header">
+    <h1>{{ filename }}</h1>
+    <a href="/reports" class="btn btn-secondary">Back to Reports</a>
+</div>
+
+{% if content %}
+<div class="report-content">
+<pre>{{ content }}</pre>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>Report not found or could not be read.</p>
+</div>
+{% endif %}
+{% endblock %}

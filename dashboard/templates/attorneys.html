@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Attorney Productivity - MyCase Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-header-row">
+        <div>
+            <h1>Attorney Productivity</h1>
+            <p class="page-subtitle">Caseload, billing, and invoice aging by attorney</p>
+        </div>
+        <a href="/attorneys/export" class="btn btn-export">Export to CSV</a>
+    </div>
+</div>
+
+<div class="attorneys-container">
+    <!-- Summary Stats Row -->
+    <div class="attorney-summary-row">
+        <div class="summary-stat">
+            <div class="summary-value">{{ attorneys|length }}</div>
+            <div class="summary-label">Attorneys</div>
+        </div>
+        <div class="summary-stat">
+            <div class="summary-value">{{ attorneys|sum(attribute='active_cases') }}</div>
+            <div class="summary-label">Active Cases</div>
+        </div>
+        <div class="summary-stat">
+            <div class="summary-value">${{ "{:,.0f}".format(attorneys|sum(attribute='total_outstanding')) }}</div>
+            <div class="summary-label">Total Outstanding</div>
+        </div>
+        <div class="summary-stat">
+            <div class="summary-value">{{ "{:.1f}".format(attorneys|sum(attribute='total_collected') / attorneys|sum(attribute='total_billed') * 100 if attorneys|sum(attribute='total_billed') > 0 else 0) }}%</div>
+            <div class="summary-label">Collection Rate</div>
+        </div>
+    </div>
+
+    <!-- Main Attorney Table -->
+    <div class="attorney-table-container">
+        <table class="attorney-table">
+            <thead>
+                <tr>
+                    <th>Attorney</th>
+                    <th class="text-center">Active Cases</th>
+                    <th class="text-center">Closed MTD</th>
+                    <th class="text-center">Closed YTD</th>
+                    <th class="text-right year-2025" title="2025 Billing">Billed '25</th>
+                    <th class="text-right year-2025" title="2025 Collections">Collected '25</th>
+                    <th class="text-right">Outstanding</th>
+                    <th class="text-center">Coll %</th>
+                    <th class="text-center" title="Paid in Full">Paid</th>
+                    <th class="text-center" title="1-30 Days Past Due">1-30</th>
+                    <th class="text-center" title="31-60 Days Past Due">31-60</th>
+                    <th class="text-center aging-warning" title="61-90 Days Past Due - Needs Calls">61-90</th>
+                    <th class="text-center aging-warning" title="91-120 Days Past Due - Needs Calls">91-120</th>
+                    <th class="text-center aging-danger" title="121-180 Days Past Due - Critical">121-180</th>
+                    <th class="text-center aging-stale" title="Over 180 Days - Stale/Unlikely to Collect">180+</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for atty in attorneys if atty.active_cases > 0 %}
+                <tr class="{% if atty.aging.needs_calls > 10 %}row-warning{% endif %}">
+                    <td>
+                        <a href="/attorney/{{ atty.attorney_name|urlencode }}" class="attorney-link">
+                            {{ atty.attorney_name }}
+                        </a>
+                    </td>
+                    <td class="text-center">{{ atty.active_cases }}</td>
+                    <td class="text-center">{{ atty.closed_mtd }}</td>
+                    <td class="text-center">{{ atty.closed_ytd }}</td>
+                    <td class="text-right year-2025">${{ "{:,.0f}".format(atty.billed_2025 or 0) }}</td>
+                    <td class="text-right year-2025">${{ "{:,.0f}".format(atty.collected_2025 or 0) }}</td>
+                    <td class="text-right">${{ "{:,.0f}".format(atty.total_outstanding) }}</td>
+                    <td class="text-center {% if atty.collection_rate >= 80 %}text-success{% elif atty.collection_rate >= 60 %}text-warning{% else %}text-danger{% endif %}">
+                        {{ "{:.1f}".format(atty.collection_rate) }}%
+                    </td>
+                    <td class="text-center">{{ atty.aging.paid_full or 0 }}</td>
+                    <td class="text-center">{{ atty.aging.dpd_1_30 or 0 }}</td>
+                    <td class="text-center">{{ atty.aging.dpd_31_60 or 0 }}</td>
+                    <td class="text-center aging-cell-warning">{{ atty.aging.dpd_61_90 or 0 }}</td>
+                    <td class="text-center aging-cell-warning">{{ atty.aging.dpd_91_120 or 0 }}</td>
+                    <td class="text-center aging-cell-danger">{{ atty.aging.dpd_121_180 or 0 }}</td>
+                    <td class="text-center aging-cell-stale">{{ atty.aging.dpd_over_180 or 0 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="totals-row">
+                    <td><strong>TOTALS</strong></td>
+                    <td class="text-center"><strong>{{ attorneys|selectattr('active_cases', 'gt', 0)|sum(attribute='active_cases') }}</strong></td>
+                    <td class="text-center"><strong>{{ attorneys|sum(attribute='closed_mtd') }}</strong></td>
+                    <td class="text-center"><strong>{{ attorneys|sum(attribute='closed_ytd') }}</strong></td>
+                    <td class="text-right year-2025"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='billed_2025')) }}</strong></td>
+                    <td class="text-right year-2025"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='collected_2025')) }}</strong></td>
+                    <td class="text-right"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='total_outstanding')) }}</strong></td>
+                    <td class="text-center">-</td>
+                    <td colspan="7" class="text-center">-</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <!-- Inactive Attorneys Section -->
+    {% set inactive_attorneys = attorneys|selectattr('active_cases', 'eq', 0)|list %}
+    {% if inactive_attorneys %}
+    <div class="inactive-section">
+        <h3>Attorneys with No Active Cases</h3>
+        <div class="inactive-list">
+            {% for atty in inactive_attorneys %}
+            <span class="inactive-tag">{{ atty.attorney_name }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="legend-section">
+        <h4>Legend</h4>
+        <div class="legend-items">
+            <span class="legend-item"><span class="legend-color warning"></span> 61-120 DPD: Needs Attorney Follow-up Call</span>
+            <span class="legend-item"><span class="legend-color danger"></span> 121-180 DPD: Critical - Urgent Follow-up Required</span>
+            <span class="legend-item"><span class="legend-color stale"></span> 180+ DPD: Stale - Unlikely to Collect</span>
+        </div>
+    </div>
+</div>
+{% endblock %}

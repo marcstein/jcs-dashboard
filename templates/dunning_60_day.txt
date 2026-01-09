@@ -1,0 +1,20 @@
+URGENT: Payment Required
+
+Dear {{ client_name }},
+
+This is a formal notice that Invoice #{{ invoice_number }} remains unpaid and is now
+60 days past due.
+
+Case: {{ case_name }}
+Original Invoice Amount: {{ invoice_amount | currency }}
+Current Balance Due: {{ balance_due | currency }}
+Days Past Due: 60
+
+Immediate payment is required to avoid further collection action. Please remit
+payment within 10 days of this notice.
+
+If you wish to discuss payment options, please contact our office immediately.
+
+{{ firm_name }}
+{{ firm_phone }}
+{{ firm_email }}

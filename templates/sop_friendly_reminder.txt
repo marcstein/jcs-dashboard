@@ -1,0 +1,23 @@
+Subject: Friendly Reminder - Payment Due for {{ case_name }}
+
+Dear {{ client_name }},
+
+We hope this message finds you well. This is a friendly reminder that your payment of ${{ balance_due | round(2) }} for {{ case_name }} was due on {{ due_date }}.
+
+We understand that sometimes things slip through the cracks. If you've already sent your payment, please disregard this notice.
+
+If you're experiencing any financial difficulties or need to discuss payment arrangements, please don't hesitate to reach out. We're here to help and can work with you to find a solution.
+
+You can make your payment through:
+- Client Portal: [Portal Link]
+- Phone: {{ firm_phone }}
+- Mail: [Firm Address]
+
+If you have any questions about your account, please contact our billing department.
+
+Thank you for your prompt attention to this matter.
+
+Warm regards,
+{{ firm_name }}
+{{ firm_phone }}
+{{ firm_email }}

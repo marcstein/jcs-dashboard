@@ -1,0 +1,22 @@
+CASE DEADLINE REMINDER
+
+Attorney: {{ attorney_name }}
+Case: {{ case_name }} ({{ case_number }})
+Client: {{ client_name }}
+
+Upcoming Deadline: {{ deadline_name }}
+Date: {{ deadline_date | date }}
+Days Until Due: {{ days_until_due }}
+
+{% if deadline_description %}
+Details: {{ deadline_description }}
+{% endif %}
+
+{% if related_tasks %}
+Related Tasks:
+{% for task in related_tasks %}
+  - {{ task.name }} ({{ task.status }})
+{% endfor %}
+{% endif %}
+
+This is an automated reminder from the MyCase automation system.

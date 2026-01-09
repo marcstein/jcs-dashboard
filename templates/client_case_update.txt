@@ -1,0 +1,30 @@
+Dear {{ client_name }},
+
+We wanted to provide you with an update on your case.
+
+Case: {{ case_name }}
+Case Number: {{ case_number }}
+Status: {{ case_status }}
+
+{{ update_message }}
+
+{% if next_steps %}
+Next Steps:
+{% for step in next_steps %}
+  - {{ step }}
+{% endfor %}
+{% endif %}
+
+{% if upcoming_dates %}
+Important Upcoming Dates:
+{% for date_item in upcoming_dates %}
+  - {{ date_item.name }}: {{ date_item.date | date }}
+{% endfor %}
+{% endif %}
+
+If you have any questions, please don't hesitate to contact our office.
+
+Sincerely,
+{{ attorney_name }}
+{{ firm_name }}
+{{ firm_phone }}

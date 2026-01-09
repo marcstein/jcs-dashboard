@@ -1,0 +1,42 @@
+Subject: FINAL NOTICE - Intent to Withdraw from Representation
+
+NOTICE OF INTENT TO WITHDRAW
+
+Case: {{ case_name }}
+Client: {{ client_name }}
+Date: {{ current_date }}
+
+Dear {{ client_name }},
+
+Despite our previous communications, your account remains seriously delinquent. This letter serves as formal notice of our intent to withdraw from your representation.
+
+ACCOUNT STATUS:
+Invoice Number: {{ invoice_number }}
+Outstanding Balance: ${{ balance_due | round(2) }}
+Days Delinquent: {{ days_overdue }}
+Payment Terms Violated: Yes
+
+PREVIOUS COMMUNICATION ATTEMPTS:
+{{ outreach_summary }}
+
+DEADLINE FOR CURE:
+You have TEN (10) CALENDAR DAYS from the date of this letter to pay the outstanding balance in full or contact our office to establish an acceptable payment arrangement.
+
+If payment or satisfactory arrangements are not made by {{ cure_deadline }}, we will:
+
+1. File a Motion to Withdraw as Counsel with the Court
+2. Cease all work on your case
+3. You will need to obtain new legal representation
+
+IMPORTANT: Withdrawing from your case does NOT eliminate your outstanding balance. Unpaid accounts may be referred to collections.
+
+To resolve this matter, contact our billing department immediately:
+Phone: {{ firm_phone }}
+Email: {{ firm_email }}
+
+We strongly encourage you to address this matter promptly to avoid disruption to your case.
+
+Sincerely,
+
+{{ firm_name }}
+{{ firm_phone }}

@@ -1,0 +1,424 @@
+{% extends "base.html" %}
+
+{% block title %}{{ case.name }} - LawMetrics.ai{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <span class="firm-name">Case Detail</span>
+    <h1>{{ case.name }}</h1>
+</div>
+
+<div class="case-header">
+    <div class="case-meta">
+        <span class="case-number">{{ case.case_number or 'No case number' }}</span>
+        <span class="case-status status-{{ case.status }}">{{ case.status }}</span>
+        <span class="case-type">{{ case.practice_area or case.case_type or 'Unknown' }}</span>
+    </div>
+    {% if case.lead_attorney_name %}
+    <div class="case-attorney">
+        <strong>Lead Attorney:</strong> {{ case.lead_attorney_name }}
+    </div>
+    {% endif %}
+</div>
+
+<div class="case-sections">
+    <!-- Docket Timeline -->
+    <section class="case-section">
+        <div class="section-header">
+            <h2>Court Docket</h2>
+            <button class="btn btn-primary btn-sm" onclick="openDocketImport()">Import Docket</button>
+        </div>
+
+        {% if docket_entries %}
+        <div class="docket-timeline">
+            {% set current_date = namespace(value=None) %}
+            {% for entry in docket_entries %}
+                {% if entry.entry_date != current_date.value %}
+                    {% set current_date.value = entry.entry_date %}
+                    <div class="docket-date">{{ entry.entry_date }}</div>
+                {% endif %}
+                <div class="docket-entry {% if entry.requires_action %}action-required{% endif %}">
+                    <div class="docket-entry-type">
+                        {{ entry.entry_type }}
+                        {% if entry.requires_action %}
+                        <span class="badge badge-warning">Action Required</span>
+                        {% endif %}
+                    </div>
+                    {% if entry.entry_text %}
+                    <div class="docket-entry-text">{{ entry.entry_text }}</div>
+                    {% endif %}
+                    {% if entry.scheduled_date %}
+                    <div class="docket-scheduled">
+                        <strong>Scheduled:</strong> {{ entry.scheduled_date }} {{ entry.scheduled_time or '' }}
+                        {% if entry.judge %} | Judge: {{ entry.judge }}{% endif %}
+                        {% if entry.location %} | {{ entry.location }}{% endif %}
+                    </div>
+                    {% endif %}
+                    {% if entry.filed_by %}
+                    <div class="docket-filed">Filed by: {{ entry.filed_by }}{% if entry.on_behalf_of %} (for {{ entry.on_behalf_of }}){% endif %}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No docket entries imported yet.</p>
+            <p>Copy docket text from <a href="https://www.courts.mo.gov/casenet/caseNoSearch.do" target="_blank">Missouri CaseNet</a> and click "Import Docket" above.</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <!-- Documents -->
+    <section class="case-section">
+        <h2>Documents ({{ documents|length }})</h2>
+        {% if documents %}
+        <div class="documents-list">
+            {% for doc in documents[:20] %}
+            <div class="document-item">
+                <span class="doc-icon">📄</span>
+                <span class="doc-name">{{ doc.name or doc.filename }}</span>
+                <span class="doc-date">{{ doc.created_at[:10] if doc.created_at else '' }}</span>
+            </div>
+            {% endfor %}
+            {% if documents|length > 20 %}
+            <div class="more-docs">+ {{ documents|length - 20 }} more documents</div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No documents synced for this case.</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+
+<!-- Docket Import Modal -->
+<div id="docketImportModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Import Docket from CaseNet</h3>
+            <button class="modal-close" onclick="closeDocketImport()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Paste docket text from Missouri CaseNet below. Include the case number header line.</p>
+            <textarea id="docketText" rows="15" placeholder="250681127 - CITY OF SAINT PETERS V ALEXSANDRA DAWN MESHOTO
+
+12/31/2025
+Plea Hearing Scheduled
+..."></textarea>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeDocketImport()">Cancel</button>
+            <button class="btn btn-primary" onclick="submitDocketImport()">Import</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.case-header {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.case-meta {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.case-number {
+    font-family: monospace;
+    font-size: 0.9rem;
+    background: var(--gray-100);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+
+.case-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.case-status.status-open {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.case-status.status-closed {
+    background: var(--gray-200);
+    color: var(--gray-600);
+}
+
+.case-type {
+    color: var(--gray-600);
+}
+
+.case-attorney {
+    margin-top: 0.75rem;
+    color: var(--gray-700);
+}
+
+.case-sections {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.case-section {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.section-header h2 {
+    margin: 0;
+}
+
+/* Docket Timeline */
+.docket-timeline {
+    border-left: 2px solid var(--gray-200);
+    padding-left: 1.5rem;
+    margin-left: 0.5rem;
+}
+
+.docket-date {
+    font-weight: 600;
+    color: var(--primary);
+    margin: 1.5rem 0 0.5rem -1.75rem;
+    padding-left: 1.5rem;
+    position: relative;
+}
+
+.docket-date::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px;
+    height: 10px;
+    background: var(--primary);
+    border-radius: 50%;
+}
+
+.docket-entry {
+    background: var(--gray-50);
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.docket-entry.action-required {
+    background: #fef3c7;
+    border-left: 3px solid var(--warning);
+}
+
+.docket-entry-type {
+    font-weight: 600;
+    color: var(--gray-800);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.docket-entry-text {
+    color: var(--gray-600);
+    margin-top: 0.25rem;
+}
+
+.docket-scheduled {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: white;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.docket-filed {
+    color: var(--gray-500);
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+
+.badge {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+}
+
+.badge-warning {
+    background: var(--warning);
+    color: white;
+}
+
+/* Documents */
+.documents-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.document-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+.document-item:hover {
+    background: var(--gray-50);
+}
+
+.doc-name {
+    flex: 1;
+    font-size: 0.9rem;
+}
+
+.doc-date {
+    color: var(--gray-500);
+    font-size: 0.8rem;
+}
+
+.more-docs {
+    color: var(--gray-500);
+    font-size: 0.85rem;
+    padding: 0.5rem;
+}
+
+.empty-state {
+    color: var(--gray-500);
+    text-align: center;
+    padding: 2rem;
+}
+
+/* Modal */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--gray-500);
+}
+
+.modal-body {
+    padding: 1.5rem;
+    overflow-y: auto;
+}
+
+.modal-body textarea {
+    width: 100%;
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 0.75rem;
+    border: 1px solid var(--gray-300);
+    border-radius: 4px;
+}
+
+.modal-footer {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--gray-200);
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+</style>
+
+<script>
+function openDocketImport() {
+    document.getElementById('docketImportModal').style.display = 'flex';
+}
+
+function closeDocketImport() {
+    document.getElementById('docketImportModal').style.display = 'none';
+}
+
+async function submitDocketImport() {
+    const docketText = document.getElementById('docketText').value;
+    if (!docketText.trim()) {
+        alert('Please paste docket text');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/docket/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                docket_text: docketText,
+                case_id: {{ case.id }}
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            alert('Error: ' + result.error);
+        } else {
+            alert(`Imported ${result.entries_parsed} docket entries`);
+            closeDocketImport();
+            location.reload();
+        }
+    } catch (error) {
+        alert('Error importing docket: ' + error);
+    }
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeDocketImport();
+    }
+});
+</script>
+{% endblock %}

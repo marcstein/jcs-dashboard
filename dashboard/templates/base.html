@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}LawMetrics.ai Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css?v=7">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% if username %}
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/" class="logo-link">
+                <span class="logo-law">law</span><span class="logo-metrics">metrics</span><span class="logo-ai">.ai</span>
+            </a>
+        </div>
+        <div class="nav-links">
+            <a href="/attorneys" class="{% if '/attorney' in request.url.path %}active{% endif %}">Attorneys</a>
+            <a href="/ar" class="{% if request.url.path == '/ar' %}active{% endif %}">A/R</a>
+            <a href="/noiw" class="{% if request.url.path == '/noiw' %}active{% endif %}">NOIW</a>
+            <a href="/wonky" class="{% if request.url.path == '/wonky' %}active{% endif %}">Wonky</a>
+            <a href="/reports" class="{% if request.url.path == '/reports' %}active{% endif %}">Reports</a>
+        </div>
+        <div class="nav-user">
+            <button id="chatToggle" class="btn-chat" title="AI Assistant">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>Ask AI</span>
+            </button>
+            <span>{{ username }}</span>
+            <a href="/logout" class="btn-logout">Logout</a>
+        </div>
+    </nav>
+    {% endif %}
+
+    <div class="app-layout">
+        <main class="container">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% if username %}
+    <!-- Chat Overlay -->
+    <div id="chatOverlay" class="chat-overlay"></div>
+
+    <!-- AI Chat Sidebar - Perplexity Style -->
+    <aside id="chatSidebar" class="chat-sidebar">
+        <div class="chat-header">
+            <div class="chat-title">
+                <div class="chat-title-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </div>
+                <span>AI Assistant</span>
+            </div>
+            <div class="chat-header-actions">
+                <button id="chatExpand" class="chat-expand" title="Expand/Collapse">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 3 21 3 21 9"></polyline>
+                        <polyline points="9 21 3 21 3 15"></polyline>
+                        <line x1="21" y1="3" x2="14" y2="10"></line>
+                        <line x1="3" y1="21" x2="10" y2="14"></line>
+                    </svg>
+                </button>
+                <button id="chatClose" class="chat-close">&times;</button>
+            </div>
+        </div>
+        <div id="chatMessages" class="chat-messages">
+            <div class="chat-welcome" id="chatWelcome">
+                <div class="chat-welcome-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                </div>
+                <h3>Ask about your firm data</h3>
+                <p>Get insights from your MyCase data using natural language</p>
+                <div class="chat-suggestions">
+                    <button class="chat-suggestion" data-query="Show billing by attorney for 2025">Show billing by attorney for 2025</button>
+                    <button class="chat-suggestion" data-query="What's the collection rate by practice area?">What's the collection rate by practice area?</button>
+                    <button class="chat-suggestion" data-query="How many open cases does each attorney have?">How many open cases does each attorney have?</button>
+                    <button class="chat-suggestion" data-query="Which staff have overdue tasks?">Which staff have overdue tasks?</button>
+                </div>
+            </div>
+        </div>
+        <div class="chat-input-container">
+            <div class="chat-input-wrapper">
+                <textarea id="chatInput" placeholder="Ask a question..." rows="1"></textarea>
+                <button id="chatMic" class="btn-mic" title="Voice input">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                </button>
+                <button id="chatSend" class="btn-send">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </aside>
+    {% endif %}
+
+    <footer class="footer">
+        <div class="footer-brand">
+            <span class="logo-law">law</span><span class="logo-metrics">metrics</span><span class="logo-ai">.ai</span>
+            <span class="footer-tagline">Legal AI Driven Analytics & Automation</span>
+        </div>
+    </footer>
+
+    <script>
+    // Chat functionality - Perplexity style
+    document.addEventListener('DOMContentLoaded', function() {
+        const chatToggle = document.getElementById('chatToggle');
+        const chatSidebar = document.getElementById('chatSidebar');
+        const chatOverlay = document.getElementById('chatOverlay');
+        const chatClose = document.getElementById('chatClose');
+        const chatExpand = document.getElementById('chatExpand');
+        const chatInput = document.getElementById('chatInput');
+        const chatSend = document.getElementById('chatSend');
+        const chatMic = document.getElementById('chatMic');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatWelcome = document.getElementById('chatWelcome');
+        const suggestions = document.querySelectorAll('.chat-suggestion');
+
+        // Speech Recognition setup
+        let recognition = null;
+        let isListening = false;
+
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = function() {
+                isListening = true;
+                chatMic.classList.add('listening');
+                chatInput.placeholder = 'Listening...';
+            };
+
+            recognition.onend = function() {
+                isListening = false;
+                chatMic.classList.remove('listening');
+                chatInput.placeholder = 'Ask a question...';
+            };
+
+            recognition.onresult = function(event) {
+                let finalTranscript = '';
+                let interimTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+
+                if (finalTranscript) {
+                    chatInput.value = finalTranscript;
+                    chatInput.style.height = 'auto';
+                    chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+                } else if (interimTranscript) {
+                    chatInput.value = interimTranscript;
+                }
+            };
+
+            recognition.onerror = function(event) {
+                console.error('Speech recognition error:', event.error);
+                isListening = false;
+                chatMic.classList.remove('listening');
+                chatInput.placeholder = 'Ask a question...';
+            };
+
+            // Mic button click handler
+            chatMic.addEventListener('click', function() {
+                if (isListening) {
+                    recognition.stop();
+                } else {
+                    chatInput.value = '';
+                    recognition.start();
+                }
+            });
+        } else {
+            // Hide mic button if speech recognition not supported
+            if (chatMic) {
+                chatMic.style.display = 'none';
+            }
+        }
+
+        if (chatToggle && chatSidebar) {
+            // Open chat
+            chatToggle.addEventListener('click', function() {
+                chatSidebar.classList.add('open');
+                chatOverlay.classList.add('visible');
+                chatInput.focus();
+            });
+
+            // Close chat
+            function closeChat() {
+                chatSidebar.classList.remove('open');
+                chatOverlay.classList.remove('visible');
+            }
+
+            chatClose.addEventListener('click', closeChat);
+            chatOverlay.addEventListener('click', closeChat);
+
+            // Expand/collapse chat
+            chatExpand.addEventListener('click', function() {
+                chatSidebar.classList.toggle('expanded');
+            });
+
+            // Handle escape key
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && chatSidebar.classList.contains('open')) {
+                    closeChat();
+                }
+            });
+
+            // Handle suggestion clicks
+            suggestions.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const query = this.getAttribute('data-query');
+                    chatInput.value = query;
+                    sendMessage();
+                });
+            });
+
+            // Send message on button click or Enter key
+            chatSend.addEventListener('click', sendMessage);
+            chatInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            // Auto-resize textarea
+            chatInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+            });
+
+            async function sendMessage() {
+                const message = chatInput.value.trim();
+                if (!message) return;
+
+                // Hide welcome message
+                if (chatWelcome) {
+                    chatWelcome.style.display = 'none';
+                }
+
+                // Add user message
+                addMessage(message, 'user');
+                chatInput.value = '';
+                chatInput.style.height = 'auto';
+                chatInput.disabled = true;
+                chatSend.disabled = true;
+
+                // Show typing indicator
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'chat-message assistant';
+                typingDiv.innerHTML = '<div class="message-content"><div class="typing-indicator"><span></span><span></span><span></span></div></div>';
+                chatMessages.appendChild(typingDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                try {
+                    const response = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: message })
+                    });
+
+                    const data = await response.json();
+                    typingDiv.remove();
+
+                    if (data.error) {
+                        addMessage('Sorry, there was an error: ' + data.error, 'assistant error');
+                    } else {
+                        addMessage(data.response, 'assistant');
+                    }
+                } catch (error) {
+                    typingDiv.remove();
+                    addMessage('Sorry, there was an error connecting to the AI assistant.', 'assistant error');
+                }
+
+                chatInput.disabled = false;
+                chatSend.disabled = false;
+                chatInput.focus();
+            }
+
+            function addMessage(text, type) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'chat-message ' + type;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+
+                // Convert markdown-style formatting to HTML
+                let html = text
+                    .replace(/```(\w+)?\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+                    .replace(/`([^`]+)`/g, '<code>$1</code>')
+                    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\n/g, '<br>');
+
+                // Handle markdown tables
+                if (html.includes('|') && html.includes('---')) {
+                    const lines = html.split('<br>');
+                    let tableHtml = '<table class="chat-table">';
+                    let inTable = false;
+                    let isHeader = true;
+
+                    lines.forEach((line, idx) => {
+                        if (line.includes('|')) {
+                            const cells = line.split('|').filter(c => c.trim());
+                            if (cells.every(c => c.trim().match(/^-+$/))) {
+                                // Separator row - skip but mark header done
+                                isHeader = false;
+                                return;
+                            }
+                            inTable = true;
+                            const tag = isHeader ? 'th' : 'td';
+                            tableHtml += '<tr>' + cells.map(c => `<${tag}>${c.trim()}</${tag}>`).join('') + '</tr>';
+                            if (isHeader) isHeader = false;
+                        }
+                    });
+
+                    if (inTable) {
+                        tableHtml += '</table>';
+                        // Remove table lines from html and add table
+                        html = lines.filter(l => !l.includes('|') || !l.includes('---')).join('<br>');
+                        html = html.replace(/<br>(<br>)+/g, '<br>'); // Clean up extra breaks
+                        html += tableHtml;
+                    }
+                }
+
+                contentDiv.innerHTML = html;
+                messageDiv.appendChild(contentDiv);
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+    });
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Wonky Invoices - MyCase{% endblock %}
+
+{% block content %}
+<h1>Wonky Invoices</h1>
+<p class="page-description">Invoices with discrepancies or issues requiring attention.</p>
+
+{% if invoices %}
+<div class="stats-grid stats-small">
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ invoices|length }}</div>
+        <div class="stat-label">Open Issues</div>
+    </div>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Invoice #</th>
+            <th>Case</th>
+            <th>Issue Type</th>
+            <th>Description</th>
+            <th>Discrepancy</th>
+            <th>Opened</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for inv in invoices %}
+        <tr>
+            <td>{{ inv.invoice_number or inv.invoice_id }}</td>
+            <td>{{ inv.case_name or 'N/A' }}</td>
+            <td><span class="badge badge-{{ inv.issue_type|lower }}">{{ inv.issue_type }}</span></td>
+            <td>{{ inv.description or 'N/A' }}</td>
+            <td>{% if inv.discrepancy %}${{ "{:,.2f}".format(inv.discrepancy) }}{% else %}N/A{% endif %}</td>
+            <td>{{ inv.opened_date or 'N/A' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No wonky invoices found.</p>
+</div>
+{% endif %}
+{% endblock %}
