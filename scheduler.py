@@ -69,7 +69,7 @@ DAILY_TASKS = [
         description="Send daily upcoming events report to managing partner",
         frequency=TaskFrequency.DAILY,
         command="notify events-report john@jcsattorney.com --days 7 --cc marc.stein@gmail.com",
-        run_at=time(6, 15),  # 6:15 AM - after sync completes
+        run_at=time(6, 30),  # 6:30 AM - after sync completes (30 min buffer)
         owner="John Schleiffarth",
     ),
     ScheduledTask(
