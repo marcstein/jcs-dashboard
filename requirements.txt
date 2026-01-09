@@ -33,3 +33,6 @@ beautifulsoup4>=4.12.0
 
 # Database utilities
 sqlite-utils>=3.35
+
+# Session management
+itsdangerous>=2.1.0
