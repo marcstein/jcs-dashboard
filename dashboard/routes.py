@@ -26,17 +26,23 @@ _sync_status = {"running": False, "last_result": None, "error": None}
 
 
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def index(request: Request, year: int = None):
     """Dashboard home page."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    stats = data.get_dashboard_stats()
-    ar_aging = data.get_ar_aging_breakdown()
+    # Default to current year if not specified
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+    available_years = [2025, 2026]
+
+    stats = data.get_dashboard_stats(year=year)
+    ar_aging = data.get_ar_aging_breakdown(year=year)
     recent_reports = data.get_recent_reports(limit=5)
 
     # SOP widget data
-    melissa_sop = data.get_melissa_sop_data()
+    melissa_sop = data.get_melissa_sop_data(year=year)
     ty_sop = data.get_ty_sop_data()
     tiffany_sop = data.get_tiffany_sop_data()
     alison_sop = data.get_legal_assistant_sop_data("Alison")
@@ -49,7 +55,7 @@ async def index(request: Request):
     tiffany_personal_sop = data.get_legal_assistant_sop_data("Tiffany")
 
     # Attorney summary for dashboard widget
-    attorney_summary = data.get_attorney_summary()
+    attorney_summary = data.get_attorney_summary(year=year)
 
     # Staff caseload data
     tiffany_caseload = data.get_staff_caseload_data("Tiffany Willis")
@@ -61,6 +67,9 @@ async def index(request: Request):
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
+        "year": year,
+        "current_year": current_year,
+        "available_years": available_years,
         "stats": stats,
         "ar_aging": ar_aging,
         "recent_reports": recent_reports,
@@ -140,18 +149,27 @@ async def staff_tasks(request: Request, staff_name: str):
 
 
 @router.get("/ar", response_class=HTMLResponse)
-async def ar_dashboard(request: Request):
+async def ar_dashboard(request: Request, year: int = None):
     """AR/Collections dashboard."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    summary = data.get_daily_collections_summary()
-    ar_aging = data.get_ar_aging_breakdown()
+    # Default to current year if not specified
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+    available_years = [2025, 2026]
+
+    summary = data.get_daily_collections_summary(year=year)
+    ar_aging = data.get_ar_aging_breakdown(year=year)
     trend = data.get_collections_trend(days_back=30)
     plans = data.get_payment_plans_summary()
 
     return templates.TemplateResponse("ar.html", {
         "request": request,
+        "year": year,
+        "current_year": current_year,
+        "available_years": available_years,
         "summary": summary,
         "ar_aging": ar_aging,
         "trend": trend,
@@ -223,19 +241,25 @@ async def view_report(request: Request, filename: str):
 
 # API endpoints for HTMX/JSON
 @router.get("/api/stats")
-async def api_stats(request: Request):
+async def api_stats(request: Request, year: int = None):
     """API endpoint for dashboard stats."""
     if not is_authenticated(request):
         return {"error": "Unauthorized"}, 401
-    return data.get_dashboard_stats()
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+    return data.get_dashboard_stats(year=year)
 
 
 @router.get("/api/ar-aging")
-async def api_ar_aging(request: Request):
+async def api_ar_aging(request: Request, year: int = None):
     """API endpoint for AR aging data."""
     if not is_authenticated(request):
         return {"error": "Unauthorized"}, 401
-    return data.get_ar_aging_breakdown()
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+    return data.get_ar_aging_breakdown(year=year)
 
 
 def _run_sync():
@@ -303,13 +327,19 @@ async def api_sync_status(request: Request):
 # =========================================================================
 
 @router.get("/attorneys", response_class=HTMLResponse)
-async def attorneys_dashboard(request: Request):
+async def attorneys_dashboard(request: Request, year: int = None):
     """Attorney productivity dashboard."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    productivity = data.get_attorney_productivity_data()
-    aging = data.get_attorney_invoice_aging()
+    # Default to current year if not specified
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+    available_years = [2025, 2026]
+
+    productivity = data.get_attorney_productivity_data(year=year)
+    aging = data.get_attorney_invoice_aging(year=year)
 
     # Merge aging data into productivity
     aging_by_id = {a['attorney_id']: a for a in aging}
@@ -319,34 +349,51 @@ async def attorneys_dashboard(request: Request):
 
     return templates.TemplateResponse("attorneys.html", {
         "request": request,
+        "year": year,
+        "current_year": current_year,
+        "available_years": available_years,
         "attorneys": productivity,
         "username": request.session.get("username"),
     })
 
 
 @router.get("/attorney/{attorney_name}", response_class=HTMLResponse)
-async def attorney_detail(request: Request, attorney_name: str):
+async def attorney_detail_view(request: Request, attorney_name: str, year: int = None):
     """Attorney detail page with call list."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    detail = data.get_attorney_detail(attorney_name)
+    # Default to current year if not specified
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+    available_years = [2025, 2026]
+
+    detail = data.get_attorney_detail(attorney_name, year=year)
 
     return templates.TemplateResponse("attorney_detail.html", {
         "request": request,
+        "year": year,
+        "current_year": current_year,
+        "available_years": available_years,
         "attorney": detail,
         "username": request.session.get("username"),
     })
 
 
 @router.get("/attorneys/export")
-async def attorneys_export_csv(request: Request):
+async def attorneys_export_csv(request: Request, year: int = None):
     """Export attorney productivity data to CSV."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    productivity = data.get_attorney_productivity_data()
-    aging = data.get_attorney_invoice_aging()
+    # Default to current year if not specified
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+
+    productivity = data.get_attorney_productivity_data(year=year)
+    aging = data.get_attorney_invoice_aging(year=year)
 
     # Merge aging data into productivity
     aging_by_id = {a['attorney_id']: a for a in aging}
@@ -364,8 +411,8 @@ async def attorneys_export_csv(request: Request):
         'Active Cases',
         'Closed MTD',
         'Closed YTD',
-        'Billed 2025',
-        'Collected 2025',
+        f'Billed {year}',
+        f'Collected {year}',
         'Total Outstanding',
         'Collection Rate %',
         'Paid in Full',
@@ -392,8 +439,8 @@ async def attorneys_export_csv(request: Request):
                 atty.get('active_cases', 0),
                 atty.get('closed_mtd', 0),
                 atty.get('closed_ytd', 0),
-                atty.get('billed_2025', 0),
-                atty.get('collected_2025', 0),
+                atty.get('total_billed', 0),
+                atty.get('total_collected', 0),
                 atty.get('total_outstanding', 0),
                 round(atty.get('collection_rate', 0), 1),
                 aging.get('paid_full', 0),
@@ -406,9 +453,9 @@ async def attorneys_export_csv(request: Request):
                 needs_calls,
             ])
 
-    # Generate filename with date
+    # Generate filename with year and date
     today = datetime.now().strftime('%Y-%m-%d')
-    filename = f"attorney_productivity_{today}.csv"
+    filename = f"attorney_productivity_{year}_{today}.csv"
 
     # Return as downloadable CSV
     output.seek(0)

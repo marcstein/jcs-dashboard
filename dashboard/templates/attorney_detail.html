@@ -4,8 +4,18 @@
 
 {% block content %}
 <div class="page-header">
-    <a href="/attorneys" class="back-link">&larr; Back to Attorneys</a>
-    <h1>{{ attorney.attorney_name }}</h1>
+    <a href="/attorneys?year={{ year }}" class="back-link">&larr; Back to Attorneys</a>
+    <h1>{{ attorney.attorney_name }}{% if year < current_year %} ({{ year }}){% endif %}</h1>
+</div>
+
+<!-- Year Tabs -->
+<div class="year-tabs">
+    {% for y in available_years %}
+    <a href="?year={{ y }}" class="year-tab {% if y == year %}active{% endif %}">
+        <span class="year-label">{{ y }}</span>
+        <span class="year-status">{% if y < current_year %}(Closed){% else %}YTD{% endif %}</span>
+    </a>
+    {% endfor %}
 </div>
 
 {% if attorney.error %}

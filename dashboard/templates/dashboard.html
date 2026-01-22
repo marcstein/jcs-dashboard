@@ -8,6 +8,16 @@
     <h1>Dashboard</h1>
 </div>
 
+<!-- Year Tabs -->
+<div class="year-tabs">
+    {% for y in available_years %}
+    <a href="?year={{ y }}" class="year-tab {% if y == year %}active{% endif %}">
+        <span class="year-label">{{ y }}</span>
+        <span class="year-status">{% if y < current_year %}(Closed){% else %}YTD{% endif %}</span>
+    </a>
+    {% endfor %}
+</div>
+
 {% if stats.no_data %}
 <div class="alert alert-warning">
     No data synced yet. Click "Sync Now" or run <code>uv run python agent.py sync</code> to populate the dashboard.
@@ -21,10 +31,10 @@
 </div>
 
 <!-- A/R Collections Widget (Full Width) -->
-<h2>A/R Collections</h2>
+<h2>{{ year }} A/R Collections</h2>
 <div class="sop-widget sop-widget-ar">
     <div class="sop-header">
-        <h3>2025 Invoice Aging</h3>
+        <h3>{{ year }} Invoice Aging{% if year < current_year %} (as of Dec 31){% endif %}</h3>
         <span class="sop-status {% if melissa_sop.aging_compliant %}status-ok{% else %}status-alert{% endif %}">
             {% if melissa_sop.aging_compliant %}On Track{% else %}{{ "{:.0f}".format(melissa_sop.aging_over_60_pct or 0) }}% &gt;60 Days{% endif %}
         </span>

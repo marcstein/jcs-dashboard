@@ -3,7 +3,17 @@
 {% block title %}A/R Dashboard - MyCase{% endblock %}
 
 {% block content %}
-<h1>Accounts Receivable</h1>
+<h1>{{ year }} Accounts Receivable{% if year < current_year %} (Closed){% endif %}</h1>
+
+<!-- Year Tabs -->
+<div class="year-tabs">
+    {% for y in available_years %}
+    <a href="?year={{ y }}" class="year-tab {% if y == year %}active{% endif %}">
+        <span class="year-label">{{ y }}</span>
+        <span class="year-status">{% if y < current_year %}(Closed){% else %}YTD{% endif %}</span>
+    </a>
+    {% endfor %}
+</div>
 
 <div class="stats-grid">
     <div class="stat-card stat-large">

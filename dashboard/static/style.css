@@ -1153,6 +1153,46 @@ h2 {
     30% { transform: translateY(-8px); }
 }
 
+/* Year Tabs */
+.year-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.year-tab {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    color: var(--gray-600);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.year-tab:hover {
+    background: var(--gray-100);
+    color: var(--gray-900);
+    border-color: var(--gray-400);
+}
+
+.year-tab.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.year-tab .year-label {
+    font-weight: 600;
+}
+
+.year-tab .year-status {
+    font-size: 0.75rem;
+    opacity: 0.85;
+    margin-left: 0.25rem;
+}
+
 /* A/R Collections Widget (Full Width) */
 .sop-widget-ar {
     background: white;

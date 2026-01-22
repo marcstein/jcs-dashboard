@@ -6,11 +6,21 @@
 <div class="page-header">
     <div class="page-header-row">
         <div>
-            <h1>Attorney Productivity</h1>
+            <h1>{{ year }} Attorney Productivity{% if year < current_year %} (Closed){% endif %}</h1>
             <p class="page-subtitle">Caseload, billing, and invoice aging by attorney</p>
         </div>
-        <a href="/attorneys/export" class="btn btn-export">Export to CSV</a>
+        <a href="/attorneys/export?year={{ year }}" class="btn btn-export">Export to CSV</a>
     </div>
+</div>
+
+<!-- Year Tabs -->
+<div class="year-tabs">
+    {% for y in available_years %}
+    <a href="?year={{ y }}" class="year-tab {% if y == year %}active{% endif %}">
+        <span class="year-label">{{ y }}</span>
+        <span class="year-status">{% if y < current_year %}(Closed){% else %}YTD{% endif %}</span>
+    </a>
+    {% endfor %}
 </div>
 
 <div class="attorneys-container">
@@ -43,8 +53,8 @@
                     <th class="text-center">Active Cases</th>
                     <th class="text-center">Closed MTD</th>
                     <th class="text-center">Closed YTD</th>
-                    <th class="text-right year-2025" title="2025 Billing">Billed '25</th>
-                    <th class="text-right year-2025" title="2025 Collections">Collected '25</th>
+                    <th class="text-right" title="{{ year }} Billing">Billed '{{ (year|string)[2:] }}</th>
+                    <th class="text-right" title="{{ year }} Collections">Collected '{{ (year|string)[2:] }}</th>
                     <th class="text-right">Outstanding</th>
                     <th class="text-center">Coll %</th>
                     <th class="text-center" title="Paid in Full">Paid</th>
@@ -60,15 +70,15 @@
                 {% for atty in attorneys if atty.active_cases > 0 %}
                 <tr class="{% if atty.aging.needs_calls > 10 %}row-warning{% endif %}">
                     <td>
-                        <a href="/attorney/{{ atty.attorney_name|urlencode }}" class="attorney-link">
+                        <a href="/attorney/{{ atty.attorney_name|urlencode }}?year={{ year }}" class="attorney-link">
                             {{ atty.attorney_name }}
                         </a>
                     </td>
                     <td class="text-center">{{ atty.active_cases }}</td>
                     <td class="text-center">{{ atty.closed_mtd }}</td>
                     <td class="text-center">{{ atty.closed_ytd }}</td>
-                    <td class="text-right year-2025">${{ "{:,.0f}".format(atty.billed_2025 or 0) }}</td>
-                    <td class="text-right year-2025">${{ "{:,.0f}".format(atty.collected_2025 or 0) }}</td>
+                    <td class="text-right">${{ "{:,.0f}".format(atty.total_billed or 0) }}</td>
+                    <td class="text-right">${{ "{:,.0f}".format(atty.total_collected or 0) }}</td>
                     <td class="text-right">${{ "{:,.0f}".format(atty.total_outstanding) }}</td>
                     <td class="text-center {% if atty.collection_rate >= 80 %}text-success{% elif atty.collection_rate >= 60 %}text-warning{% else %}text-danger{% endif %}">
                         {{ "{:.1f}".format(atty.collection_rate) }}%

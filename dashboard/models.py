@@ -78,41 +78,50 @@ class DashboardData:
                 names.append(name)
         return names[0] if names else 'Unknown'
 
-    def get_daily_collections_summary(self, target_date: date = None) -> Dict:
-        """Get daily collections summary from cached invoices (2025 data only)."""
+    def get_daily_collections_summary(self, target_date: date = None, year: int = None) -> Dict:
+        """Get daily collections summary from cached invoices for specified year."""
         target_date = target_date or date.today()
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
+        # For closed years, freeze aging at Dec 31 of that year
+        if year < current_year:
+            reference_date = f"'{year}-12-31'"
+        else:
+            reference_date = "'now'"
 
         # First try to get data from the cache database (cached_invoices)
         try:
             if self.cache_db_path.exists():
                 with self._get_cache_connection() as conn:
                     cursor = conn.cursor()
-                    # Filter to 2025 invoices only
-                    cursor.execute("""
+                    # Filter to specified year invoices
+                    cursor.execute(f"""
                         SELECT
                             SUM(balance_due) as total_ar,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) < 0 THEN balance_due ELSE 0 END) as ar_current,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) BETWEEN 0 AND 30 THEN balance_due ELSE 0 END) as ar_0_30,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) BETWEEN 31 AND 60 THEN balance_due ELSE 0 END) as ar_31_60,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) BETWEEN 61 AND 90 THEN balance_due ELSE 0 END) as ar_61_90,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) BETWEEN 91 AND 120 THEN balance_due ELSE 0 END) as ar_91_120,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) > 120 THEN balance_due ELSE 0 END) as ar_120_plus,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) > 90 THEN balance_due ELSE 0 END) as ar_90_plus,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) <= 180 THEN balance_due ELSE 0 END) as ar_under_180,
-                            SUM(CASE WHEN julianday('now') - julianday(due_date) > 180 THEN balance_due ELSE 0 END) as ar_over_180,
-                            COUNT(CASE WHEN balance_due > 0 AND julianday('now') - julianday(due_date) > 30 THEN 1 END) as delinquent
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) < 0 THEN balance_due ELSE 0 END) as ar_current,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) BETWEEN 0 AND 30 THEN balance_due ELSE 0 END) as ar_0_30,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) BETWEEN 31 AND 60 THEN balance_due ELSE 0 END) as ar_31_60,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) BETWEEN 61 AND 90 THEN balance_due ELSE 0 END) as ar_61_90,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) BETWEEN 91 AND 120 THEN balance_due ELSE 0 END) as ar_91_120,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) > 120 THEN balance_due ELSE 0 END) as ar_120_plus,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) > 90 THEN balance_due ELSE 0 END) as ar_90_plus,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) <= 180 THEN balance_due ELSE 0 END) as ar_under_180,
+                            SUM(CASE WHEN julianday({reference_date}) - julianday(due_date) > 180 THEN balance_due ELSE 0 END) as ar_over_180,
+                            COUNT(CASE WHEN balance_due > 0 AND julianday({reference_date}) - julianday(due_date) > 30 THEN 1 END) as delinquent
                         FROM cached_invoices
                         WHERE balance_due > 0
-                          AND strftime('%Y', invoice_date) = '2025'
+                          AND strftime('%Y', invoice_date) = '{year}'
                     """)
 
                     row = cursor.fetchone()
 
-                    # Get total billed and collected for 2025 invoices
-                    cursor.execute("""
+                    # Get total billed and collected for specified year invoices
+                    cursor.execute(f"""
                         SELECT SUM(total_amount) as total_billed, SUM(paid_amount) as total_collected
                         FROM cached_invoices
-                        WHERE strftime('%Y', invoice_date) = '2025'
+                        WHERE strftime('%Y', invoice_date) = '{year}'
                     """)
                     billing_row = cursor.fetchone()
                     total_billed = billing_row['total_billed'] or 0 if billing_row else 0
@@ -134,15 +143,15 @@ class DashboardData:
                         over_60 = ar_61_90 + ar_90_plus
                         over_60_pct = (over_60 / total_billed * 100) if total_billed > 0 else 0
 
-                        # Get today's payments from cached_payments if available (2025 only)
+                        # Get today's payments from cached_payments if available (for specified year)
                         cash_received = 0
                         payment_count = 0
                         try:
-                            cursor.execute("""
+                            cursor.execute(f"""
                                 SELECT SUM(amount) as total, COUNT(*) as count
                                 FROM cached_payments
-                                WHERE DATE(payment_date) = DATE('now')
-                                  AND strftime('%Y', payment_date) = '2025'
+                                WHERE DATE(payment_date) = DATE({reference_date})
+                                  AND strftime('%Y', payment_date) = '{year}'
                             """)
                             prow = cursor.fetchone()
                             if prow and prow['total']:
@@ -229,9 +238,9 @@ class DashboardData:
                 'no_data': True,
             }
 
-    def get_ar_aging_breakdown(self) -> Dict:
-        """Get AR aging breakdown for charts (2025 data)."""
-        summary = self.get_daily_collections_summary()
+    def get_ar_aging_breakdown(self, year: int = None) -> Dict:
+        """Get AR aging breakdown for charts (for specified year)."""
+        summary = self.get_daily_collections_summary(year=year)
         # Use OrderedDict-like insertion order (Python 3.7+) for display order
         return {
             'Collected': summary.get('total_collected', 0),
@@ -438,9 +447,9 @@ class DashboardData:
     # SOP Widget Data Methods
     # =========================================================================
 
-    def get_melissa_sop_data(self) -> Dict:
-        """Get Melissa (AR Specialist) SOP metrics."""
-        summary = self.get_daily_collections_summary()
+    def get_melissa_sop_data(self, year: int = None) -> Dict:
+        """Get Melissa (AR Specialist) SOP metrics for specified year."""
+        summary = self.get_daily_collections_summary(year=year)
         plans = self.get_payment_plans_summary()
         noiw = self.get_noiw_pipeline()
 
@@ -920,9 +929,9 @@ class DashboardData:
                 'error': str(e)
             }
 
-    def get_dashboard_stats(self) -> Dict:
-        """Get high-level stats for dashboard overview."""
-        summary = self.get_daily_collections_summary()
+    def get_dashboard_stats(self, year: int = None) -> Dict:
+        """Get high-level stats for dashboard overview for specified year."""
+        summary = self.get_daily_collections_summary(year=year)
         plans = self.get_payment_plans_summary()
         noiw = self.get_noiw_pipeline()
         wonky = self.get_wonky_invoices()
@@ -950,8 +959,12 @@ class DashboardData:
     # Attorney Productivity Methods
     # =========================================================================
 
-    def get_attorney_productivity_data(self) -> List[Dict]:
-        """Get per-attorney metrics: active cases, closed MTD/YTD, billing (2025 data only)."""
+    def get_attorney_productivity_data(self, year: int = None) -> List[Dict]:
+        """Get per-attorney metrics: active cases, closed MTD/YTD, billing for specified year."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
         try:
             if not self.cache_db_path.exists():
                 return []
@@ -959,32 +972,33 @@ class DashboardData:
             with self._get_cache_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get attorney productivity with case counts and billing (2025 only)
-                # Filter to cases created in 2025 and invoices from 2025
-                cursor.execute("""
+                # For closed years, use Dec 31 as the reference for MTD
+                if year < current_year:
+                    mtd_start = f"'{year}-12-01'"
+                else:
+                    mtd_start = "DATE('now', 'start of month')"
+
+                # Get attorney productivity with case counts and billing for specified year
+                cursor.execute(f"""
                     SELECT
                         c.lead_attorney_id as attorney_id,
                         c.lead_attorney_name as attorney_name,
                         COUNT(DISTINCT CASE WHEN LOWER(c.status) = 'open'
-                            AND strftime('%Y', c.created_at) = '2025'
+                            AND strftime('%Y', c.created_at) = '{year}'
                             THEN c.id END) as active_cases,
                         COUNT(DISTINCT CASE WHEN LOWER(c.status) = 'closed'
-                            AND c.date_closed >= DATE('now', 'start of month')
-                            AND strftime('%Y', c.created_at) = '2025'
+                            AND c.date_closed >= {mtd_start}
+                            AND strftime('%Y', c.created_at) = '{year}'
                             THEN c.id END) as closed_mtd,
                         COUNT(DISTINCT CASE WHEN LOWER(c.status) = 'closed'
-                            AND strftime('%Y', c.date_closed) = '2025'
-                            AND strftime('%Y', c.created_at) = '2025'
+                            AND strftime('%Y', c.date_closed) = '{year}'
+                            AND strftime('%Y', c.created_at) = '{year}'
                             THEN c.id END) as closed_ytd,
-                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '2025' THEN i.total_amount ELSE 0 END), 0) as total_billed,
-                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '2025' THEN i.paid_amount ELSE 0 END), 0) as total_collected,
-                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '2025' THEN i.balance_due ELSE 0 END), 0) as total_outstanding,
-                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '2025' THEN i.total_amount ELSE 0 END), 0) as billed_2025,
-                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '2025' THEN i.paid_amount ELSE 0 END), 0) as collected_2025,
-                        0 as billed_2026_ytd,
-                        0 as collected_2026_ytd
+                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '{year}' THEN i.total_amount ELSE 0 END), 0) as total_billed,
+                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '{year}' THEN i.paid_amount ELSE 0 END), 0) as total_collected,
+                        COALESCE(SUM(CASE WHEN strftime('%Y', i.invoice_date) = '{year}' THEN i.balance_due ELSE 0 END), 0) as total_outstanding
                     FROM cached_cases c
-                    LEFT JOIN cached_invoices i ON i.case_id = c.id AND strftime('%Y', i.invoice_date) = '2025'
+                    LEFT JOIN cached_invoices i ON i.case_id = c.id AND strftime('%Y', i.invoice_date) = '{year}'
                     WHERE c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
                     GROUP BY c.lead_attorney_id, c.lead_attorney_name
                     ORDER BY active_cases DESC
@@ -996,12 +1010,6 @@ class DashboardData:
                     total_collected = row['total_collected'] or 0
                     collection_rate = (total_collected / total_billed * 100) if total_billed > 0 else 0
 
-                    # Year-specific billing
-                    billed_2025 = row['billed_2025'] or 0
-                    collected_2025 = row['collected_2025'] or 0
-                    billed_2026_ytd = row['billed_2026_ytd'] or 0
-                    collected_2026_ytd = row['collected_2026_ytd'] or 0
-
                     results.append({
                         'attorney_id': row['attorney_id'],
                         'attorney_name': row['attorney_name'],
@@ -1012,19 +1020,25 @@ class DashboardData:
                         'total_collected': total_collected,
                         'total_outstanding': row['total_outstanding'] or 0,
                         'collection_rate': collection_rate,
-                        # Year-based billing
-                        'billed_2025': billed_2025,
-                        'collected_2025': collected_2025,
-                        'billed_2026_ytd': billed_2026_ytd,
-                        'collected_2026_ytd': collected_2026_ytd,
+                        'year': year,
                     })
                 return results
         except Exception as e:
             print(f"Error getting attorney productivity: {e}")
             return []
 
-    def get_attorney_invoice_aging(self, attorney_id: int = None) -> List[Dict]:
-        """Get invoice aging breakdown by attorney with 30/60/90/120+ DPD buckets (2025 invoices only)."""
+    def get_attorney_invoice_aging(self, attorney_id: int = None, year: int = None) -> List[Dict]:
+        """Get invoice aging breakdown by attorney with 30/60/90/120+ DPD buckets for specified year."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
+        # For closed years, freeze aging at Dec 31 of that year
+        if year < current_year:
+            reference_date = f"'{year}-12-31'"
+        else:
+            reference_date = "'now'"
+
         try:
             if not self.cache_db_path.exists():
                 return []
@@ -1038,25 +1052,25 @@ class DashboardData:
                     attorney_filter = "AND c.lead_attorney_id = ?"
                     params = [attorney_id]
 
-                # Filter to 2025 invoices only
+                # Filter to specified year invoices
                 cursor.execute(f"""
                     SELECT
                         c.lead_attorney_id as attorney_id,
                         c.lead_attorney_name as attorney_name,
                         COUNT(i.id) as total_invoices,
                         SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_full,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) <= 0 THEN 1 ELSE 0 END) as current,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) BETWEEN 1 AND 30 THEN 1 ELSE 0 END) as dpd_1_30,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) BETWEEN 31 AND 60 THEN 1 ELSE 0 END) as dpd_31_60,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) BETWEEN 61 AND 90 THEN 1 ELSE 0 END) as dpd_61_90,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) BETWEEN 91 AND 120 THEN 1 ELSE 0 END) as dpd_91_120,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) BETWEEN 121 AND 180 THEN 1 ELSE 0 END) as dpd_121_180,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) > 180 THEN 1 ELSE 0 END) as dpd_over_180,
-                        SUM(CASE WHEN i.balance_due > 0 AND julianday('now') - julianday(i.due_date) > 60 AND julianday('now') - julianday(i.due_date) <= 180 THEN i.balance_due ELSE 0 END) as amount_60_to_180
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) <= 0 THEN 1 ELSE 0 END) as current,
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) BETWEEN 1 AND 30 THEN 1 ELSE 0 END) as dpd_1_30,
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) BETWEEN 31 AND 60 THEN 1 ELSE 0 END) as dpd_31_60,
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) BETWEEN 61 AND 90 THEN 1 ELSE 0 END) as dpd_61_90,
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) BETWEEN 91 AND 120 THEN 1 ELSE 0 END) as dpd_91_120,
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) BETWEEN 121 AND 180 THEN 1 ELSE 0 END) as dpd_121_180,
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) > 180 THEN 1 ELSE 0 END) as dpd_over_180,
+                        SUM(CASE WHEN i.balance_due > 0 AND julianday({reference_date}) - julianday(i.due_date) > 60 AND julianday({reference_date}) - julianday(i.due_date) <= 180 THEN i.balance_due ELSE 0 END) as amount_60_to_180
                     FROM cached_cases c
                     JOIN cached_invoices i ON i.case_id = c.id
                     WHERE c.lead_attorney_name IS NOT NULL
-                      AND strftime('%Y', i.invoice_date) = '2025'
+                      AND strftime('%Y', i.invoice_date) = '{year}'
                       {attorney_filter}
                     GROUP BY c.lead_attorney_id, c.lead_attorney_name
                     ORDER BY total_invoices DESC
@@ -1088,8 +1102,18 @@ class DashboardData:
             print(f"Error getting attorney invoice aging: {e}")
             return []
 
-    def get_collection_call_list(self, attorney_id: int = None) -> List[Dict]:
-        """Get 60+ DPD invoices with client contact info for calls (2025 invoices only)."""
+    def get_collection_call_list(self, attorney_id: int = None, year: int = None) -> List[Dict]:
+        """Get 60+ DPD invoices with client contact info for calls for specified year."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
+        # For closed years, freeze aging at Dec 31 of that year
+        if year < current_year:
+            reference_date = f"'{year}-12-31'"
+        else:
+            reference_date = "'now'"
+
         try:
             if not self.cache_db_path.exists():
                 return []
@@ -1103,14 +1127,14 @@ class DashboardData:
                     attorney_filter = "AND c.lead_attorney_id = ?"
                     params = [attorney_id]
 
-                # Filter to 2025 invoices only
+                # Filter to specified year invoices
                 cursor.execute(f"""
                     SELECT
                         i.id as invoice_id,
                         i.invoice_number,
                         i.balance_due,
                         i.due_date,
-                        CAST(julianday('now') - julianday(i.due_date) AS INTEGER) as days_overdue,
+                        CAST(julianday({reference_date}) - julianday(i.due_date) AS INTEGER) as days_overdue,
                         c.id as case_id,
                         c.name as case_name,
                         c.lead_attorney_name,
@@ -1122,10 +1146,10 @@ class DashboardData:
                     JOIN cached_cases c ON i.case_id = c.id
                     LEFT JOIN cached_contacts ct ON i.contact_id = ct.id
                     WHERE i.balance_due > 0
-                      AND julianday('now') - julianday(i.due_date) > 60
-                      AND julianday('now') - julianday(i.due_date) <= 180
+                      AND julianday({reference_date}) - julianday(i.due_date) > 60
+                      AND julianday({reference_date}) - julianday(i.due_date) <= 180
                       AND c.lead_attorney_name IS NOT NULL
-                      AND strftime('%Y', i.invoice_date) = '2025'
+                      AND strftime('%Y', i.invoice_date) = '{year}'
                       {attorney_filter}
                     ORDER BY days_overdue DESC
                 """, params)
@@ -1164,8 +1188,12 @@ class DashboardData:
             print(f"Error getting collection call list: {e}")
             return []
 
-    def get_attorney_detail(self, attorney_name: str) -> Dict:
-        """Get detailed information for a specific attorney."""
+    def get_attorney_detail(self, attorney_name: str, year: int = None) -> Dict:
+        """Get detailed information for a specific attorney for specified year."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
         try:
             if not self.cache_db_path.exists():
                 return {}
@@ -1185,18 +1213,18 @@ class DashboardData:
             if not attorney_id:
                 return {'attorney_name': attorney_name, 'error': 'Attorney not found'}
 
-            # Get productivity data
-            productivity = [p for p in self.get_attorney_productivity_data()
+            # Get productivity data for specified year
+            productivity = [p for p in self.get_attorney_productivity_data(year=year)
                           if p['attorney_id'] == attorney_id]
             productivity = productivity[0] if productivity else {}
 
-            # Get invoice aging
-            aging = [a for a in self.get_attorney_invoice_aging(attorney_id)
+            # Get invoice aging for specified year
+            aging = [a for a in self.get_attorney_invoice_aging(attorney_id, year=year)
                     if a['attorney_id'] == attorney_id]
             aging = aging[0] if aging else {}
 
-            # Get call list (60+ DPD invoices)
-            call_list = self.get_collection_call_list(attorney_id)
+            # Get call list (60+ DPD invoices) for specified year
+            call_list = self.get_collection_call_list(attorney_id, year=year)
 
             # Get active cases
             with self._get_cache_connection() as conn:
@@ -1231,10 +1259,10 @@ class DashboardData:
             print(f"Error getting attorney detail: {e}")
             return {'attorney_name': attorney_name, 'error': str(e)}
 
-    def get_attorney_summary(self) -> Dict:
-        """Get high-level attorney summary for main dashboard widget."""
+    def get_attorney_summary(self, year: int = None) -> Dict:
+        """Get high-level attorney summary for main dashboard widget for specified year."""
         try:
-            productivity = self.get_attorney_productivity_data()
+            productivity = self.get_attorney_productivity_data(year=year)
             if not productivity:
                 return {
                     'active_attorneys': 0,
@@ -1257,7 +1285,7 @@ class DashboardData:
             total_billed = sum(p['total_billed'] for p in active_attorneys)
 
             # Get aging data - individual DPD bucket totals (only <180 days)
-            aging = self.get_attorney_invoice_aging()
+            aging = self.get_attorney_invoice_aging(year=year)
             total_paid_full = sum(a.get('paid_full', 0) for a in aging)
             total_dpd_1_30 = sum(a.get('dpd_1_30', 0) for a in aging)
             total_dpd_31_60 = sum(a.get('dpd_31_60', 0) for a in aging)
