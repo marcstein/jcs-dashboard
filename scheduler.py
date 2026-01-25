@@ -121,6 +121,23 @@ DAILY_TASKS = [
         run_at=time(9, 0),
         owner="Tiffany Willis",
     ),
+    ScheduledTask(
+        name="noiw_sync",
+        description="Sync NOIW pipeline to tracking table",
+        frequency=TaskFrequency.DAILY,
+        command="plans noiw-sync",
+        run_at=time(7, 15),  # After payment plan compliance
+        owner="Melissa Scarlett",
+    ),
+    ScheduledTask(
+        name="noiw_daily_alert",
+        description="Send daily NOIW pipeline alert to Slack",
+        frequency=TaskFrequency.DAILY,
+        command="plans noiw-notify daily",
+        run_at=time(8, 0),  # Morning alert
+        owner="Melissa Scarlett",
+        notify_on_failure=True,
+    ),
 ]
 
 WEEKLY_TASKS = [
@@ -173,10 +190,19 @@ WEEKLY_TASKS = [
     ),
     ScheduledTask(
         name="noiw_pipeline_review",
-        description="NOIW Pipeline Review",
+        description="NOIW Pipeline Review (console output)",
         frequency=TaskFrequency.WEEKLY,
-        command="plans noiw-pipeline",
+        command="plans noiw-pipeline --limit 100",
         run_at=time(14, 0),  # 2:00 PM Friday
+        day_of_week=DayOfWeek.FRIDAY,
+        owner="Melissa Scarlett",
+    ),
+    ScheduledTask(
+        name="noiw_workflow_report",
+        description="NOIW Workflow Status Report to Slack",
+        frequency=TaskFrequency.WEEKLY,
+        command="plans noiw-notify workflow",
+        run_at=time(14, 30),  # 2:30 PM Friday after review
         day_of_week=DayOfWeek.FRIDAY,
         owner="Melissa Scarlett",
     ),

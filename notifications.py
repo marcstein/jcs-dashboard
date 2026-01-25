@@ -353,6 +353,63 @@ class NotificationManager:
                 {"title": "Days Left", "value": str(summary.get("days_left", 0)), "short": True},
             ]
 
+        elif report_type == "noiw_daily":
+            # Daily NOIW pipeline summary
+            title = f":warning: NOIW Pipeline Report - {date.today()}"
+            total_cases = summary.get('total_cases', 0)
+            total_balance = summary.get('total_balance', 0)
+            critical = summary.get('critical_count', 0)
+
+            color = "danger" if critical > 20 else "warning" if total_cases > 50 else "#439FE0"
+
+            message = f"*{total_cases} cases* in NOIW pipeline\n"
+            message += f"*Total Balance:* ${total_balance:,.2f}\n"
+            message += f"*Critical (60+ days):* {critical}"
+
+            fields = [
+                {"title": "30-60 days", "value": str(summary.get('bucket_30_60', 0)), "short": True},
+                {"title": "60-90 days", "value": str(summary.get('bucket_60_90', 0)), "short": True},
+                {"title": "90-180 days", "value": str(summary.get('bucket_90_180', 0)), "short": True},
+                {"title": "180+ days", "value": str(summary.get('bucket_180_plus', 0)), "short": True},
+            ]
+
+        elif report_type == "noiw_critical":
+            # Critical NOIW escalation alert
+            title = f":rotating_light: CRITICAL NOIW Alert"
+            color = "danger"
+
+            case_count = summary.get('case_count', 0)
+            total_balance = summary.get('total_balance', 0)
+
+            message = f"*{case_count} cases* require immediate attention!\n"
+            message += f"*Balance at Risk:* ${total_balance:,.2f}\n\n"
+
+            # Add top cases if provided
+            if details:
+                message += "*Top Cases:*\n"
+                for case in details[:5]:
+                    message += f"• {case.get('contact_name', 'Unknown')}: ${case.get('balance_due', 0):,.2f} ({case.get('days_delinquent', 0)} days)\n"
+
+            fields = None
+
+        elif report_type == "noiw_workflow":
+            # NOIW workflow status update
+            title = f":clipboard: NOIW Workflow Status"
+            color = "#439FE0"
+
+            message = f"*Total Tracked:* {summary.get('total_tracked', 0)} cases\n"
+            message += f"*Total Balance:* ${summary.get('total_balance', 0):,.2f}"
+
+            fields = []
+            by_status = summary.get('by_status', {})
+            for status, data in by_status.items():
+                if data.get('count', 0) > 0:
+                    fields.append({
+                        "title": status.replace('_', ' ').title(),
+                        "value": f"{data['count']} (${data.get('total_balance', 0):,.0f})",
+                        "short": True,
+                    })
+
         else:
             title = f"MyCase Alert: {report_type}"
             color = "#439FE0"

@@ -14,6 +14,7 @@ from enum import Enum
 
 from api_client import MyCaseClient, get_client, MyCaseAPIError
 from database import Database, get_db
+from cache import get_cache
 
 
 class PaymentPlanStatus(Enum):
@@ -30,6 +31,18 @@ class DelinquencyLevel(Enum):
     LATE_16_30 = 2  # 16-30 days late - NOIW consideration
     LATE_31_60 = 3  # 31-60 days late - NOIW required
     LATE_60_PLUS = 4  # 60+ days - escalate to attorney
+
+
+class NOIWStatus(Enum):
+    """NOIW workflow status for a case."""
+    PENDING = "pending"           # In pipeline, no action yet
+    WARNING_SENT = "warning_sent"  # First warning letter sent
+    FINAL_NOTICE = "final_notice"  # Final notice before withdrawal
+    ATTORNEY_REVIEW = "attorney_review"  # Escalated to attorney
+    ON_HOLD = "on_hold"           # Collections hold in place
+    PAYMENT_ARRANGED = "payment_arranged"  # Payment plan renegotiated
+    WITHDRAWN = "withdrawn"       # Case withdrawn
+    RESOLVED = "resolved"         # Paid or otherwise resolved
 
 
 @dataclass
@@ -159,6 +172,33 @@ class PaymentPlanManager:
                     UNIQUE(case_id, status)
                 )
             """)
+
+            # NOIW workflow tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS noiw_tracking (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_id INTEGER NOT NULL,
+                    case_name TEXT,
+                    contact_id INTEGER,
+                    contact_name TEXT,
+                    invoice_id INTEGER,
+                    balance_due REAL,
+                    days_delinquent INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    warning_sent_date DATE,
+                    final_notice_date DATE,
+                    attorney_review_date DATE,
+                    resolution_date DATE,
+                    resolution_notes TEXT,
+                    assigned_to TEXT,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(case_id, invoice_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_noiw_status ON noiw_tracking(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_noiw_case ON noiw_tracking(case_id)")
 
             conn.commit()
 
@@ -675,29 +715,316 @@ class PaymentPlanManager:
             print(f"Error preparing NOIW packet: {e}")
             return None
 
-    def get_noiw_pipeline(self) -> List[Dict]:
-        """Get all cases that need NOIW consideration (30+ days delinquent)."""
-        plans = self.get_all_active_plans()
+    def get_noiw_pipeline(self, min_days: int = 30, open_cases_only: bool = True) -> List[Dict]:
+        """
+        Get all invoices that need NOIW consideration (30+ days delinquent).
+
+        Uses cached invoice/case/contact data for accurate names.
+
+        Args:
+            min_days: Minimum days overdue to include (default 30)
+            open_cases_only: Only include invoices for open cases (default True)
+        """
         held_cases = self._get_held_cases()
+        cache = get_cache()
 
         pipeline = []
-        for plan in plans:
-            if plan.case_id in held_cases:
-                continue
 
-            if plan.days_delinquent >= 30:
+        # Query the cache database directly for invoices with balance due
+        with cache._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build query to get delinquent invoices with case/contact names
+            query = """
+                SELECT
+                    ci.id as invoice_id,
+                    ci.invoice_number,
+                    ci.case_id,
+                    ci.contact_id,
+                    ci.balance_due,
+                    ci.due_date,
+                    CAST(julianday('now') - julianday(ci.due_date) AS INTEGER) as days_overdue,
+                    cc.name as case_name,
+                    cc.status as case_status,
+                    co.name as contact_name,
+                    co.first_name,
+                    co.last_name
+                FROM cached_invoices ci
+                LEFT JOIN cached_cases cc ON ci.case_id = cc.id
+                LEFT JOIN cached_contacts co ON ci.contact_id = co.id
+                WHERE ci.balance_due > 0
+                AND julianday('now') - julianday(ci.due_date) >= ?
+            """
+
+            if open_cases_only:
+                query += " AND (cc.status IS NULL OR LOWER(cc.status) = 'open')"
+
+            query += " ORDER BY days_overdue DESC"
+
+            cursor.execute(query, (min_days,))
+
+            for row in cursor.fetchall():
+                case_id = row['case_id']
+
+                # Skip held cases
+                if case_id and case_id in held_cases:
+                    continue
+
+                days_overdue = row['days_overdue'] or 0
+
+                # Build contact name from available fields
+                contact_name = row['contact_name']
+                if not contact_name:
+                    first = row['first_name'] or ''
+                    last = row['last_name'] or ''
+                    contact_name = f"{first} {last}".strip() or "Unknown"
+
+                # Extract client name from case name if contact unknown
+                # Case names often follow format: "LASTNAME.FIRSTNAME - ..."
+                case_name = row['case_name'] or 'N/A'
+                if contact_name == "Unknown" and case_name != 'N/A':
+                    # Try to extract from case name pattern
+                    name_part = case_name.split(' - ')[0].split(':')[0]
+                    if '.' in name_part:
+                        contact_name = name_part.replace('.', ' ').strip()
+
                 pipeline.append({
-                    "case_id": plan.case_id,
-                    "case_name": plan.case_name,
-                    "contact_name": plan.contact_name,
-                    "days_delinquent": plan.days_delinquent,
-                    "balance_due": plan.balance_remaining,
-                    "urgency": "critical" if plan.days_delinquent >= 60 else "high",
+                    "invoice_id": row['invoice_id'],
+                    "invoice_number": row['invoice_number'],
+                    "case_id": case_id,
+                    "case_name": case_name,
+                    "contact_id": row['contact_id'],
+                    "contact_name": contact_name,
+                    "days_delinquent": days_overdue,
+                    "balance_due": row['balance_due'],
+                    "urgency": "critical" if days_overdue >= 60 else "high",
+                    "case_status": row['case_status'] or "Unknown",
                 })
 
-        # Sort by days delinquent (most urgent first)
-        pipeline.sort(key=lambda x: x["days_delinquent"], reverse=True)
         return pipeline
+
+    # ========== NOIW Workflow Tracking ==========
+
+    def get_noiw_status(self, case_id: int, invoice_id: int = None) -> Optional[Dict]:
+        """Get NOIW tracking status for a case/invoice."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            if invoice_id:
+                cursor.execute("""
+                    SELECT * FROM noiw_tracking
+                    WHERE case_id = ? AND invoice_id = ?
+                """, (case_id, invoice_id))
+            else:
+                cursor.execute("""
+                    SELECT * FROM noiw_tracking
+                    WHERE case_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                """, (case_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def start_noiw_tracking(self, case_id: int, invoice_id: int,
+                           case_name: str = None, contact_id: int = None,
+                           contact_name: str = None, balance_due: float = 0,
+                           days_delinquent: int = 0, assigned_to: str = None) -> int:
+        """Start NOIW tracking for a case/invoice."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO noiw_tracking
+                (case_id, case_name, contact_id, contact_name, invoice_id,
+                 balance_due, days_delinquent, status, assigned_to)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                ON CONFLICT(case_id, invoice_id) DO UPDATE SET
+                    balance_due = excluded.balance_due,
+                    days_delinquent = excluded.days_delinquent,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (case_id, case_name, contact_id, contact_name, invoice_id,
+                  balance_due, days_delinquent, assigned_to))
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_noiw_status(self, case_id: int, invoice_id: int, new_status: str,
+                          notes: str = None, assigned_to: str = None) -> bool:
+        """Update NOIW status for a case/invoice."""
+        valid_statuses = [s.value for s in NOIWStatus]
+        if new_status not in valid_statuses:
+            raise ValueError(f"Invalid status: {new_status}. Must be one of {valid_statuses}")
+
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build update based on status
+            date_field = None
+            if new_status == NOIWStatus.WARNING_SENT.value:
+                date_field = "warning_sent_date"
+            elif new_status == NOIWStatus.FINAL_NOTICE.value:
+                date_field = "final_notice_date"
+            elif new_status == NOIWStatus.ATTORNEY_REVIEW.value:
+                date_field = "attorney_review_date"
+            elif new_status in [NOIWStatus.RESOLVED.value, NOIWStatus.WITHDRAWN.value,
+                               NOIWStatus.PAYMENT_ARRANGED.value]:
+                date_field = "resolution_date"
+
+            if date_field:
+                cursor.execute(f"""
+                    UPDATE noiw_tracking
+                    SET status = ?,
+                        {date_field} = CURRENT_DATE,
+                        notes = COALESCE(?, notes),
+                        assigned_to = COALESCE(?, assigned_to),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE case_id = ? AND invoice_id = ?
+                """, (new_status, notes, assigned_to, case_id, invoice_id))
+            else:
+                cursor.execute("""
+                    UPDATE noiw_tracking
+                    SET status = ?,
+                        notes = COALESCE(?, notes),
+                        assigned_to = COALESCE(?, assigned_to),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE case_id = ? AND invoice_id = ?
+                """, (new_status, notes, assigned_to, case_id, invoice_id))
+
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_noiw_workflow_summary(self) -> Dict:
+        """Get summary of NOIW workflow statuses."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    status,
+                    COUNT(*) as count,
+                    SUM(balance_due) as total_balance
+                FROM noiw_tracking
+                GROUP BY status
+            """)
+
+            summary = {s.value: {"count": 0, "total_balance": 0} for s in NOIWStatus}
+            for row in cursor.fetchall():
+                summary[row['status']] = {
+                    "count": row['count'],
+                    "total_balance": row['total_balance'] or 0
+                }
+
+            # Get total
+            cursor.execute("""
+                SELECT COUNT(*) as total, SUM(balance_due) as total_balance
+                FROM noiw_tracking
+            """)
+            totals = cursor.fetchone()
+
+            return {
+                "by_status": summary,
+                "total_tracked": totals['total'] or 0,
+                "total_balance": totals['total_balance'] or 0
+            }
+
+    def get_noiw_cases_by_status(self, status: str) -> List[Dict]:
+        """Get all NOIW cases with a specific status."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM noiw_tracking
+                WHERE status = ?
+                ORDER BY days_delinquent DESC
+            """, (status,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def sync_noiw_from_pipeline(self) -> Dict:
+        """
+        Sync NOIW tracking from the pipeline.
+        Creates tracking entries for new pipeline cases,
+        updates existing entries with current balances.
+        """
+        pipeline = self.get_noiw_pipeline(min_days=30, open_cases_only=True)
+
+        new_entries = 0
+        updated = 0
+
+        for item in pipeline:
+            existing = self.get_noiw_status(item['case_id'], item['invoice_id'])
+
+            if existing:
+                # Update balance and days delinquent
+                with self.db._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE noiw_tracking
+                        SET balance_due = ?,
+                            days_delinquent = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE case_id = ? AND invoice_id = ?
+                    """, (item['balance_due'], item['days_delinquent'],
+                          item['case_id'], item['invoice_id']))
+                    conn.commit()
+                updated += 1
+            else:
+                # Create new tracking entry
+                self.start_noiw_tracking(
+                    case_id=item['case_id'],
+                    invoice_id=item['invoice_id'],
+                    case_name=item['case_name'],
+                    contact_id=item.get('contact_id'),
+                    contact_name=item['contact_name'],
+                    balance_due=item['balance_due'],
+                    days_delinquent=item['days_delinquent']
+                )
+                new_entries += 1
+
+        return {
+            "pipeline_count": len(pipeline),
+            "new_entries": new_entries,
+            "updated": updated
+        }
+
+    def get_noiw_notification_data(self) -> Dict:
+        """
+        Generate data for NOIW notifications.
+
+        Returns dict with:
+        - summary: Overall stats for daily report
+        - critical_cases: Cases needing immediate attention
+        - workflow_status: Status tracking summary
+        """
+        pipeline = self.get_noiw_pipeline(min_days=30, open_cases_only=True)
+
+        # Calculate summary stats
+        total_balance = sum(p['balance_due'] for p in pipeline)
+        critical_count = sum(1 for p in pipeline if p['urgency'] == 'critical')
+
+        # Age buckets
+        bucket_30_60 = sum(1 for p in pipeline if 30 <= p['days_delinquent'] < 60)
+        bucket_60_90 = sum(1 for p in pipeline if 60 <= p['days_delinquent'] < 90)
+        bucket_90_180 = sum(1 for p in pipeline if 90 <= p['days_delinquent'] < 180)
+        bucket_180_plus = sum(1 for p in pipeline if p['days_delinquent'] >= 180)
+
+        # Get critical cases (180+ days or balance > $10K)
+        critical_cases = [
+            p for p in pipeline
+            if p['days_delinquent'] >= 180 or p['balance_due'] >= 10000
+        ]
+        critical_cases.sort(key=lambda x: x['balance_due'], reverse=True)
+
+        # Get workflow status
+        workflow_status = self.get_noiw_workflow_summary()
+
+        return {
+            "summary": {
+                "total_cases": len(pipeline),
+                "total_balance": total_balance,
+                "critical_count": critical_count,
+                "bucket_30_60": bucket_30_60,
+                "bucket_60_90": bucket_60_90,
+                "bucket_90_180": bucket_90_180,
+                "bucket_180_plus": bucket_180_plus,
+            },
+            "critical_cases": critical_cases[:10],  # Top 10 by balance
+            "workflow_status": workflow_status,
+            "pipeline": pipeline,
+        }
 
     # ========== Intake Verification ==========
 

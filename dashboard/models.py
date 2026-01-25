@@ -329,28 +329,87 @@ class DashboardData:
                 print(f"Error reading report: {e}")
         return None
 
-    def get_noiw_pipeline(self) -> List[Dict]:
+    def get_noiw_pipeline(self, status_filter: str = None) -> List[Dict]:
         """Get NOIW pipeline cases from local database."""
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT case_id, case_name, contact_name, balance_due,
-                       days_delinquent, initiated_date, outcome
-                FROM noiw_tracking
-                WHERE outcome IS NULL OR outcome = 'pending'
-                ORDER BY days_delinquent DESC, balance_due DESC
-            """)
+            if status_filter:
+                cursor.execute("""
+                    SELECT case_id, case_name, contact_name, invoice_id, balance_due,
+                           days_delinquent, status, assigned_to, warning_sent_date,
+                           final_notice_date, created_at, updated_at
+                    FROM noiw_tracking
+                    WHERE status = ?
+                    ORDER BY days_delinquent DESC, balance_due DESC
+                """, (status_filter,))
+            else:
+                cursor.execute("""
+                    SELECT case_id, case_name, contact_name, invoice_id, balance_due,
+                           days_delinquent, status, assigned_to, warning_sent_date,
+                           final_notice_date, created_at, updated_at
+                    FROM noiw_tracking
+                    WHERE status NOT IN ('resolved', 'withdrawn')
+                    ORDER BY days_delinquent DESC, balance_due DESC
+                """)
 
             rows = cursor.fetchall()
             return [{
                 'case_id': row['case_id'],
                 'case_name': row['case_name'],
                 'contact_name': row['contact_name'],
+                'invoice_id': row['invoice_id'],
                 'balance_due': row['balance_due'],
                 'days_delinquent': row['days_delinquent'],
-                'initiated_date': row['initiated_date'],
+                'status': row['status'],
+                'assigned_to': row['assigned_to'],
+                'warning_sent_date': row['warning_sent_date'],
+                'final_notice_date': row['final_notice_date'],
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at'],
             } for row in rows]
+
+    def get_noiw_summary(self) -> Dict:
+        """Get NOIW pipeline summary statistics."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get status counts
+            cursor.execute("""
+                SELECT status, COUNT(*) as count, SUM(balance_due) as total_balance
+                FROM noiw_tracking
+                GROUP BY status
+            """)
+            by_status = {}
+            for row in cursor.fetchall():
+                by_status[row['status']] = {
+                    'count': row['count'],
+                    'total_balance': row['total_balance'] or 0
+                }
+
+            # Get age buckets for active cases
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN days_delinquent >= 30 AND days_delinquent < 60 THEN 1 ELSE 0 END) as bucket_30_60,
+                    SUM(CASE WHEN days_delinquent >= 60 AND days_delinquent < 90 THEN 1 ELSE 0 END) as bucket_60_90,
+                    SUM(CASE WHEN days_delinquent >= 90 AND days_delinquent < 180 THEN 1 ELSE 0 END) as bucket_90_180,
+                    SUM(CASE WHEN days_delinquent >= 180 THEN 1 ELSE 0 END) as bucket_180_plus,
+                    COUNT(*) as total_active,
+                    SUM(balance_due) as total_balance
+                FROM noiw_tracking
+                WHERE status NOT IN ('resolved', 'withdrawn')
+            """)
+            totals = cursor.fetchone()
+
+            return {
+                'by_status': by_status,
+                'bucket_30_60': totals['bucket_30_60'] or 0,
+                'bucket_60_90': totals['bucket_60_90'] or 0,
+                'bucket_90_180': totals['bucket_90_180'] or 0,
+                'bucket_180_plus': totals['bucket_180_plus'] or 0,
+                'total_active': totals['total_active'] or 0,
+                'total_balance': totals['total_balance'] or 0,
+            }
 
     def get_wonky_invoices(self) -> List[Dict]:
         """Get open wonky invoices from local database."""

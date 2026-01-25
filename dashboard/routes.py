@@ -179,16 +179,19 @@ async def ar_dashboard(request: Request, year: int = None):
 
 
 @router.get("/noiw", response_class=HTMLResponse)
-async def noiw_pipeline(request: Request):
+async def noiw_pipeline(request: Request, status: str = None):
     """NOIW Pipeline page."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    pipeline = data.get_noiw_pipeline()
+    pipeline = data.get_noiw_pipeline(status_filter=status)
+    summary = data.get_noiw_summary()
 
     return templates.TemplateResponse("noiw.html", {
         "request": request,
         "pipeline": pipeline,
+        "summary": summary,
+        "current_filter": status,
         "username": request.session.get("username"),
     })
 

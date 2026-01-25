@@ -24,9 +24,11 @@ Automated SOP compliance monitoring system for JCS Law Firm using MyCase API int
 - `promises.py` - Payment promise tracking and monitoring
 - `notifications.py` - Multi-channel notifications (Slack, Email, SMS)
 - `trends.py` - Historical KPI trend analysis
+- `case_phases.py` - Universal 7-phase case management framework
 
 ### Database
 - `data/mycase_agent.db` - SQLite database for local tracking
+- `data/case_phases.db` - Case phase tracking and history
 
 ### Templates
 - `templates/` - Email/notification templates for SOPs
@@ -79,13 +81,15 @@ Because the MyCase API only returns tasks for open cases:
 - `data/mycase_cache.db` - Main cache database
 - `dashboard/mycase_cache.db` - Dashboard copy (symlinked or copied)
 
-## Current Metrics (Dec 2025)
+## Current Metrics (Jan 2026)
 
 ### AR/Collections
 - Total AR: $1.45M
 - 82.2% over 60 days (target <25%) - CRITICAL
 - Payment plan compliance: 7.6% (target ≥90%) - CRITICAL
-- NOIW pipeline: 14 cases 30+ days delinquent
+- NOIW pipeline: 163 open cases 30+ days delinquent ($620K total)
+  - 147 critical (60+ days), 16 high (30-59 days)
+  - 83 cases over 180 days delinquent
 
 ### Intake
 - 16 new cases/week
@@ -116,6 +120,15 @@ uv run python agent.py sop alison     # Legal assistant tasks
 # Payment Plans
 uv run python agent.py plans sync       # Sync from MyCase
 uv run python agent.py plans compliance # Compliance report
+
+# NOIW Pipeline (Notice of Intent to Withdraw)
+uv run python agent.py plans noiw-pipeline            # Show NOIW pipeline with summary
+uv run python agent.py plans noiw-pipeline --limit 20 # Limit results
+uv run python agent.py plans noiw-pipeline --export   # Export to CSV
+uv run python agent.py plans noiw-sync                # Sync pipeline to tracking table
+uv run python agent.py plans noiw-status              # Show workflow status summary
+uv run python agent.py plans noiw-list pending        # List cases by status
+uv run python agent.py plans noiw-update <case> <inv> <status>  # Update case status
 
 # Quality
 uv run python agent.py quality summary  # Quality audit
@@ -151,8 +164,14 @@ uv run python agent.py promises stats            # Promise-keeping statistics
 uv run python agent.py notify status             # Show notification config status
 uv run python agent.py notify test-slack         # Test Slack webhook
 uv run python agent.py notify test-email <addr>  # Test email
-uv run python agent.py notify send-report <type> # Send report to Slack (daily_ar, intake_weekly, overdue_tasks)
+uv run python agent.py notify send-report <type> # Send report to Slack
+  # Report types: daily_ar, intake_weekly, overdue_tasks, noiw_daily, noiw_critical, noiw_workflow
 uv run python agent.py notify log                # View notification history
+
+# NOIW Notifications (quick access)
+uv run python agent.py plans noiw-notify daily    # Send daily NOIW summary to Slack
+uv run python agent.py plans noiw-notify critical # Send critical cases alert
+uv run python agent.py plans noiw-notify workflow # Send workflow status update
 
 # Trend Analysis
 uv run python agent.py trends record             # Record today's KPI snapshot
@@ -160,6 +179,17 @@ uv run python agent.py trends dashboard          # Show trends dashboard with sp
 uv run python agent.py trends report             # Generate trend analysis report
 uv run python agent.py trends analyze <metric>   # Analyze specific metric trend
 uv run python agent.py trends compare <metric>   # Week-over-week or month-over-month comparison
+
+# Case Phases (integrated into agent CLI)
+uv run python agent.py phases init           # Initialize phases, mappings, and workflows
+uv run python agent.py phases list           # List all 7 universal phases
+uv run python agent.py phases mappings       # List MyCase stage → phase mappings
+uv run python agent.py phases workflows      # List case-type specific workflows
+uv run python agent.py phases sync           # Sync case phases from cache
+uv run python agent.py phases sync --stages-only  # Sync stages from MyCase API
+uv run python agent.py phases report         # Generate phase distribution report
+uv run python agent.py phases stalled        # List cases stalled in current phase
+uv run python agent.py phases case <id>      # Show phase history for a case
 ```
 
 ## Scheduled Tasks
@@ -167,10 +197,12 @@ uv run python agent.py trends compare <metric>   # Week-over-week or month-over-
 ### Daily Tasks (Weekdays)
 | Time | Task | Owner | Command |
 |------|------|-------|---------|
-| 6:00 AM | Data Sync | - | `run --sync` |
+| 6:00 AM | Data Sync | - | `sync` |
 | 7:00 AM | Payment Plan Compliance | Melissa | `plans compliance` |
+| 7:15 AM | NOIW Sync | Melissa | `plans noiw-sync` |
 | 7:30 AM | Dunning Cycle | Melissa | `collections dunning` |
 | 7:45 AM | Ops Huddle Prep | Tiffany | `tasks ops-huddle` |
+| 8:00 AM | NOIW Daily Alert | Melissa | `plans noiw-notify daily` |
 | 8:00 AM | Deadline Notifications | - | `deadlines notify` |
 | 8:00 AM | License Deadline Check | Alison | `tasks license-deadlines` |
 | 8:30 AM | Overdue Task Alerts | - | `deadlines overdue` |
@@ -183,6 +215,7 @@ uv run python agent.py trends compare <metric>   # Week-over-week or month-over-
 | Monday | 9:30 AM | Weekly Intake Report | Ty |
 | Wednesday | 9:00 AM | A/R Huddle Report | Melissa |
 | Friday | 2:00 PM | NOIW Pipeline Review | Melissa |
+| Friday | 2:30 PM | NOIW Workflow Report | Melissa |
 | Friday | 4:00 PM | Weekly Quality Summary | Tiffany |
 
 ### Monthly Tasks
@@ -219,6 +252,26 @@ Track and visualize KPI trends over time:
 - Sparkline visualizations in terminal
 - Trend direction detection (improving/declining/stable)
 - Gap-to-target analysis
+
+### Case Phase Tracking
+Universal 7-phase framework mapping MyCase stages to standardized phases:
+
+**The 7 Universal Phases:**
+| # | Phase | Short Name | Owner | Typical Duration |
+|---|-------|------------|-------|------------------|
+| 1 | Intake & Case Initiation | Intake | Intake Team | 1-3 days |
+| 2 | Discovery & Investigation | Discovery | Paralegals | 14-56 days |
+| 3 | Legal Analysis & Motion Practice | Motions | Attorneys | 21-70 days |
+| 4 | Case Strategy & Negotiation | Strategy | Attorneys | 14-42 days |
+| 5 | Trial Preparation | Trial Prep | Attorneys | 14-56 days |
+| 6 | Disposition & Sentencing | Disposition | Attorneys | 1-42 days |
+| 7 | Post-Disposition & Case Closure | Closing | Admin | 7-28 days |
+
+**Current Distribution (749 cases):**
+- Intake: 128 | Discovery: 265 | Motions: 106 | Strategy: 165
+- Trial Prep: 10 | Disposition: 17 | Closing: 58
+
+**Case-Type Workflows:** Municipal, DWI/PFR, Expungement, License Reinstatement
 
 ## Configuration
 
@@ -270,3 +323,5 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 10. Fixed Firm Tasks Overview widget: removed misleading 0% quality score, added balanced metrics
 11. Added attorney productivity dashboard with invoice aging buckets (60-180 DPD, 180+ DPD)
 12. Added year-based billing columns to attorney productivity page
+13. Added case phase tracking module (`case_phases.py`) with 7-phase universal framework
+14. Mapped 30 MyCase stages to universal phases (749 cases tracked)

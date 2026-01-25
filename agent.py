@@ -39,6 +39,10 @@ from payment_plans import PaymentPlanManager
 from intake_automation import IntakeManager
 from task_sla import TaskSLAManager
 from case_quality import CaseQualityManager
+from case_phases import (
+    get_phase_db, get_phase_manager, CasePhaseManager,
+    DEFAULT_PHASES, DEFAULT_STAGE_MAPPINGS, DEFAULT_WORKFLOWS
+)
 
 
 console = Console()
@@ -893,33 +897,279 @@ def plans_compliance():
 
 
 @plans.command("noiw-pipeline")
-def plans_noiw():
+@click.option("--min-days", default=30, help="Minimum days overdue")
+@click.option("--min-balance", default=0, type=float, help="Minimum balance due")
+@click.option("--limit", default=50, help="Max cases to show")
+@click.option("--include-closed", is_flag=True, help="Include closed cases")
+@click.option("--export", is_flag=True, help="Export to CSV file")
+def plans_noiw(min_days: int, min_balance: float, limit: int, include_closed: bool, export: bool):
     """Show NOIW (Notice of Intent to Withdraw) pipeline."""
     manager = PaymentPlanManager()
-    pipeline = manager.get_noiw_pipeline()
+    pipeline = manager.get_noiw_pipeline(
+        min_days=min_days,
+        open_cases_only=not include_closed
+    )
+
+    # Filter by minimum balance
+    if min_balance > 0:
+        pipeline = [p for p in pipeline if p['balance_due'] >= min_balance]
 
     if not pipeline:
         console.print("[green]No cases in NOIW pipeline[/green]")
         return
 
-    table = Table(title=f"NOIW Pipeline ({len(pipeline)} cases)")
+    # Calculate summary stats
+    total_balance = sum(p['balance_due'] for p in pipeline)
+    critical_count = sum(1 for p in pipeline if p['urgency'] == 'critical')
+    high_count = len(pipeline) - critical_count
+
+    # Age buckets
+    bucket_30_60 = sum(1 for p in pipeline if 30 <= p['days_delinquent'] < 60)
+    bucket_60_90 = sum(1 for p in pipeline if 60 <= p['days_delinquent'] < 90)
+    bucket_90_180 = sum(1 for p in pipeline if 90 <= p['days_delinquent'] < 180)
+    bucket_180_plus = sum(1 for p in pipeline if p['days_delinquent'] >= 180)
+
+    # Show summary
+    console.print(Panel.fit(
+        f"[bold]NOIW Pipeline Summary[/bold]\n\n"
+        f"Total Cases: {len(pipeline)}\n"
+        f"Total Balance: ${total_balance:,.2f}\n\n"
+        f"[red]CRITICAL (60+ days):[/red] {critical_count}\n"
+        f"[yellow]HIGH (30-59 days):[/yellow] {high_count}\n\n"
+        f"Age Distribution:\n"
+        f"  30-60 days:  {bucket_30_60}\n"
+        f"  60-90 days:  {bucket_60_90}\n"
+        f"  90-180 days: {bucket_90_180}\n"
+        f"  180+ days:   {bucket_180_plus}",
+        title="NOIW Pipeline"
+    ))
+
+    # Export to CSV if requested
+    if export:
+        import csv
+        filename = f"noiw_pipeline_{date.today().isoformat()}.csv"
+        with open(filename, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'contact_name', 'case_name', 'days_delinquent', 'balance_due',
+                'urgency', 'case_id', 'invoice_id', 'case_status'
+            ])
+            writer.writeheader()
+            writer.writerows(pipeline)
+        console.print(f"\n[green]Exported {len(pipeline)} cases to {filename}[/green]")
+        return
+
+    # Show table
+    table = Table(title=f"Top {min(limit, len(pipeline))} Cases")
     table.add_column("Urgency")
     table.add_column("Contact")
     table.add_column("Case")
     table.add_column("Days Late", justify="right")
     table.add_column("Balance", justify="right")
 
-    for item in pipeline:
+    for item in pipeline[:limit]:
         urgency = "[red]CRITICAL[/red]" if item['urgency'] == 'critical' else "[yellow]HIGH[/yellow]"
         table.add_row(
             urgency,
             item['contact_name'][:20],
-            (item['case_name'] or 'N/A')[:25],
+            (item['case_name'] or 'N/A')[:30],
             str(item['days_delinquent']),
             f"${item['balance_due']:,.2f}"
         )
 
     console.print(table)
+
+    if len(pipeline) > limit:
+        console.print(f"\n[dim]Showing {limit} of {len(pipeline)} cases. Use --limit to show more.[/dim]")
+
+
+@plans.command("noiw-sync")
+def plans_noiw_sync():
+    """Sync NOIW tracking from the pipeline."""
+    manager = PaymentPlanManager()
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Syncing NOIW tracking...", total=None)
+        result = manager.sync_noiw_from_pipeline()
+
+    console.print(Panel.fit(
+        f"[bold]NOIW Sync Complete[/bold]\n\n"
+        f"Pipeline cases: {result['pipeline_count']}\n"
+        f"New tracking entries: {result['new_entries']}\n"
+        f"Updated entries: {result['updated']}",
+        title="NOIW Sync"
+    ))
+
+
+@plans.command("noiw-status")
+def plans_noiw_status():
+    """Show NOIW workflow status summary."""
+    manager = PaymentPlanManager()
+    summary = manager.get_noiw_workflow_summary()
+
+    if summary['total_tracked'] == 0:
+        console.print("[yellow]No NOIW cases being tracked. Run 'plans noiw-sync' first.[/yellow]")
+        return
+
+    console.print(Panel.fit(
+        f"[bold]NOIW Workflow Summary[/bold]\n\n"
+        f"Total Cases Tracked: {summary['total_tracked']}\n"
+        f"Total Balance: ${summary['total_balance']:,.2f}",
+        title="NOIW Tracking"
+    ))
+
+    table = Table(title="Cases by Status")
+    table.add_column("Status")
+    table.add_column("Count", justify="right")
+    table.add_column("Balance", justify="right")
+
+    status_colors = {
+        'pending': 'yellow',
+        'warning_sent': 'cyan',
+        'final_notice': 'magenta',
+        'attorney_review': 'red',
+        'on_hold': 'dim',
+        'payment_arranged': 'green',
+        'withdrawn': 'red',
+        'resolved': 'green',
+    }
+
+    for status, data in summary['by_status'].items():
+        if data['count'] > 0:
+            color = status_colors.get(status, 'white')
+            table.add_row(
+                f"[{color}]{status.replace('_', ' ').title()}[/{color}]",
+                str(data['count']),
+                f"${data['total_balance']:,.2f}"
+            )
+
+    console.print(table)
+
+
+@plans.command("noiw-update")
+@click.argument("case_id", type=int)
+@click.argument("invoice_id", type=int)
+@click.argument("status", type=click.Choice([
+    'warning_sent', 'final_notice', 'attorney_review',
+    'on_hold', 'payment_arranged', 'withdrawn', 'resolved'
+]))
+@click.option("--notes", help="Add notes to the update")
+@click.option("--assigned-to", help="Assign to staff member")
+def plans_noiw_update(case_id: int, invoice_id: int, status: str, notes: str, assigned_to: str):
+    """Update NOIW status for a case."""
+    manager = PaymentPlanManager()
+
+    # Check if tracking exists
+    existing = manager.get_noiw_status(case_id, invoice_id)
+    if not existing:
+        console.print(f"[red]No NOIW tracking found for case {case_id}, invoice {invoice_id}[/red]")
+        console.print("[dim]Run 'plans noiw-sync' first to create tracking entries.[/dim]")
+        return
+
+    success = manager.update_noiw_status(
+        case_id=case_id,
+        invoice_id=invoice_id,
+        new_status=status,
+        notes=notes,
+        assigned_to=assigned_to
+    )
+
+    if success:
+        console.print(f"[green]Updated NOIW status to '{status}' for case {case_id}[/green]")
+        if notes:
+            console.print(f"[dim]Notes: {notes}[/dim]")
+    else:
+        console.print("[red]Failed to update NOIW status[/red]")
+
+
+@plans.command("noiw-list")
+@click.argument("status", type=click.Choice([
+    'pending', 'warning_sent', 'final_notice', 'attorney_review',
+    'on_hold', 'payment_arranged', 'withdrawn', 'resolved'
+]))
+@click.option("--limit", default=25, help="Max cases to show")
+def plans_noiw_list(status: str, limit: int):
+    """List NOIW cases by status."""
+    manager = PaymentPlanManager()
+    cases = manager.get_noiw_cases_by_status(status)
+
+    if not cases:
+        console.print(f"[yellow]No cases with status '{status}'[/yellow]")
+        return
+
+    table = Table(title=f"NOIW Cases - {status.replace('_', ' ').title()} ({len(cases)})")
+    table.add_column("Case ID")
+    table.add_column("Contact")
+    table.add_column("Days Late", justify="right")
+    table.add_column("Balance", justify="right")
+    table.add_column("Assigned To")
+
+    for case in cases[:limit]:
+        table.add_row(
+            str(case['case_id']),
+            (case['contact_name'] or 'Unknown')[:20],
+            str(case['days_delinquent']),
+            f"${case['balance_due']:,.2f}",
+            case['assigned_to'] or '-'
+        )
+
+    console.print(table)
+
+    if len(cases) > limit:
+        console.print(f"\n[dim]Showing {limit} of {len(cases)} cases.[/dim]")
+
+
+@plans.command("noiw-notify")
+@click.argument("report_type", type=click.Choice(['daily', 'critical', 'workflow']))
+@click.option("--dry-run", is_flag=True, help="Preview without sending")
+def plans_noiw_notify(report_type: str, dry_run: bool):
+    """Send NOIW notification to Slack."""
+    from notifications import NotificationManager
+
+    manager = PaymentPlanManager()
+    notif_mgr = NotificationManager()
+
+    # Get NOIW data
+    noiw_data = manager.get_noiw_notification_data()
+
+    if report_type == 'daily':
+        summary = noiw_data['summary']
+        report_name = 'noiw_daily'
+        details = None
+    elif report_type == 'critical':
+        summary = {
+            "case_count": len(noiw_data['critical_cases']),
+            "total_balance": sum(c['balance_due'] for c in noiw_data['critical_cases']),
+        }
+        details = noiw_data['critical_cases']
+        report_name = 'noiw_critical'
+    else:  # workflow
+        summary = noiw_data['workflow_status']
+        details = None
+        report_name = 'noiw_workflow'
+
+    # Show preview
+    console.print(Panel.fit(
+        f"[bold]NOIW Notification Preview[/bold]\n\n"
+        f"Report Type: {report_type}\n"
+        f"Cases: {summary.get('total_cases', summary.get('case_count', summary.get('total_tracked', 0)))}\n"
+        f"Balance: ${summary.get('total_balance', 0):,.2f}",
+        title="Preview"
+    ))
+
+    if dry_run:
+        console.print("[yellow]DRY RUN - notification not sent[/yellow]")
+        return
+
+    success = notif_mgr.send_slack_report(report_name, summary, details)
+
+    if success:
+        console.print(f"[green]NOIW {report_type} notification sent to Slack[/green]")
+    else:
+        console.print("[red]Failed to send notification[/red]")
 
 
 @plans.command("holds")
@@ -1969,12 +2219,16 @@ def notify_test_email(to_email: str, subject: str):
 
 
 @notify.command("send-report")
-@click.argument("report_type", type=click.Choice(["daily_ar", "intake_weekly", "overdue_tasks"]))
+@click.argument("report_type", type=click.Choice([
+    "daily_ar", "intake_weekly", "overdue_tasks",
+    "noiw_daily", "noiw_critical", "noiw_workflow"
+]))
 def notify_send_report(report_type: str):
     """Send a report to Slack."""
     from notifications import NotificationManager
 
     manager = NotificationManager()
+    details = None
 
     # Get current data for the report
     if report_type == "daily_ar":
@@ -1989,6 +2243,7 @@ def notify_send_report(report_type: str):
             "noiw_count": kpis.get("noiw_pipeline", 0),
             "delinquent": kpis.get("delinquent_plans", 0),
         }
+
     elif report_type == "intake_weekly":
         from intake_automation import IntakeManager
         intake_mgr = IntakeManager()
@@ -2000,7 +2255,8 @@ def notify_send_report(report_type: str):
             "dwi_count": metrics.get("dwi_count", 0),
             "traffic_count": metrics.get("traffic_count", 0),
         }
-    else:
+
+    elif report_type == "overdue_tasks":
         from task_sla import TaskSLAManager
         task_mgr = TaskSLAManager()
         overdue = task_mgr.get_overdue_tasks()
@@ -2016,7 +2272,23 @@ def notify_send_report(report_type: str):
         for name, count in by_assignee.items():
             details.append({"assignee": name, "count": count})
 
-    success = manager.send_slack_report(report_type, summary)
+    elif report_type in ["noiw_daily", "noiw_critical", "noiw_workflow"]:
+        # NOIW reports
+        plans_mgr = PaymentPlanManager()
+        noiw_data = plans_mgr.get_noiw_notification_data()
+
+        if report_type == "noiw_daily":
+            summary = noiw_data['summary']
+        elif report_type == "noiw_critical":
+            summary = {
+                "case_count": len(noiw_data['critical_cases']),
+                "total_balance": sum(c['balance_due'] for c in noiw_data['critical_cases']),
+            }
+            details = noiw_data['critical_cases']
+        else:  # noiw_workflow
+            summary = noiw_data['workflow_status']
+
+    success = manager.send_slack_report(report_type, summary, details)
 
     if success:
         console.print(f"[green]{report_type} report sent to Slack[/green]")
@@ -2696,6 +2968,290 @@ def users_password(username: str, password: str):
         console.print(f"[green]Password updated for '{username}'[/green]")
     else:
         console.print(f"[red]User '{username}' not found[/red]")
+
+
+# ============================================================================
+# Case Phases Commands
+# ============================================================================
+
+@cli.group()
+def phases():
+    """Case phase tracking and analytics."""
+    pass
+
+
+@phases.command("init")
+def phases_init():
+    """Initialize default phases, mappings, and workflows."""
+    db = get_phase_db()
+    manager = CasePhaseManager(db)
+    result = manager.initialize()
+
+    console.print(Panel.fit(
+        f"[bold]Initialization Complete[/bold]\n\n"
+        f"Phases added: {result['phases_added']}\n"
+        f"Stage mappings added: {result['mappings_added']}\n"
+        f"Workflows added: {result['workflows_added']}",
+        title="Case Phases"
+    ))
+
+
+@phases.command("list")
+def phases_list():
+    """List all 7 universal phases."""
+    db = get_phase_db()
+    phases_data = db.get_phases()
+
+    if not phases_data:
+        console.print("[yellow]No phases configured. Run 'phases init' first.[/yellow]")
+        return
+
+    table = Table(title="7 Universal Case Phases")
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("Phase", style="bold")
+    table.add_column("Short Name")
+    table.add_column("Owner")
+    table.add_column("Duration", justify="center")
+    table.add_column("Terminal")
+
+    for p in phases_data:
+        terminal = "[dim]Yes[/dim]" if p.is_terminal else ""
+        duration = f"{p.typical_duration_min_days}-{p.typical_duration_max_days}d"
+        table.add_row(
+            str(p.display_order),
+            p.name,
+            p.short_name,
+            p.primary_responsibility,
+            duration,
+            terminal
+        )
+
+    console.print(table)
+
+
+@phases.command("mappings")
+def phases_mappings():
+    """List MyCase stage-to-phase mappings."""
+    db = get_phase_db()
+    mappings = db.get_stage_mappings()
+
+    if not mappings:
+        console.print("[yellow]No mappings configured. Run 'phases init' first.[/yellow]")
+        return
+
+    table = Table(title="Stage → Phase Mappings")
+    table.add_column("MyCase Stage", style="cyan")
+    table.add_column("Phase Code")
+    table.add_column("Phase Name")
+
+    for m in mappings:
+        table.add_row(
+            m['mycase_stage_name'],
+            m['phase_code'],
+            m.get('phase_short_name') or m.get('phase_name', '')
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]Total mappings: {len(mappings)}[/dim]")
+
+
+@phases.command("workflows")
+def phases_workflows():
+    """List case-type specific workflows."""
+    db = get_phase_db()
+    workflows = db.get_workflows()
+
+    if not workflows:
+        console.print("[yellow]No workflows configured. Run 'phases init' first.[/yellow]")
+        return
+
+    for w in workflows:
+        console.print(Panel.fit(
+            f"[bold]{w.name}[/bold] [{w.code}]\n\n"
+            f"Applies to: {', '.join(w.case_type_patterns)}\n"
+            f"{w.description}\n\n"
+            f"[bold]Stages:[/bold]\n" +
+            "\n".join([f"  {s['order']}. {s['name']}" for s in w.stages]),
+            title=f"Workflow: {w.code}"
+        ))
+
+
+@phases.command("sync")
+@click.option("--stages-only", is_flag=True, help="Only sync stage definitions from MyCase")
+def phases_sync(stages_only: bool):
+    """Sync case phases from MyCase cache."""
+    from cache import get_cache
+
+    db = get_phase_db()
+    cache = get_cache()
+    api_client = get_client()
+    manager = CasePhaseManager(db, cache, api_client)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        if stages_only:
+            task = progress.add_task("Syncing stages from MyCase API...", total=None)
+            count = manager.sync_stages_from_mycase()
+            console.print(f"\n[green]Synced {count} stages from MyCase[/green]")
+            return
+
+        task = progress.add_task("Syncing case phases...", total=None)
+        result = manager.sync_case_phases()
+
+    console.print(Panel.fit(
+        f"[bold]Sync Complete[/bold]\n\n"
+        f"Cases processed: {result['cases_processed']}\n"
+        f"New phase entries: {result['new_entries']}\n"
+        f"Phase transitions: {result['updated']}",
+        title="Phase Sync"
+    ))
+
+    if result['unmapped_stages']:
+        console.print(f"\n[yellow]Unmapped stages ({len(result['unmapped_stages'])}):[/yellow]")
+        unique_stages = set(s['stage_name'] for s in result['unmapped_stages'])
+        for stage in sorted(unique_stages)[:10]:
+            console.print(f"  • {stage}")
+        if len(unique_stages) > 10:
+            console.print(f"  ... and {len(unique_stages) - 10} more")
+
+
+@phases.command("report")
+@click.option("--json-output", is_flag=True, help="Output as JSON")
+def phases_report(json_output: bool):
+    """Generate phase distribution report."""
+    from cache import get_cache
+
+    db = get_phase_db()
+    cache = get_cache()
+    manager = CasePhaseManager(db, cache)
+
+    # First sync to get current data
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Syncing and generating report...", total=None)
+        manager.sync_case_phases()
+        report = manager.get_phase_report()
+
+    if json_output:
+        console.print(json.dumps(report, indent=2, default=str))
+        return
+
+    console.print(Panel.fit(
+        f"[bold]Phase Distribution Report[/bold]\n\n"
+        f"Total Active Cases: {report['total_cases']}\n"
+        f"Stalled Cases (>30 days): {report['stalled_cases']}",
+        title="Summary"
+    ))
+
+    # Phase distribution table
+    table = Table(title="Cases by Phase")
+    table.add_column("Phase", style="bold")
+    table.add_column("Cases", justify="right")
+    table.add_column("Avg Days", justify="right")
+    table.add_column("Typical", justify="center")
+    table.add_column("Status")
+
+    for p in report['phases']:
+        if p['current_cases'] == 0:
+            continue
+
+        typical = f"{p['typical_min_days']}-{p['typical_max_days']}d"
+
+        # Determine status based on avg days vs typical max
+        if p['avg_days_in_phase'] and p['avg_days_in_phase'] > p['typical_max_days']:
+            status = "[red]⚠ Over typical[/red]"
+        elif p['avg_days_in_phase'] and p['avg_days_in_phase'] > p['typical_max_days'] * 0.8:
+            status = "[yellow]Near limit[/yellow]"
+        else:
+            status = "[green]On track[/green]"
+
+        table.add_row(
+            p['short_name'],
+            str(p['current_cases']),
+            f"{p['avg_days_in_phase']:.0f}d" if p['avg_days_in_phase'] else "-",
+            typical,
+            status
+        )
+
+    console.print(table)
+
+
+@phases.command("stalled")
+@click.option("--days", default=30, help="Threshold days to consider stalled")
+@click.option("--limit", default=20, help="Max cases to show")
+def phases_stalled(days: int, limit: int):
+    """List cases stalled in their current phase."""
+    db = get_phase_db()
+    stalled = db.get_stalled_cases(days)
+
+    if not stalled:
+        console.print(f"[green]No cases stalled more than {days} days![/green]")
+        return
+
+    table = Table(title=f"Stalled Cases (>{days} days in phase)")
+    table.add_column("Days", justify="right", style="red")
+    table.add_column("Case")
+    table.add_column("Phase")
+    table.add_column("Stage")
+    table.add_column("Typical Max", justify="right")
+
+    for case in stalled[:limit]:
+        days_in = int(case['days_in_phase']) if case['days_in_phase'] else 0
+        typical_max = case.get('typical_duration_max_days') or '-'
+        table.add_row(
+            str(days_in),
+            (case['case_name'] or f"Case {case['case_id']}")[:30],
+            case['phase_code'],
+            (case['mycase_stage_name'] or '-')[:25],
+            str(typical_max) + 'd' if typical_max != '-' else '-'
+        )
+
+    console.print(table)
+    if len(stalled) > limit:
+        console.print(f"\n[dim]Showing {limit} of {len(stalled)} stalled cases[/dim]")
+
+
+@phases.command("case")
+@click.argument("case_id", type=int)
+def phases_case(case_id: int):
+    """Show phase history for a specific case."""
+    db = get_phase_db()
+    history = db.get_case_phase_history(case_id)
+
+    if not history:
+        console.print(f"[yellow]No phase history for case {case_id}[/yellow]")
+        return
+
+    case_name = history[0].get('case_name') or f"Case {case_id}"
+    console.print(f"\n[bold]Phase History: {case_name}[/bold]\n")
+
+    table = Table()
+    table.add_column("Phase")
+    table.add_column("Stage")
+    table.add_column("Entered")
+    table.add_column("Exited")
+    table.add_column("Duration", justify="right")
+
+    for h in history:
+        entered = h['entered_at'][:10] if h['entered_at'] else '-'
+        exited = h['exited_at'][:10] if h['exited_at'] else '[dim]current[/dim]'
+        duration = f"{h['duration_days']:.0f}d" if h['duration_days'] else '-'
+
+        table.add_row(
+            h['phase_name'] or h['phase_code'],
+            h['mycase_stage_name'] or '-',
+            entered,
+            exited,
+            duration
+        )
+
+    console.print(table)
 
 
 # ============================================================================

@@ -6,43 +6,304 @@
 <h1>NOIW Pipeline</h1>
 <p class="page-description">Notice of Intent to Withdraw - cases with significant delinquency requiring action.</p>
 
-{% if pipeline %}
-<div class="stats-grid stats-small">
+{% if summary %}
+<!-- Summary Stats -->
+<div class="stats-grid">
     <div class="stat-card">
-        <div class="stat-value">{{ pipeline|length }}</div>
-        <div class="stat-label">Cases in Pipeline</div>
+        <div class="stat-value">{{ summary.total_active }}</div>
+        <div class="stat-label">Active Cases</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">${{ "{:,.0f}".format(pipeline|sum(attribute='balance_due')) }}</div>
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_balance) }}</div>
         <div class="stat-label">Total Balance</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ summary.bucket_180_plus }}</div>
+        <div class="stat-label">180+ Days (Critical)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.bucket_90_180 }}</div>
+        <div class="stat-label">90-180 Days</div>
     </div>
 </div>
 
+<!-- Workflow Status -->
+<div class="section-header">
+    <h2>Workflow Status</h2>
+</div>
+<div class="stats-grid stats-small">
+    {% for status, data in summary.by_status.items() %}
+    <a href="/noiw?status={{ status }}" class="stat-card clickable {% if current_filter == status %}active{% endif %}">
+        <div class="stat-value">{{ data.count }}</div>
+        <div class="stat-label">{{ status.replace('_', ' ').title() }}</div>
+        <div class="stat-subtext">${{ "{:,.0f}".format(data.total_balance) }}</div>
+    </a>
+    {% endfor %}
+</div>
+
+<!-- Age Distribution -->
+<div class="section-header">
+    <h2>Age Distribution</h2>
+</div>
+<div class="age-buckets">
+    <div class="age-bucket">
+        <div class="bucket-bar" style="width: {{ (summary.bucket_30_60 / (summary.total_active or 1) * 100)|round }}%"></div>
+        <span class="bucket-label">30-60 days</span>
+        <span class="bucket-count">{{ summary.bucket_30_60 }}</span>
+    </div>
+    <div class="age-bucket">
+        <div class="bucket-bar warning" style="width: {{ (summary.bucket_60_90 / (summary.total_active or 1) * 100)|round }}%"></div>
+        <span class="bucket-label">60-90 days</span>
+        <span class="bucket-count">{{ summary.bucket_60_90 }}</span>
+    </div>
+    <div class="age-bucket">
+        <div class="bucket-bar danger" style="width: {{ (summary.bucket_90_180 / (summary.total_active or 1) * 100)|round }}%"></div>
+        <span class="bucket-label">90-180 days</span>
+        <span class="bucket-count">{{ summary.bucket_90_180 }}</span>
+    </div>
+    <div class="age-bucket">
+        <div class="bucket-bar critical" style="width: {{ (summary.bucket_180_plus / (summary.total_active or 1) * 100)|round }}%"></div>
+        <span class="bucket-label">180+ days</span>
+        <span class="bucket-count">{{ summary.bucket_180_plus }}</span>
+    </div>
+</div>
+{% endif %}
+
+<!-- Case List -->
+<div class="section-header">
+    <h2>
+        {% if current_filter %}
+            {{ current_filter.replace('_', ' ').title() }} Cases
+            <a href="/noiw" class="clear-filter">(clear filter)</a>
+        {% else %}
+            All Active Cases
+        {% endif %}
+    </h2>
+</div>
+
+{% if pipeline %}
 <table class="data-table">
     <thead>
         <tr>
-            <th>Case</th>
             <th>Client</th>
-            <th>Balance Due</th>
-            <th>Days Delinquent</th>
-            <th>Initiated</th>
+            <th>Case</th>
+            <th>Balance</th>
+            <th>Days</th>
+            <th>Status</th>
+            <th>Assigned</th>
+            <th>Warning Sent</th>
         </tr>
     </thead>
     <tbody>
         {% for case in pipeline %}
-        <tr class="{% if case.days_delinquent > 60 %}row-danger{% elif case.days_delinquent > 30 %}row-warning{% endif %}">
-            <td>{{ case.case_name or case.case_id }}</td>
-            <td>{{ case.contact_name or 'N/A' }}</td>
-            <td>${{ "{:,.0f}".format(case.balance_due or 0) }}</td>
-            <td>{{ case.days_delinquent or 0 }} days</td>
-            <td>{{ case.initiated_date or 'N/A' }}</td>
+        <tr class="{% if case.days_delinquent >= 180 %}row-critical{% elif case.days_delinquent >= 90 %}row-danger{% elif case.days_delinquent >= 60 %}row-warning{% endif %}">
+            <td>{{ case.contact_name or 'Unknown' }}</td>
+            <td class="case-name" title="{{ case.case_name or '' }}">
+                {{ (case.case_name or 'N/A')[:35] }}{% if case.case_name and case.case_name|length > 35 %}...{% endif %}
+            </td>
+            <td class="text-right">${{ "{:,.0f}".format(case.balance_due or 0) }}</td>
+            <td class="text-center {% if case.days_delinquent >= 180 %}text-critical{% elif case.days_delinquent >= 90 %}text-danger{% elif case.days_delinquent >= 60 %}text-warning{% endif %}">
+                {{ case.days_delinquent or 0 }}
+            </td>
+            <td>
+                <span class="status-badge status-{{ case.status or 'pending' }}">
+                    {{ (case.status or 'pending').replace('_', ' ').title() }}
+                </span>
+            </td>
+            <td>{{ case.assigned_to or '-' }}</td>
+            <td>{{ case.warning_sent_date or '-' }}</td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+
+<div class="table-footer">
+    <span>Showing {{ pipeline|length }} cases</span>
+</div>
 {% else %}
 <div class="empty-state">
-    <p>No cases in NOIW pipeline.</p>
+    <p>
+        {% if current_filter %}
+            No cases with status "{{ current_filter }}".
+        {% else %}
+            No cases in NOIW pipeline. Run <code>plans noiw-sync</code> to populate.
+        {% endif %}
+    </p>
 </div>
 {% endif %}
+
+<style>
+/* NOIW-specific styles */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stats-small {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.stat-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+
+.stat-card.clickable {
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+
+.stat-card.clickable:hover {
+    border-color: var(--primary-color, #0366d6);
+    transform: translateY(-2px);
+}
+
+.stat-card.active {
+    border-color: var(--primary-color, #0366d6);
+    background: var(--primary-light, #f0f7ff);
+}
+
+.stat-card.stat-warning {
+    border-left: 4px solid #f66a0a;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-top: 0.25rem;
+}
+
+.stat-subtext {
+    font-size: 0.75rem;
+    color: var(--text-tertiary, #6a737d);
+    margin-top: 0.25rem;
+}
+
+.section-header {
+    margin: 2rem 0 1rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    padding-bottom: 0.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+.clear-filter {
+    font-size: 0.85rem;
+    font-weight: normal;
+}
+
+/* Age buckets */
+.age-buckets {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+}
+
+.age-bucket {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: var(--card-bg, #fff);
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-color, #e1e4e8);
+}
+
+.bucket-bar {
+    height: 24px;
+    background: var(--primary-color, #0366d6);
+    border-radius: 4px;
+    min-width: 4px;
+    transition: width 0.3s;
+}
+
+.bucket-bar.warning { background: #f9a825; }
+.bucket-bar.danger { background: #f66a0a; }
+.bucket-bar.critical { background: #cb2431; }
+
+.bucket-label {
+    width: 100px;
+    font-size: 0.9rem;
+}
+
+.bucket-count {
+    font-weight: 600;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.status-pending { background: #ffefc3; color: #7c5e00; }
+.status-warning_sent { background: #d4edda; color: #155724; }
+.status-final_notice { background: #fff3cd; color: #856404; }
+.status-attorney_review { background: #f8d7da; color: #721c24; }
+.status-on_hold { background: #e2e3e5; color: #383d41; }
+.status-payment_arranged { background: #d1ecf1; color: #0c5460; }
+.status-resolved { background: #c3e6cb; color: #155724; }
+.status-withdrawn { background: #f5c6cb; color: #721c24; }
+
+/* Table row colors */
+.row-warning { background-color: #fff8e1; }
+.row-danger { background-color: #ffebee; }
+.row-critical { background-color: #ffcdd2; }
+
+.text-warning { color: #f9a825; }
+.text-danger { color: #f66a0a; }
+.text-critical { color: #cb2431; font-weight: 700; }
+
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+
+.case-name {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.table-footer {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+}
+
+.empty-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--text-secondary, #586069);
+}
+
+.empty-state code {
+    background: var(--code-bg, #f6f8fa);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+</style>
 {% endblock %}
