@@ -1644,13 +1644,13 @@ class DashboardData:
 
                 # Get phase distribution from case_phases table
                 cursor.execute("""
-                    SELECT p.code, p.name, p.short_name, p.sequence,
+                    SELECT p.code, p.name, p.short_name, p.display_order as sequence,
                            COUNT(cp.case_id) as case_count
                     FROM phases p
                     LEFT JOIN case_phases cp ON p.code = cp.current_phase
                     WHERE p.firm_id IS NULL
-                    GROUP BY p.code, p.name, p.short_name, p.sequence
-                    ORDER BY p.sequence
+                    GROUP BY p.code, p.name, p.short_name, p.display_order
+                    ORDER BY p.display_order
                 """)
 
                 return [{
@@ -1810,17 +1810,17 @@ class DashboardData:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    SELECT p.code, p.name, p.short_name, p.sequence,
-                           p.expected_duration_days,
-                           AVG(cph.days_in_phase) as avg_days,
-                           MIN(cph.days_in_phase) as min_days,
-                           MAX(cph.days_in_phase) as max_days,
+                    SELECT p.code, p.name, p.short_name, p.display_order as sequence,
+                           p.typical_duration_max_days as expected_duration_days,
+                           AVG(cph.duration_days) as avg_days,
+                           MIN(cph.duration_days) as min_days,
+                           MAX(cph.duration_days) as max_days,
                            COUNT(cph.id) as transitions
                     FROM phases p
                     LEFT JOIN case_phase_history cph ON p.code = cph.phase_code
                     WHERE p.firm_id IS NULL
-                    GROUP BY p.code, p.name, p.short_name, p.sequence, p.expected_duration_days
-                    ORDER BY p.sequence
+                    GROUP BY p.code, p.name, p.short_name, p.display_order, p.typical_duration_max_days
+                    ORDER BY p.display_order
                 """)
 
                 return [{
