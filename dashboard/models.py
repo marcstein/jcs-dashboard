@@ -341,7 +341,7 @@ class DashboardData:
                            final_notice_date, created_at, updated_at
                     FROM noiw_tracking
                     WHERE status = ?
-                    ORDER BY days_delinquent DESC, balance_due DESC
+                    ORDER BY days_delinquent ASC, balance_due DESC
                 """, (status_filter,))
             else:
                 cursor.execute("""
@@ -350,7 +350,7 @@ class DashboardData:
                            final_notice_date, created_at, updated_at
                     FROM noiw_tracking
                     WHERE status NOT IN ('resolved', 'withdrawn')
-                    ORDER BY days_delinquent DESC, balance_due DESC
+                    ORDER BY days_delinquent ASC, balance_due DESC
                 """)
 
             rows = cursor.fetchall()

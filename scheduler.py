@@ -75,6 +75,14 @@ DAILY_TASKS = [
         owner="John Schleiffarth",
     ),
     ScheduledTask(
+        name="daily_collections_report",
+        description="Generate daily collections report for Melissa",
+        frequency=TaskFrequency.DAILY,
+        command="sop melissa --daily",
+        run_at=time(6, 45),  # 6:45 AM - after sync, before other tasks
+        owner="Melissa Scarlett",
+    ),
+    ScheduledTask(
         name="payment_plan_compliance",
         description="Run payment plan compliance check",
         frequency=TaskFrequency.DAILY,
