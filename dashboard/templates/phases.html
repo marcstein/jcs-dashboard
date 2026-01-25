@@ -175,13 +175,13 @@
         <tr>
             <td>{{ row.practice_area }}</td>
             <td class="text-center"><strong>{{ row.total }}</strong></td>
-            <td class="text-center">{{ row.phases.get('INTAKE', 0) or '-' }}</td>
-            <td class="text-center">{{ row.phases.get('DISCOVERY', 0) or '-' }}</td>
-            <td class="text-center">{{ row.phases.get('MOTIONS', 0) or '-' }}</td>
-            <td class="text-center">{{ row.phases.get('STRATEGY', 0) or '-' }}</td>
-            <td class="text-center">{{ row.phases.get('TRIAL_PREP', 0) or '-' }}</td>
-            <td class="text-center">{{ row.phases.get('DISPOSITION', 0) or '-' }}</td>
-            <td class="text-center">{{ row.phases.get('CLOSING', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('intake', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('discovery', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('motions', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('strategy', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('trial_prep', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('disposition', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('post_disposition', 0) or '-' }}</td>
         </tr>
         {% endfor %}
     </tbody>
