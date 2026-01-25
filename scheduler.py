@@ -122,6 +122,15 @@ DAILY_TASKS = [
         owner="Alison Ehrhard",
     ),
     ScheduledTask(
+        name="license_critical_sms",
+        description="Send SMS alerts for critical license deadlines (3 days or less)",
+        frequency=TaskFrequency.DAILY,
+        command="tasks license-notify --sms --days 3",
+        run_at=time(8, 15),  # Shortly after check
+        owner="Alison Ehrhard",
+        notify_on_failure=True,
+    ),
+    ScheduledTask(
         name="quality_audit",
         description="Run quality audit on recent cases",
         frequency=TaskFrequency.DAILY,

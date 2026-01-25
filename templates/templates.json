@@ -114,5 +114,87 @@
     ],
     "created_at": "2025-12-20T11:51:09.284842",
     "updated_at": "2025-12-20T11:51:09.284844"
+  },
+  "noiw_warning": {
+    "filename": "noiw_warning.txt",
+    "type": "noiw",
+    "description": "Initial NOIW warning letter (30 days delinquent)",
+    "variables": [
+      "client_name",
+      "case_name",
+      "invoice_number",
+      "balance_due",
+      "days_overdue"
+    ],
+    "created_at": "2026-01-25T00:00:00",
+    "updated_at": "2026-01-25T00:00:00"
+  },
+  "noiw_final_notice": {
+    "filename": "noiw_final_notice.txt",
+    "type": "noiw",
+    "description": "Final NOIW notice before attorney review",
+    "variables": [
+      "client_name",
+      "case_name",
+      "case_number",
+      "balance_due",
+      "days_overdue",
+      "previous_notices",
+      "previous_contact_dates",
+      "notice_date",
+      "final_deadline"
+    ],
+    "created_at": "2026-01-25T00:00:00",
+    "updated_at": "2026-01-25T00:00:00"
+  },
+  "payment_plan_confirmation": {
+    "filename": "payment_plan_confirmation.txt",
+    "type": "payment",
+    "description": "Confirmation of payment plan arrangement",
+    "variables": [
+      "client_name",
+      "case_name",
+      "total_balance",
+      "monthly_payment",
+      "num_payments",
+      "first_payment_date",
+      "final_payment_date",
+      "payment_schedule"
+    ],
+    "created_at": "2026-01-25T00:00:00",
+    "updated_at": "2026-01-25T00:00:00"
+  },
+  "promise_reminder": {
+    "filename": "promise_reminder.txt",
+    "type": "promise",
+    "description": "Reminder about upcoming payment promise",
+    "variables": [
+      "client_name",
+      "case_name",
+      "promised_amount",
+      "promise_date",
+      "days_until",
+      "promise_made_date",
+      "remaining_balance"
+    ],
+    "created_at": "2026-01-25T00:00:00",
+    "updated_at": "2026-01-25T00:00:00"
+  },
+  "promise_broken": {
+    "filename": "promise_broken.txt",
+    "type": "promise",
+    "description": "Follow-up for missed payment promise",
+    "variables": [
+      "client_name",
+      "case_name",
+      "promised_amount",
+      "promise_date",
+      "days_overdue",
+      "promise_made_date",
+      "total_balance",
+      "plan_status"
+    ],
+    "created_at": "2026-01-25T00:00:00",
+    "updated_at": "2026-01-25T00:00:00"
   }
 }

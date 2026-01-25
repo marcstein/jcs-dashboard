@@ -1,0 +1,46 @@
+Subject: FINAL NOTICE - Immediate Action Required - {{ case_name }}
+
+NOTICE OF INTENT TO WITHDRAW - FINAL WARNING
+
+Dear {{ client_name }},
+
+This is our FINAL NOTICE before we proceed with filing a Motion to Withdraw as your legal counsel.
+
+ACCOUNT STATUS:
+Case: {{ case_name }}
+Case Number: {{ case_number }}
+Outstanding Balance: ${{ balance_due | round(2) }}
+Days Past Due: {{ days_overdue }}
+Previous Notices Sent: {{ previous_notices }}
+
+Despite our previous communications on {{ previous_contact_dates }}, your account remains seriously delinquent. This situation prevents us from continuing to effectively represent you.
+
+CRITICAL DEADLINE:
+
+You have SEVEN (7) CALENDAR DAYS from {{ notice_date }} to:
+[ ] Pay the outstanding balance in full, OR
+[ ] Contact us to establish a payment arrangement
+
+DEADLINE: {{ final_deadline }}
+
+IF YOU DO NOT RESPOND BY THIS DEADLINE:
+
+1. We will file a Motion to Withdraw as Counsel with the Court
+2. All work on your case will cease immediately
+3. You will be responsible for finding new legal representation
+4. Your court dates and deadlines will still apply
+
+NOTE: Withdrawal from your case does NOT eliminate your financial obligation. Unpaid balances may be referred to collections.
+
+CONTACT US IMMEDIATELY:
+Phone: (816) 287-3787 (Ask for Melissa Scarlett)
+Email: billing@jcslawfirm.com
+
+Time is critical. Please contact us TODAY to discuss resolution options.
+
+Sincerely,
+
+JCS Law Firm
+(816) 287-3787
+
+cc: File

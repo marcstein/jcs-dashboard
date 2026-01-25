@@ -211,6 +211,77 @@ async def wonky_invoices(request: Request):
     })
 
 
+@router.get("/phases", response_class=HTMLResponse)
+async def phases_dashboard(request: Request, phase: str = None):
+    """Case Phases dashboard showing phase distribution and stalled cases."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    summary = data.get_phases_summary()
+    stalled = data.get_stalled_cases(threshold_days=30)
+    velocity = data.get_phase_velocity()
+    by_case_type = data.get_phase_by_case_type()
+
+    # If a specific phase is selected, get cases in that phase
+    phase_cases = []
+    if phase:
+        phase_cases = data.get_cases_in_phase(phase, limit=50)
+
+    return templates.TemplateResponse("phases.html", {
+        "request": request,
+        "summary": summary,
+        "stalled": stalled,
+        "velocity": velocity,
+        "by_case_type": by_case_type,
+        "current_phase": phase,
+        "phase_cases": phase_cases,
+        "username": request.session.get("username"),
+    })
+
+
+@router.get("/trends", response_class=HTMLResponse)
+async def trends_dashboard(request: Request, metric: str = None):
+    """Historical KPI trends dashboard."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    summary = data.get_trends_summary()
+
+    # If a specific metric is selected, get detailed comparison
+    metric_detail = None
+    metric_history = []
+    if metric:
+        metric_detail = data.get_metric_comparison(metric)
+        metric_history = data.get_trend_data(metric, days_back=30)
+
+    return templates.TemplateResponse("trends.html", {
+        "request": request,
+        "summary": summary,
+        "current_metric": metric,
+        "metric_detail": metric_detail,
+        "metric_history": metric_history,
+        "username": request.session.get("username"),
+    })
+
+
+@router.get("/promises", response_class=HTMLResponse)
+async def promises_dashboard(request: Request, status: str = None):
+    """Payment promises tracking dashboard."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    summary = data.get_promises_summary()
+    promises = data.get_promises_list(status=status)
+
+    return templates.TemplateResponse("promises.html", {
+        "request": request,
+        "summary": summary,
+        "promises": promises,
+        "current_filter": status,
+        "username": request.session.get("username"),
+    })
+
+
 @router.get("/reports", response_class=HTMLResponse)
 async def reports_list(request: Request):
     """Reports listing page."""

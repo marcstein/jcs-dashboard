@@ -1,0 +1,405 @@
+{% extends "base.html" %}
+
+{% block title %}Case Phases - MyCase{% endblock %}
+
+{% block content %}
+<h1>Case Phases</h1>
+<p class="page-description">Universal 7-phase case management framework - track case progression through standardized phases.</p>
+
+{% if summary %}
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.total_cases }}</div>
+        <div class="stat-label">Total Cases Tracked</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.phases_count }}</div>
+        <div class="stat-label">Active Phases</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ stalled|length }}</div>
+        <div class="stat-label">Stalled Cases (30+ days)</div>
+    </div>
+</div>
+
+<!-- Phase Distribution -->
+<div class="section-header">
+    <h2>Phase Distribution</h2>
+</div>
+<div class="phase-distribution">
+    {% for phase in summary.distribution %}
+    <a href="/phases?phase={{ phase.code }}" class="phase-bar-container {% if current_phase == phase.code %}active{% endif %}">
+        <div class="phase-info">
+            <span class="phase-name">{{ phase.short_name }}</span>
+            <span class="phase-count">{{ phase.case_count }}</span>
+        </div>
+        <div class="phase-bar-wrapper">
+            <div class="phase-bar phase-{{ phase.sequence }}" style="width: {{ phase.percentage }}%"></div>
+        </div>
+        <span class="phase-pct">{{ phase.percentage }}%</span>
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if current_phase and phase_cases %}
+<!-- Cases in Selected Phase -->
+<div class="section-header">
+    <h2>
+        Cases in {{ current_phase|upper }}
+        <a href="/phases" class="clear-filter">(clear filter)</a>
+    </h2>
+</div>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Case</th>
+            <th>Entered Phase</th>
+            <th>Days in Phase</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for case in phase_cases %}
+        <tr class="{% if case.days_in_phase >= 60 %}row-critical{% elif case.days_in_phase >= 30 %}row-warning{% endif %}">
+            <td class="case-name" title="{{ case.case_name or '' }}">
+                {{ (case.case_name or 'N/A')[:40] }}{% if case.case_name and case.case_name|length > 40 %}...{% endif %}
+            </td>
+            <td>{{ case.phase_entered_at or '-' }}</td>
+            <td class="text-center {% if case.days_in_phase >= 60 %}text-critical{% elif case.days_in_phase >= 30 %}text-warning{% endif %}">
+                {{ case.days_in_phase }}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<div class="table-footer">
+    <span>Showing {{ phase_cases|length }} cases</span>
+</div>
+{% endif %}
+
+{% if velocity %}
+<!-- Phase Velocity -->
+<div class="section-header">
+    <h2>Phase Velocity (Avg Days)</h2>
+</div>
+<div class="velocity-grid">
+    {% for v in velocity %}
+    <div class="velocity-card">
+        <div class="velocity-phase">{{ v.short_name }}</div>
+        <div class="velocity-stats">
+            <div class="velocity-avg">
+                {% if v.avg_days %}
+                    <span class="{% if v.expected_days and v.avg_days > v.expected_days %}text-warning{% endif %}">
+                        {{ v.avg_days }} days
+                    </span>
+                {% else %}
+                    <span class="text-muted">No data</span>
+                {% endif %}
+            </div>
+            {% if v.expected_days %}
+            <div class="velocity-expected">Target: {{ v.expected_days }} days</div>
+            {% endif %}
+        </div>
+        <div class="velocity-transitions">{{ v.transitions }} transitions</div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if stalled %}
+<!-- Stalled Cases -->
+<div class="section-header">
+    <h2>Stalled Cases (30+ days in phase)</h2>
+</div>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Case</th>
+            <th>Current Phase</th>
+            <th>Days in Phase</th>
+            <th>Entered</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for case in stalled[:20] %}
+        <tr class="{% if case.days_in_phase >= 90 %}row-critical{% elif case.days_in_phase >= 60 %}row-danger{% else %}row-warning{% endif %}">
+            <td class="case-name" title="{{ case.case_name or '' }}">
+                {{ (case.case_name or 'N/A')[:35] }}{% if case.case_name and case.case_name|length > 35 %}...{% endif %}
+            </td>
+            <td>
+                <span class="phase-badge phase-{{ case.current_phase }}">
+                    {{ case.short_name }}
+                </span>
+            </td>
+            <td class="text-center {% if case.days_in_phase >= 90 %}text-critical{% elif case.days_in_phase >= 60 %}text-danger{% else %}text-warning{% endif %}">
+                {{ case.days_in_phase }}
+            </td>
+            <td>{{ case.phase_entered_at or '-' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% if stalled|length > 20 %}
+<div class="table-footer">
+    <span>Showing 20 of {{ stalled|length }} stalled cases</span>
+</div>
+{% endif %}
+{% else %}
+<div class="empty-state">
+    <p>No cases are currently stalled. All cases are progressing within expected timelines.</p>
+</div>
+{% endif %}
+
+{% if by_case_type %}
+<!-- Phase by Case Type -->
+<div class="section-header">
+    <h2>Phase Distribution by Case Type</h2>
+</div>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Practice Area</th>
+            <th>Total</th>
+            <th>Intake</th>
+            <th>Discovery</th>
+            <th>Motions</th>
+            <th>Strategy</th>
+            <th>Trial Prep</th>
+            <th>Disposition</th>
+            <th>Closing</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in by_case_type[:10] %}
+        <tr>
+            <td>{{ row.practice_area }}</td>
+            <td class="text-center"><strong>{{ row.total }}</strong></td>
+            <td class="text-center">{{ row.phases.get('INTAKE', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('DISCOVERY', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('MOTIONS', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('STRATEGY', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('TRIAL_PREP', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('DISPOSITION', 0) or '-' }}</td>
+            <td class="text-center">{{ row.phases.get('CLOSING', 0) or '-' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<style>
+/* Phase-specific styles */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+
+.stat-card.stat-warning {
+    border-left: 4px solid #f66a0a;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-top: 0.25rem;
+}
+
+.section-header {
+    margin: 2rem 0 1rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    padding-bottom: 0.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+.clear-filter {
+    font-size: 0.85rem;
+    font-weight: normal;
+}
+
+/* Phase distribution bars */
+.phase-distribution {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+}
+
+.phase-bar-container {
+    display: grid;
+    grid-template-columns: 100px 1fr 50px;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 1rem;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 4px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+}
+
+.phase-bar-container:hover {
+    border-color: var(--primary-color, #0366d6);
+    transform: translateX(4px);
+}
+
+.phase-bar-container.active {
+    border-color: var(--primary-color, #0366d6);
+    background: var(--primary-light, #f0f7ff);
+}
+
+.phase-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.phase-name {
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.phase-count {
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.phase-bar-wrapper {
+    height: 24px;
+    background: var(--bg-secondary, #f6f8fa);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.phase-bar {
+    height: 100%;
+    border-radius: 4px;
+    min-width: 4px;
+    transition: width 0.3s;
+}
+
+.phase-1 { background: #28a745; }
+.phase-2 { background: #17a2b8; }
+.phase-3 { background: #6f42c1; }
+.phase-4 { background: #fd7e14; }
+.phase-5 { background: #dc3545; }
+.phase-6 { background: #6c757d; }
+.phase-7 { background: #20c997; }
+
+.phase-pct {
+    text-align: right;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+}
+
+/* Velocity grid */
+.velocity-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.velocity-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+
+.velocity-phase {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary, #24292e);
+}
+
+.velocity-avg {
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.velocity-expected {
+    font-size: 0.75rem;
+    color: var(--text-tertiary, #6a737d);
+    margin-top: 0.25rem;
+}
+
+.velocity-transitions {
+    font-size: 0.75rem;
+    color: var(--text-tertiary, #6a737d);
+    margin-top: 0.5rem;
+}
+
+/* Phase badges */
+.phase-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #fff;
+}
+
+.phase-INTAKE { background: #28a745; }
+.phase-DISCOVERY { background: #17a2b8; }
+.phase-MOTIONS { background: #6f42c1; }
+.phase-STRATEGY { background: #fd7e14; }
+.phase-TRIAL_PREP { background: #dc3545; }
+.phase-DISPOSITION { background: #6c757d; }
+.phase-CLOSING { background: #20c997; }
+
+/* Table row colors */
+.row-warning { background-color: #fff8e1; }
+.row-danger { background-color: #ffebee; }
+.row-critical { background-color: #ffcdd2; }
+
+.text-warning { color: #f9a825; }
+.text-danger { color: #f66a0a; }
+.text-critical { color: #cb2431; font-weight: 700; }
+.text-muted { color: var(--text-tertiary, #6a737d); }
+
+.text-center { text-align: center; }
+
+.case-name {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.table-footer {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+}
+
+.empty-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--text-secondary, #586069);
+}
+</style>
+{% endblock %}

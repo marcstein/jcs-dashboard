@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Promises - MyCase{% endblock %}
+
+{% block content %}
+<h1>Payment Promises</h1>
+<p class="page-description">Track client payment promises, monitor kept/broken rates, and identify at-risk accounts.</p>
+
+{% if summary %}
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.total_pending }}</div>
+        <div class="stat-label">Pending Promises</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ summary.due_today }}</div>
+        <div class="stat-label">Due Today</div>
+    </div>
+    <div class="stat-card stat-danger">
+        <div class="stat-value">{{ summary.overdue }}</div>
+        <div class="stat-label">Overdue</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.upcoming_7_days }}</div>
+        <div class="stat-label">Due This Week</div>
+    </div>
+</div>
+
+<!-- Promise Performance -->
+<div class="section-header">
+    <h2>Promise Performance (30 days)</h2>
+</div>
+<div class="performance-grid">
+    <div class="performance-card">
+        <div class="performance-rate {% if summary.kept_rate >= 80 %}rate-good{% elif summary.kept_rate >= 60 %}rate-warning{% else %}rate-danger{% endif %}">
+            {{ "%.0f"|format(summary.kept_rate) }}%
+        </div>
+        <div class="performance-label">Promise Kept Rate</div>
+    </div>
+    <div class="performance-stats">
+        <div class="stat-row">
+            <span class="stat-icon kept"></span>
+            <span class="stat-text">{{ summary.kept_count }} Kept</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-icon broken"></span>
+            <span class="stat-text">{{ summary.broken_count }} Broken</span>
+        </div>
+    </div>
+    <div class="performance-amounts">
+        <div class="amount-row">
+            <span class="amount-label">Total Promised:</span>
+            <span class="amount-value">${{ "{:,.0f}".format(summary.total_promised) }}</span>
+        </div>
+        <div class="amount-row">
+            <span class="amount-label">Collected:</span>
+            <span class="amount-value">${{ "{:,.0f}".format(summary.total_collected) }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Tabs -->
+<div class="section-header">
+    <h2>
+        {% if current_filter %}
+            {{ current_filter.replace('_', ' ').title() }} Promises
+            <a href="/promises" class="clear-filter">(show all)</a>
+        {% else %}
+            All Pending Promises
+        {% endif %}
+    </h2>
+</div>
+<div class="filter-tabs">
+    <a href="/promises" class="filter-tab {% if not current_filter %}active{% endif %}">All Pending</a>
+    <a href="/promises?status=due_today" class="filter-tab {% if current_filter == 'due_today' %}active{% endif %}">Due Today ({{ summary.due_today }})</a>
+    <a href="/promises?status=overdue" class="filter-tab {% if current_filter == 'overdue' %}active{% endif %}">Overdue ({{ summary.overdue }})</a>
+    <a href="/promises?status=upcoming" class="filter-tab {% if current_filter == 'upcoming' %}active{% endif %}">This Week</a>
+</div>
+
+<!-- Promises Table -->
+{% if promises %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Case</th>
+            <th>Amount</th>
+            <th>Promise Date</th>
+            <th>Days</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in promises %}
+        <tr class="{% if p.days_until < 0 %}row-danger{% elif p.days_until == 0 %}row-warning{% endif %}">
+            <td>{{ p.contact_name or 'Unknown' }}</td>
+            <td class="case-name" title="{{ p.case_name or '' }}">
+                {{ (p.case_name or 'N/A')[:30] }}{% if p.case_name and p.case_name|length > 30 %}...{% endif %}
+            </td>
+            <td class="text-right">${{ "{:,.0f}".format(p.amount) }}</td>
+            <td>{{ p.promise_date }}</td>
+            <td class="text-center {% if p.days_until < 0 %}text-danger{% elif p.days_until == 0 %}text-warning{% endif %}">
+                {% if p.days_until < 0 %}
+                    {{ abs(p.days_until) }}d overdue
+                {% elif p.days_until == 0 %}
+                    Today
+                {% else %}
+                    {{ p.days_until }}d
+                {% endif %}
+            </td>
+            <td>
+                <span class="status-badge status-{{ p.status }}">
+                    {{ p.status.title() }}
+                </span>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<div class="table-footer">
+    <span>Showing {{ promises|length }} promises</span>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>
+        {% if current_filter %}
+            No promises with status "{{ current_filter }}".
+        {% else %}
+            No pending payment promises. Use <code>uv run python agent.py promises add</code> to record promises.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+{% endif %}
+
+<style>
+/* Promise-specific styles */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+
+.stat-card.stat-warning {
+    border-left: 4px solid #f9a825;
+}
+
+.stat-card.stat-danger {
+    border-left: 4px solid #dc3545;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-top: 0.25rem;
+}
+
+.section-header {
+    margin: 2rem 0 1rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    padding-bottom: 0.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+.clear-filter {
+    font-size: 0.85rem;
+    font-weight: normal;
+}
+
+/* Performance Grid */
+.performance-grid {
+    display: grid;
+    grid-template-columns: 150px 1fr 1fr;
+    gap: 2rem;
+    padding: 1.5rem;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    margin-bottom: 2rem;
+}
+
+.performance-card {
+    text-align: center;
+}
+
+.performance-rate {
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+.rate-good { color: #28a745; }
+.rate-warning { color: #f9a825; }
+.rate-danger { color: #dc3545; }
+
+.performance-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary, #586069);
+}
+
+.performance-stats {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.75rem;
+}
+
+.stat-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.stat-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+}
+
+.stat-icon.kept { background: #28a745; }
+.stat-icon.broken { background: #dc3545; }
+
+.stat-text {
+    font-size: 1rem;
+}
+
+.performance-amounts {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.amount-row {
+    display: flex;
+    justify-content: space-between;
+}
+
+.amount-label {
+    color: var(--text-secondary, #586069);
+}
+
+.amount-value {
+    font-weight: 600;
+}
+
+/* Filter Tabs */
+.filter-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.filter-tab {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 20px;
+    text-decoration: none;
+    color: var(--text-secondary, #586069);
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.filter-tab:hover {
+    border-color: var(--primary-color, #0366d6);
+    color: var(--primary-color, #0366d6);
+}
+
+.filter-tab.active {
+    background: var(--primary-color, #0366d6);
+    border-color: var(--primary-color, #0366d6);
+    color: #fff;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.status-pending { background: #ffefc3; color: #7c5e00; }
+.status-kept { background: #d4edda; color: #155724; }
+.status-broken { background: #f8d7da; color: #721c24; }
+.status-partial { background: #fff3cd; color: #856404; }
+
+/* Table row colors */
+.row-warning { background-color: #fff8e1; }
+.row-danger { background-color: #ffebee; }
+
+.text-warning { color: #f9a825; }
+.text-danger { color: #dc3545; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+
+.case-name {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.table-footer {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+}
+
+.empty-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--text-secondary, #586069);
+}
+
+.empty-state code {
+    background: var(--code-bg, #f6f8fa);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+</style>
+{% endblock %}

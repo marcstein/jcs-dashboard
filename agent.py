@@ -1415,6 +1415,96 @@ def tasks_license(days: int):
         console.print(f"[green]No license deadlines in next {days} days[/green]")
 
 
+@tasks.command("license-notify")
+@click.option("--sms/--no-sms", default=False, help="Send SMS for critical deadlines")
+@click.option("--slack/--no-slack", default=True, help="Send Slack notification")
+@click.option("--days", default=3, help="Days threshold for critical")
+def tasks_license_notify(sms: bool, slack: bool, days: int):
+    """Send notifications for critical license deadlines (within 3 days or overdue)."""
+    from notifications import NotificationManager, NotificationPriority
+
+    manager = TaskSLAManager()
+    notifier = NotificationManager()
+
+    # Get critical deadlines (within threshold) and overdue
+    upcoming = manager.get_upcoming_license_deadlines(days_ahead=days)
+    overdue = manager.get_overdue_license_filings()
+
+    critical = [d for d in upcoming if d.is_urgent or d.days_remaining <= days]
+    all_critical = overdue + critical
+
+    if not all_critical:
+        console.print(f"[green]No critical license deadlines (within {days} days)[/green]")
+        return
+
+    console.print(f"[yellow]Found {len(all_critical)} critical license deadlines[/yellow]")
+
+    # Send Slack notification
+    if slack:
+        summary = {
+            "total": len(all_critical),
+            "overdue": len(overdue),
+            "critical": len(critical),
+            "cases": [
+                {
+                    "client": d.client_name,
+                    "type": d.filing_type,
+                    "days": d.days_remaining,
+                    "assignee": d.assignee_name,
+                }
+                for d in all_critical[:10]
+            ],
+        }
+        success = notifier.send_slack_report("license_deadline", summary)
+        if success:
+            console.print("[green]Slack notification sent[/green]")
+        else:
+            console.print("[red]Failed to send Slack notification[/red]")
+
+    # Send SMS for each critical deadline
+    if sms:
+        # Get staff phone numbers from config
+        sms_config = notifier._load_sms_config()
+        staff_numbers = sms_config.get("staff_numbers", {})
+
+        if not staff_numbers:
+            console.print("[yellow]No staff SMS numbers configured[/yellow]")
+            console.print("Add to data/notifications_config.json:")
+            console.print('  "sms": {"staff_numbers": {"Alison": "+1234567890"}}')
+            return
+
+        sent_count = 0
+        for deadline in all_critical:
+            # Find assignee's number
+            assignee = deadline.assignee_name
+            number = None
+            for name, phone in staff_numbers.items():
+                if name.lower() in assignee.lower():
+                    number = phone
+                    break
+
+            if not number:
+                console.print(f"[yellow]No phone for {assignee}[/yellow]")
+                continue
+
+            # Build message
+            if deadline.days_remaining < 0:
+                msg = f"OVERDUE: {deadline.filing_type} for {deadline.client_name} was due {abs(deadline.days_remaining)} days ago!"
+            else:
+                msg = f"URGENT: {deadline.filing_type} for {deadline.client_name} due in {deadline.days_remaining} days ({deadline.deadline_date})"
+
+            success = notifier.send_sms(
+                to_number=number,
+                message=msg,
+                priority=NotificationPriority.CRITICAL
+            )
+            if success:
+                sent_count += 1
+                console.print(f"[green]SMS sent to {assignee}[/green]")
+
+        console.print(f"[bold]Sent {sent_count} SMS notifications[/bold]")
+
+
 @tasks.command("ops-huddle")
 def tasks_ops_huddle():
     """Generate paralegal ops huddle report (Tiffany SOP)."""

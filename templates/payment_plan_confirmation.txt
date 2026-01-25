@@ -1,0 +1,42 @@
+Subject: Payment Plan Confirmation - {{ case_name }}
+
+Dear {{ client_name }},
+
+Thank you for contacting us regarding your account. This letter confirms the payment arrangement we discussed.
+
+PAYMENT PLAN DETAILS:
+
+Case: {{ case_name }}
+Total Balance: ${{ total_balance | round(2) }}
+Monthly Payment: ${{ monthly_payment | round(2) }}
+Number of Payments: {{ num_payments }}
+First Payment Due: {{ first_payment_date }}
+Final Payment Due: {{ final_payment_date }}
+
+PAYMENT SCHEDULE:
+{% for payment in payment_schedule %}
+{{ payment.date }}: ${{ payment.amount | round(2) }}
+{% endfor %}
+
+PAYMENT METHODS:
+- MyCase Client Portal (recommended - automatic payments available)
+- Phone: (816) 287-3787
+- Check payable to "JCS Law Firm"
+
+IMPORTANT TERMS:
+1. Payments must be received by the due date each month
+2. A missed or late payment will result in the plan being voided
+3. If the plan is voided, the full remaining balance becomes due immediately
+4. We may resume NOIW proceedings if payments are not made as agreed
+
+If you anticipate any difficulty making a scheduled payment, please contact us BEFORE the due date so we can discuss options.
+
+We appreciate your commitment to resolving this matter and look forward to continuing to represent you.
+
+Sincerely,
+
+Melissa Scarlett
+AR Specialist
+JCS Law Firm
+(816) 287-3787
+melissa@jcslawfirm.com

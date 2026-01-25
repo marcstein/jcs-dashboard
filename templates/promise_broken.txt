@@ -1,0 +1,39 @@
+Subject: URGENT: Missed Payment - Action Required
+
+Dear {{ client_name }},
+
+We are contacting you regarding a missed payment on your account.
+
+MISSED PAYMENT DETAILS:
+Case: {{ case_name }}
+Promised Amount: ${{ promised_amount | round(2) }}
+Promise Date: {{ promise_date }}
+Days Overdue: {{ days_overdue }}
+
+During our conversation on {{ promise_made_date }}, you committed to making this payment. Unfortunately, we have not received payment and the due date has passed.
+
+CURRENT ACCOUNT STATUS:
+Total Balance Due: ${{ total_balance | round(2) }}
+Payment Plan Status: {{ plan_status }}
+
+THIS IS IMPORTANT:
+- Missing promised payments jeopardizes any existing payment arrangements
+- Your account may be escalated to our NOIW process
+- We may need to file a Motion to Withdraw from your case
+
+WHAT YOU NEED TO DO:
+Please contact Melissa Scarlett at (816) 287-3787 TODAY to:
+1. Make the missed payment, AND
+2. Confirm your commitment to future payments
+
+If we do not hear from you within 48 HOURS, your payment arrangement may be voided and the full balance will become due immediately.
+
+We want to continue representing you, but we need your cooperation.
+
+Sincerely,
+
+Melissa Scarlett
+AR Specialist
+JCS Law Firm
+(816) 287-3787
+melissa@jcslawfirm.com

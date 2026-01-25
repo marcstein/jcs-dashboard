@@ -1,0 +1,30 @@
+Subject: Payment Reminder - Due {{ promise_date }}
+
+Dear {{ client_name }},
+
+This is a friendly reminder about your upcoming payment.
+
+PAYMENT DETAILS:
+Case: {{ case_name }}
+Promised Amount: ${{ promised_amount | round(2) }}
+Due Date: {{ promise_date }}
+Days Until Due: {{ days_until }}
+
+During our conversation on {{ promise_made_date }}, you agreed to make this payment by {{ promise_date }}. We wanted to send a quick reminder as the date approaches.
+
+PAYMENT OPTIONS:
+- MyCase Client Portal: [Portal Link]
+- Phone: (816) 287-3787 (credit card)
+- Check: Mail to JCS Law Firm
+
+Your remaining balance after this payment: ${{ remaining_balance | round(2) }}
+
+If your circumstances have changed and you need to discuss modified arrangements, please contact us BEFORE the due date at (816) 287-3787.
+
+Thank you for your attention to this matter.
+
+Best regards,
+
+JCS Law Firm
+Billing Department
+(816) 287-3787

@@ -344,14 +344,32 @@ class NotificationManager:
                     })
 
         elif report_type == "license_deadline":
-            title = f":rotating_light: License Deadline Alert"
+            title = f":rotating_light: Critical License Deadline Alert"
             color = "danger"
 
-            message = summary.get("message", "License filing deadline approaching")
-            fields = [
-                {"title": "Case", "value": summary.get("case_name", ""), "short": True},
-                {"title": "Days Left", "value": str(summary.get("days_left", 0)), "short": True},
-            ]
+            total = summary.get("total", 0)
+            overdue = summary.get("overdue", 0)
+            critical = summary.get("critical", 0)
+
+            message = f"*{total} critical license deadlines*\n"
+            if overdue > 0:
+                message += f":red_circle: *{overdue} OVERDUE*\n"
+            if critical > 0:
+                message += f":warning: *{critical} due within 3 days*\n"
+
+            fields = []
+            cases = summary.get("cases", [])
+            for case in cases[:8]:
+                days = case.get("days", 0)
+                if days < 0:
+                    status = f":red_circle: {abs(days)}d overdue"
+                else:
+                    status = f"{days}d left"
+                fields.append({
+                    "title": f"{case.get('client', 'Unknown')} ({case.get('type', '')})",
+                    "value": f"{status} - {case.get('assignee', '')}",
+                    "short": True,
+                })
 
         elif report_type == "noiw_daily":
             # Daily NOIW pipeline summary

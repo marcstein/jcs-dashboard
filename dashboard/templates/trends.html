@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+
+{% block title %}KPI Trends - MyCase{% endblock %}
+
+{% block content %}
+<h1>KPI Trends</h1>
+<p class="page-description">Historical trend analysis - track KPI movement over time with week-over-week and month-over-month comparisons.</p>
+
+{% if summary %}
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.total_metrics }}</div>
+        <div class="stat-label">Tracked Metrics</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-value">{{ summary.improving }}</div>
+        <div class="stat-label">Improving</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ summary.declining }}</div>
+        <div class="stat-label">Declining</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.on_target }}</div>
+        <div class="stat-label">On Target</div>
+    </div>
+</div>
+
+{% if current_metric and metric_detail %}
+<!-- Metric Detail View -->
+<div class="section-header">
+    <h2>
+        {{ current_metric.replace('_', ' ').title() }}
+        <a href="/trends" class="clear-filter">(back to all)</a>
+    </h2>
+</div>
+<div class="metric-detail">
+    <div class="metric-current">
+        <div class="metric-value-large">
+            {% if metric_detail.current is not none %}
+                {% if 'pct' in current_metric or 'rate' in current_metric or 'compliance' in current_metric %}
+                    {{ "%.1f"|format(metric_detail.current) }}%
+                {% elif 'ar_' in current_metric or 'total' in current_metric %}
+                    ${{ "{:,.0f}".format(metric_detail.current) }}
+                {% else %}
+                    {{ "%.1f"|format(metric_detail.current) }}
+                {% endif %}
+            {% else %}
+                No data
+            {% endif %}
+        </div>
+        <div class="metric-label">Current Value</div>
+    </div>
+    <div class="metric-comparisons">
+        <div class="comparison-card">
+            <div class="comparison-label">Week over Week</div>
+            <div class="comparison-value {% if metric_detail.wow_change is not none %}{% if metric_detail.wow_change > 0 %}text-success{% elif metric_detail.wow_change < 0 %}text-danger{% endif %}{% endif %}">
+                {% if metric_detail.wow_change is not none %}
+                    {{ "+" if metric_detail.wow_change > 0 else "" }}{{ "%.1f"|format(metric_detail.wow_change) }}%
+                {% else %}
+                    N/A
+                {% endif %}
+            </div>
+        </div>
+        <div class="comparison-card">
+            <div class="comparison-label">Month over Month</div>
+            <div class="comparison-value {% if metric_detail.mom_change is not none %}{% if metric_detail.mom_change > 0 %}text-success{% elif metric_detail.mom_change < 0 %}text-danger{% endif %}{% endif %}">
+                {% if metric_detail.mom_change is not none %}
+                    {{ "+" if metric_detail.mom_change > 0 else "" }}{{ "%.1f"|format(metric_detail.mom_change) }}%
+                {% else %}
+                    N/A
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if metric_history %}
+<!-- Simple chart visualization using ASCII/bar -->
+<div class="section-header">
+    <h2>30-Day History</h2>
+</div>
+<div class="history-chart">
+    {% set max_val = namespace(value=0.001) %}
+    {% for h in metric_history %}
+        {% if h.value > max_val.value %}
+            {% set max_val.value = h.value %}
+        {% endif %}
+    {% endfor %}
+    {% for h in metric_history %}
+    <div class="history-bar-container" title="{{ h.date }}: {{ '%.1f'|format(h.value) }}">
+        <div class="history-bar" style="height: {{ (h.value / max_val.value * 100)|int }}%"></div>
+        <div class="history-date">{{ h.date[-5:] }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+<!-- All Metrics Grid -->
+<div class="section-header">
+    <h2>All Metrics</h2>
+</div>
+<div class="metrics-grid">
+    {% for m in summary.metrics %}
+    <a href="/trends?metric={{ m.name }}" class="metric-card {% if current_metric == m.name %}active{% endif %} {% if not m.on_target %}off-target{% endif %}">
+        <div class="metric-header">
+            <span class="metric-name">{{ m.display_name }}</span>
+            <span class="metric-direction direction-{{ m.direction }}">
+                {% if m.direction == 'improving' %}
+                    <span class="arrow">&#9650;</span>
+                {% elif m.direction == 'declining' %}
+                    <span class="arrow">&#9660;</span>
+                {% else %}
+                    <span class="arrow">&#9644;</span>
+                {% endif %}
+            </span>
+        </div>
+        <div class="metric-value">
+            {% if m.current is not none %}
+                {% if 'pct' in m.name or 'rate' in m.name or 'compliance' in m.name %}
+                    {{ "%.1f"|format(m.current) }}%
+                {% elif 'ar_' in m.name or 'total' in m.name %}
+                    ${{ "{:,.0f}".format(m.current) }}
+                {% else %}
+                    {{ "%.1f"|format(m.current) if m.current is number else m.current }}
+                {% endif %}
+            {% else %}
+                --
+            {% endif %}
+        </div>
+        {% if m.target %}
+        <div class="metric-target">
+            Target: {{ m.target }}
+            {% if m.on_target %}
+                <span class="target-status success">On Target</span>
+            {% else %}
+                <span class="target-status danger">Off Target</span>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if m.sparkline %}
+        <div class="metric-sparkline">{{ m.sparkline }}</div>
+        {% endif %}
+        {% if m.change_pct is not none %}
+        <div class="metric-change {% if m.change_pct > 0 %}positive{% elif m.change_pct < 0 %}negative{% endif %}">
+            {{ "+" if m.change_pct > 0 else "" }}{{ "%.1f"|format(m.change_pct) }}% (30d)
+        </div>
+        {% endif %}
+        {% if m.insight %}
+        <div class="metric-insight">{{ m.insight }}</div>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <p>No trend data available yet. Run <code>uv run python agent.py trends record</code> to start tracking KPIs.</p>
+</div>
+{% endif %}
+
+<style>
+/* Trends-specific styles */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+
+.stat-card.stat-success {
+    border-left: 4px solid #28a745;
+}
+
+.stat-card.stat-warning {
+    border-left: 4px solid #f66a0a;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-top: 0.25rem;
+}
+
+.section-header {
+    margin: 2rem 0 1rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    padding-bottom: 0.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+.clear-filter {
+    font-size: 0.85rem;
+    font-weight: normal;
+}
+
+/* Metric Detail */
+.metric-detail {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+}
+
+.metric-current {
+    text-align: center;
+    padding-right: 2rem;
+    border-right: 1px solid var(--border-color, #e1e4e8);
+}
+
+.metric-value-large {
+    font-size: 3rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+}
+
+.metric-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary, #586069);
+}
+
+.metric-comparisons {
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+}
+
+.comparison-card {
+    text-align: center;
+}
+
+.comparison-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-bottom: 0.5rem;
+}
+
+.comparison-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.text-success { color: #28a745; }
+.text-danger { color: #dc3545; }
+
+/* History Chart */
+.history-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 120px;
+    padding: 1rem;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    overflow-x: auto;
+}
+
+.history-bar-container {
+    flex: 1;
+    min-width: 20px;
+    max-width: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+}
+
+.history-bar {
+    width: 100%;
+    background: var(--primary-color, #0366d6);
+    border-radius: 2px 2px 0 0;
+    min-height: 4px;
+    transition: height 0.3s;
+}
+
+.history-bar:hover {
+    background: var(--primary-dark, #0256b6);
+}
+
+.history-date {
+    font-size: 0.65rem;
+    color: var(--text-tertiary, #6a737d);
+    margin-top: 4px;
+    transform: rotate(-45deg);
+    white-space: nowrap;
+}
+
+/* Metrics Grid */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+}
+
+.metric-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+}
+
+.metric-card:hover {
+    border-color: var(--primary-color, #0366d6);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.metric-card.active {
+    border-color: var(--primary-color, #0366d6);
+    background: var(--primary-light, #f0f7ff);
+}
+
+.metric-card.off-target {
+    border-left: 4px solid #f66a0a;
+}
+
+.metric-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.metric-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.metric-direction {
+    font-size: 1.2rem;
+}
+
+.direction-improving .arrow { color: #28a745; }
+.direction-declining .arrow { color: #dc3545; }
+.direction-stable .arrow { color: #6c757d; }
+
+.metric-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+    margin-bottom: 0.5rem;
+}
+
+.metric-target {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #586069);
+    margin-bottom: 0.5rem;
+}
+
+.target-status {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+
+.target-status.success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.target-status.danger {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.metric-sparkline {
+    font-family: monospace;
+    font-size: 1rem;
+    letter-spacing: -2px;
+    color: var(--text-secondary, #586069);
+    margin-bottom: 0.5rem;
+}
+
+.metric-change {
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.metric-change.positive { color: #28a745; }
+.metric-change.negative { color: #dc3545; }
+
+.metric-insight {
+    font-size: 0.8rem;
+    color: var(--text-tertiary, #6a737d);
+    font-style: italic;
+}
+
+.empty-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--text-secondary, #586069);
+}
+
+.empty-state code {
+    background: var(--code-bg, #f6f8fa);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+</style>
+{% endblock %}

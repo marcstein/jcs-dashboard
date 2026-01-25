@@ -1,0 +1,33 @@
+Subject: IMPORTANT: Outstanding Balance Requires Attention - {{ case_name }}
+
+Dear {{ client_name }},
+
+We are reaching out regarding your account with JCS Law Firm. Your account has an outstanding balance that requires your attention.
+
+ACCOUNT STATUS:
+Case: {{ case_name }}
+Invoice #: {{ invoice_number }}
+Outstanding Balance: ${{ balance_due | round(2) }}
+Days Past Due: {{ days_overdue }}
+
+We understand that circumstances can sometimes make timely payment challenging. However, per the terms of your Engagement Agreement, accounts must remain current for us to continue effective representation.
+
+PLEASE TAKE ACTION:
+
+1. PAY IN FULL - Bring your account current to ensure uninterrupted service
+2. SET UP A PAYMENT PLAN - Contact us to arrange manageable monthly payments
+3. DISCUSS YOUR SITUATION - If you're experiencing hardship, let us know
+
+To make a payment or discuss options:
+Phone: (816) 287-3787
+Email: billing@jcslawfirm.com
+
+If we do not hear from you within 14 days, your account will be escalated to our NOIW (Notice of Intent to Withdraw) process, which may result in us filing to withdraw as your counsel.
+
+We value our relationship with you and want to continue working together.
+
+Sincerely,
+
+JCS Law Firm
+Billing Department
+(816) 287-3787

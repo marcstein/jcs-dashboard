@@ -295,7 +295,13 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 ### Dashboard Routes
 - `/` - Main dashboard with SOP widgets
 - `/attorneys` - Attorney productivity with invoice aging buckets
+- `/ar` - A/R and collections dashboard
+- `/noiw` - NOIW pipeline with workflow status filtering
+- `/phases` - Case phase distribution and stalled cases
+- `/trends` - Historical KPI trends with sparklines
+- `/promises` - Payment promise tracking and reliability
 - `/staff/{name}` - Individual staff detail pages
+- `/wonky` - Invoices requiring attention
 
 ### Dashboard Files
 - `dashboard/app.py` - FastAPI application
@@ -325,3 +331,8 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 12. Added year-based billing columns to attorney productivity page
 13. Added case phase tracking module (`case_phases.py`) with 7-phase universal framework
 14. Mapped 30 MyCase stages to universal phases (749 cases tracked)
+15. Added dashboard Case Phases page (`/phases`) with distribution, velocity, stalled cases
+16. Added dashboard Trends page (`/trends`) with sparklines and WoW/MoM comparisons
+17. Added license deadline SMS alerts (`tasks license-notify --sms`)
+18. Added dashboard Promises page (`/promises`) with promise-keeping rate tracking
+19. Added NOIW/payment email templates (noiw_warning, noiw_final_notice, payment_plan_confirmation, promise_reminder, promise_broken)

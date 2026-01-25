@@ -16,6 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from database import get_db
 import dashboard.config as config
 
+# Case phases database path
+PHASES_DB_PATH = Path(__file__).parent.parent / "data" / "case_phases.db"
+
+# Trend tracker database uses the same main database
+TRENDS_DB_PATH = Path(__file__).parent.parent / "data" / "mycase_agent.db"
+
 # Cache database path
 CACHE_DB_PATH = Path(__file__).parent.parent / "data" / "mycase_cache.db"
 
@@ -1612,3 +1618,464 @@ class DashboardData:
         except Exception as e:
             print(f"Error getting staff active cases list: {e}")
             return []
+
+    # =========================================================================
+    # Case Phase Methods
+    # =========================================================================
+
+    @contextmanager
+    def _get_phases_connection(self):
+        """Get connection to the phases database."""
+        conn = sqlite3.connect(PHASES_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def get_phase_distribution(self) -> List[Dict]:
+        """Get case count by phase for open cases."""
+        try:
+            if not PHASES_DB_PATH.exists():
+                return []
+
+            with self._get_phases_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get phase distribution from case_phases table
+                cursor.execute("""
+                    SELECT p.code, p.name, p.short_name, p.sequence,
+                           COUNT(cp.case_id) as case_count
+                    FROM phases p
+                    LEFT JOIN case_phases cp ON p.code = cp.current_phase
+                    WHERE p.firm_id IS NULL
+                    GROUP BY p.code, p.name, p.short_name, p.sequence
+                    ORDER BY p.sequence
+                """)
+
+                return [{
+                    'code': r['code'],
+                    'name': r['name'],
+                    'short_name': r['short_name'],
+                    'sequence': r['sequence'],
+                    'case_count': r['case_count'] or 0
+                } for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error getting phase distribution: {e}")
+            return []
+
+    def get_phases_summary(self) -> Dict:
+        """Get phase summary statistics."""
+        try:
+            distribution = self.get_phase_distribution()
+            total_cases = sum(p['case_count'] for p in distribution)
+
+            # Calculate percentages
+            for p in distribution:
+                p['percentage'] = round(p['case_count'] / total_cases * 100, 1) if total_cases > 0 else 0
+
+            return {
+                'total_cases': total_cases,
+                'distribution': distribution,
+                'phases_count': len(distribution),
+            }
+        except Exception as e:
+            print(f"Error getting phases summary: {e}")
+            return {'total_cases': 0, 'distribution': [], 'phases_count': 0}
+
+    def get_stalled_cases(self, threshold_days: int = 30) -> List[Dict]:
+        """Get cases that have been in the same phase too long."""
+        try:
+            if not PHASES_DB_PATH.exists():
+                return []
+
+            with self._get_phases_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT cp.case_id, cp.case_name, cp.current_phase, cp.phase_entered_at,
+                           p.name as phase_name, p.short_name,
+                           CAST(julianday('now') - julianday(cp.phase_entered_at) AS INTEGER) as days_in_phase
+                    FROM case_phases cp
+                    JOIN phases p ON cp.current_phase = p.code
+                    WHERE julianday('now') - julianday(cp.phase_entered_at) >= ?
+                    ORDER BY days_in_phase DESC
+                    LIMIT 50
+                """, (threshold_days,))
+
+                return [{
+                    'case_id': r['case_id'],
+                    'case_name': r['case_name'],
+                    'current_phase': r['current_phase'],
+                    'phase_name': r['phase_name'],
+                    'short_name': r['short_name'],
+                    'phase_entered_at': r['phase_entered_at'],
+                    'days_in_phase': r['days_in_phase']
+                } for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error getting stalled cases: {e}")
+            return []
+
+    def get_phase_by_case_type(self) -> List[Dict]:
+        """Get phase distribution broken down by case type."""
+        try:
+            if not PHASES_DB_PATH.exists() or not self.cache_db_path.exists():
+                return []
+
+            with self._get_phases_connection() as phases_conn:
+                phases_cursor = phases_conn.cursor()
+
+                # Get case IDs and phases
+                phases_cursor.execute("""
+                    SELECT case_id, current_phase FROM case_phases
+                """)
+                case_phases = {r['case_id']: r['current_phase'] for r in phases_cursor.fetchall()}
+
+            with self._get_cache_connection() as cache_conn:
+                cache_cursor = cache_conn.cursor()
+
+                # Get practice areas for these cases
+                case_ids = list(case_phases.keys())
+                if not case_ids:
+                    return []
+
+                placeholders = ','.join(['?' for _ in case_ids])
+                cache_cursor.execute(f"""
+                    SELECT id, practice_area FROM cached_cases
+                    WHERE id IN ({placeholders})
+                """, case_ids)
+
+                # Build breakdown
+                breakdown = {}
+                for row in cache_cursor.fetchall():
+                    case_id = row['id']
+                    practice_area = row['practice_area'] or 'Unknown'
+                    phase = case_phases.get(case_id, 'Unknown')
+
+                    if practice_area not in breakdown:
+                        breakdown[practice_area] = {}
+                    if phase not in breakdown[practice_area]:
+                        breakdown[practice_area][phase] = 0
+                    breakdown[practice_area][phase] += 1
+
+                # Convert to list format
+                result = []
+                for practice_area, phases in breakdown.items():
+                    result.append({
+                        'practice_area': practice_area,
+                        'phases': phases,
+                        'total': sum(phases.values())
+                    })
+
+                return sorted(result, key=lambda x: x['total'], reverse=True)
+        except Exception as e:
+            print(f"Error getting phase by case type: {e}")
+            return []
+
+    def get_cases_in_phase(self, phase_code: str, limit: int = 50) -> List[Dict]:
+        """Get list of cases in a specific phase."""
+        try:
+            if not PHASES_DB_PATH.exists():
+                return []
+
+            with self._get_phases_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT cp.case_id, cp.case_name, cp.phase_entered_at,
+                           CAST(julianday('now') - julianday(cp.phase_entered_at) AS INTEGER) as days_in_phase
+                    FROM case_phases cp
+                    WHERE cp.current_phase = ?
+                    ORDER BY cp.phase_entered_at ASC
+                    LIMIT ?
+                """, (phase_code, limit))
+
+                return [{
+                    'case_id': r['case_id'],
+                    'case_name': r['case_name'],
+                    'phase_entered_at': r['phase_entered_at'],
+                    'days_in_phase': r['days_in_phase']
+                } for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error getting cases in phase: {e}")
+            return []
+
+    def get_phase_velocity(self) -> List[Dict]:
+        """Get average days spent in each phase (velocity metrics)."""
+        try:
+            if not PHASES_DB_PATH.exists():
+                return []
+
+            with self._get_phases_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT p.code, p.name, p.short_name, p.sequence,
+                           p.expected_duration_days,
+                           AVG(cph.days_in_phase) as avg_days,
+                           MIN(cph.days_in_phase) as min_days,
+                           MAX(cph.days_in_phase) as max_days,
+                           COUNT(cph.id) as transitions
+                    FROM phases p
+                    LEFT JOIN case_phase_history cph ON p.code = cph.phase_code
+                    WHERE p.firm_id IS NULL
+                    GROUP BY p.code, p.name, p.short_name, p.sequence, p.expected_duration_days
+                    ORDER BY p.sequence
+                """)
+
+                return [{
+                    'code': r['code'],
+                    'name': r['name'],
+                    'short_name': r['short_name'],
+                    'sequence': r['sequence'],
+                    'expected_days': r['expected_duration_days'],
+                    'avg_days': round(r['avg_days'], 1) if r['avg_days'] else None,
+                    'min_days': r['min_days'],
+                    'max_days': r['max_days'],
+                    'transitions': r['transitions'] or 0
+                } for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error getting phase velocity: {e}")
+            return []
+
+    # =========================================================================
+    # Trend Analysis Methods
+    # =========================================================================
+
+    def get_trend_data(self, metric_name: str, days_back: int = 30) -> List[Dict]:
+        """Get historical trend data for a specific metric."""
+        try:
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT snapshot_date, value
+                    FROM kpi_trends
+                    WHERE metric_name = ?
+                      AND snapshot_date >= DATE('now', ?)
+                    ORDER BY snapshot_date ASC
+                """, (metric_name, f'-{days_back} days'))
+
+                return [{
+                    'date': r['snapshot_date'],
+                    'value': r['value']
+                } for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error getting trend data: {e}")
+            return []
+
+    def get_all_metrics(self) -> List[str]:
+        """Get list of all tracked metrics."""
+        try:
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT DISTINCT metric_name
+                    FROM kpi_trends
+                    ORDER BY metric_name
+                """)
+
+                return [r['metric_name'] for r in cursor.fetchall()]
+        except Exception:
+            return []
+
+    def get_trends_dashboard_data(self, days_back: int = 30) -> Dict:
+        """Get comprehensive trends data for dashboard display."""
+        try:
+            # Import the TrendTracker to reuse its analysis logic
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from trends import TrendTracker
+
+            tracker = TrendTracker()
+            return tracker.get_dashboard_data()
+        except Exception as e:
+            print(f"Error getting trends dashboard data: {e}")
+            return {'generated_at': None, 'metrics': []}
+
+    def get_metric_comparison(self, metric_name: str) -> Dict:
+        """Get week-over-week and month-over-month comparison for a metric."""
+        try:
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Current value (latest)
+                cursor.execute("""
+                    SELECT value FROM kpi_trends
+                    WHERE metric_name = ?
+                    ORDER BY snapshot_date DESC
+                    LIMIT 1
+                """, (metric_name,))
+                row = cursor.fetchone()
+                current = row['value'] if row else None
+
+                # Value 7 days ago
+                cursor.execute("""
+                    SELECT value FROM kpi_trends
+                    WHERE metric_name = ?
+                      AND snapshot_date <= DATE('now', '-7 days')
+                    ORDER BY snapshot_date DESC
+                    LIMIT 1
+                """, (metric_name,))
+                row = cursor.fetchone()
+                week_ago = row['value'] if row else None
+
+                # Value 30 days ago
+                cursor.execute("""
+                    SELECT value FROM kpi_trends
+                    WHERE metric_name = ?
+                      AND snapshot_date <= DATE('now', '-30 days')
+                    ORDER BY snapshot_date DESC
+                    LIMIT 1
+                """, (metric_name,))
+                row = cursor.fetchone()
+                month_ago = row['value'] if row else None
+
+                # Calculate changes
+                wow_change = None
+                mom_change = None
+
+                if current is not None and week_ago is not None and week_ago != 0:
+                    wow_change = ((current - week_ago) / abs(week_ago)) * 100
+
+                if current is not None and month_ago is not None and month_ago != 0:
+                    mom_change = ((current - month_ago) / abs(month_ago)) * 100
+
+                return {
+                    'metric_name': metric_name,
+                    'current': current,
+                    'week_ago': week_ago,
+                    'month_ago': month_ago,
+                    'wow_change': round(wow_change, 1) if wow_change is not None else None,
+                    'mom_change': round(mom_change, 1) if mom_change is not None else None,
+                }
+        except Exception as e:
+            print(f"Error getting metric comparison: {e}")
+            return {'metric_name': metric_name, 'current': None}
+
+    def get_trends_summary(self) -> Dict:
+        """Get summary of all trend metrics with their status."""
+        try:
+            trends_data = self.get_trends_dashboard_data()
+            metrics = trends_data.get('metrics', [])
+
+            # Count improving/declining/stable
+            improving = sum(1 for m in metrics if m.get('direction') == 'improving')
+            declining = sum(1 for m in metrics if m.get('direction') == 'declining')
+            stable = sum(1 for m in metrics if m.get('direction') == 'stable')
+            on_target = sum(1 for m in metrics if m.get('on_target'))
+
+            return {
+                'total_metrics': len(metrics),
+                'improving': improving,
+                'declining': declining,
+                'stable': stable,
+                'on_target': on_target,
+                'off_target': len(metrics) - on_target,
+                'metrics': metrics,
+            }
+        except Exception as e:
+            print(f"Error getting trends summary: {e}")
+            return {
+                'total_metrics': 0,
+                'improving': 0,
+                'declining': 0,
+                'stable': 0,
+                'on_target': 0,
+                'off_target': 0,
+                'metrics': [],
+            }
+
+    # =========================================================================
+    # Promise Tracking Methods
+    # =========================================================================
+
+    def get_promises_summary(self) -> Dict:
+        """Get summary of payment promises."""
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from promises import PromiseTracker
+
+            tracker = PromiseTracker()
+            stats = tracker.get_promise_stats(days_back=30)
+
+            pending = tracker.get_pending_promises()
+            due_today = tracker.get_due_today()
+            overdue = tracker.get_overdue()
+            upcoming = tracker.get_upcoming(days=7)
+
+            return {
+                'total_pending': len(pending),
+                'due_today': len(due_today),
+                'overdue': len(overdue),
+                'upcoming_7_days': len(upcoming),
+                'kept_count': stats.get('kept_count', 0),
+                'broken_count': stats.get('broken_count', 0),
+                'kept_rate': stats.get('kept_rate', 0),
+                'total_promised': stats.get('total_promised', 0),
+                'total_collected': stats.get('total_collected', 0),
+            }
+        except Exception as e:
+            print(f"Error getting promises summary: {e}")
+            return {
+                'total_pending': 0,
+                'due_today': 0,
+                'overdue': 0,
+                'upcoming_7_days': 0,
+                'kept_count': 0,
+                'broken_count': 0,
+                'kept_rate': 0,
+                'total_promised': 0,
+                'total_collected': 0,
+            }
+
+    def get_promises_list(self, status: str = None) -> List[Dict]:
+        """Get list of promises filtered by status."""
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from promises import PromiseTracker
+
+            tracker = PromiseTracker()
+
+            if status == 'pending':
+                promises = tracker.get_pending_promises()
+            elif status == 'due_today':
+                promises = tracker.get_due_today()
+            elif status == 'overdue':
+                promises = tracker.get_overdue()
+            elif status == 'upcoming':
+                promises = tracker.get_upcoming(days=7)
+            else:
+                promises = tracker.get_pending_promises()
+
+            return [{
+                'id': p.id,
+                'contact_id': p.contact_id,
+                'contact_name': p.contact_name,
+                'case_id': p.case_id,
+                'case_name': p.case_name,
+                'amount': p.amount,
+                'promise_date': str(p.promise_date),
+                'status': p.status.value,
+                'notes': p.notes,
+                'days_until': (p.promise_date - date.today()).days if p.promise_date >= date.today() else -(date.today() - p.promise_date).days
+            } for p in promises]
+        except Exception as e:
+            print(f"Error getting promises list: {e}")
+            return []
+
+    def get_contact_reliability(self, contact_id: int) -> Dict:
+        """Get promise reliability for a contact."""
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from promises import PromiseTracker
+
+            tracker = PromiseTracker()
+            return tracker.get_contact_reliability(contact_id)
+        except Exception as e:
+            print(f"Error getting contact reliability: {e}")
+            return {'total': 0, 'kept': 0, 'broken': 0, 'pending': 0, 'rate': 0}
