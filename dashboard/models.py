@@ -385,7 +385,7 @@ class DashboardData:
             with self._get_cache_connection() as conn:
                 cursor = conn.cursor()
 
-                # Filter to tasks on 2025 cases
+                # Filter to tasks on 2025 cases, exclude tasks > 200 days overdue (stale)
                 cursor.execute("""
                     SELECT t.id, t.name as task_name, c.name as case_name, t.assignee_name,
                            t.due_date, t.priority,
@@ -393,6 +393,7 @@ class DashboardData:
                     FROM cached_tasks t
                     LEFT JOIN cached_cases c ON t.case_id = c.id
                     WHERE t.due_date < DATE('now')
+                      AND t.due_date >= DATE('now', '-200 days')
                       AND (t.completed = 0 OR t.completed IS NULL)
                       AND strftime('%Y', c.created_at) = '2025'
                     ORDER BY t.due_date ASC
@@ -419,8 +420,9 @@ class DashboardData:
             if self.cache_db_path.exists():
                 with self._get_cache_connection() as conn:
                     cursor = conn.cursor()
+                    # Check both full and incremental sync times, use the most recent
                     cursor.execute("""
-                        SELECT MAX(last_full_sync) as last_sync
+                        SELECT MAX(COALESCE(last_incremental_sync, last_full_sync)) as last_sync
                         FROM sync_metadata
                     """)
                     row = cursor.fetchone()
@@ -577,37 +579,40 @@ class DashboardData:
             with self._get_cache_connection() as conn:
                 cursor = conn.cursor()
 
-                # Overdue tasks on 2025 cases
+                # Overdue tasks on 2025 cases (exclude > 200 days as stale)
                 cursor.execute("""
                     SELECT COUNT(*) as count
                     FROM cached_tasks t
                     JOIN cached_cases c ON t.case_id = c.id
                     WHERE t.due_date < DATE('now')
+                      AND t.due_date >= DATE('now', '-200 days')
                       AND (t.completed = 0 OR t.completed IS NULL)
                       AND strftime('%Y', c.created_at) = '2025'
                 """)
                 row = cursor.fetchone()
                 overdue_count = row['count'] if row else 0
 
-                # Critical overdue (more than 7 days) on 2025 cases
+                # Critical overdue (more than 7 days, less than 200) on 2025 cases
                 cursor.execute("""
                     SELECT COUNT(*) as count
                     FROM cached_tasks t
                     JOIN cached_cases c ON t.case_id = c.id
                     WHERE t.due_date < DATE('now', '-7 days')
+                      AND t.due_date >= DATE('now', '-200 days')
                       AND (t.completed = 0 OR t.completed IS NULL)
                       AND strftime('%Y', c.created_at) = '2025'
                 """)
                 row = cursor.fetchone()
                 overdue_critical = row['count'] if row else 0
 
-                # Tasks by assignee (top offenders) on 2025 cases
+                # Tasks by assignee (top offenders) on 2025 cases (exclude > 200 days)
                 staff_lookup = self._get_staff_lookup()
                 cursor.execute("""
                     SELECT t.assignee_name, COUNT(*) as count
                     FROM cached_tasks t
                     JOIN cached_cases c ON t.case_id = c.id
                     WHERE t.due_date < DATE('now')
+                      AND t.due_date >= DATE('now', '-200 days')
                       AND (t.completed = 0 OR t.completed IS NULL)
                       AND strftime('%Y', c.created_at) = '2025'
                     GROUP BY t.assignee_name
@@ -724,12 +729,13 @@ class DashboardData:
                     assignee_filter = "AND (t.assignee_name LIKE ? OR t.assignee_name LIKE ? OR t.assignee_name LIKE ? OR t.assignee_name = ?)"
                     params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
 
-                # Overdue tasks for this assignee on 2025 cases
+                # Overdue tasks for this assignee on 2025 cases (exclude > 200 days as stale)
                 cursor.execute(f"""
                     SELECT COUNT(*) as count
                     FROM cached_tasks t
                     JOIN cached_cases c ON t.case_id = c.id
                     WHERE t.due_date < DATE('now')
+                      AND t.due_date >= DATE('now', '-200 days')
                       AND (t.completed = 0 OR t.completed IS NULL)
                       AND strftime('%Y', c.created_at) = '2025'
                       {assignee_filter}
@@ -820,7 +826,7 @@ class DashboardData:
                     assignee_filter = "AND (t.assignee_name LIKE ? OR t.assignee_name LIKE ? OR t.assignee_name LIKE ? OR t.assignee_name = ?)"
                     params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
 
-                # Get overdue tasks on 2025 cases
+                # Get overdue tasks on 2025 cases (exclude > 200 days as stale)
                 cursor.execute(f"""
                     SELECT t.id, t.name as task_name, c.name as case_name, t.due_date,
                            CAST(julianday('now') - julianday(t.due_date) AS INTEGER) as days_overdue,
@@ -828,6 +834,7 @@ class DashboardData:
                     FROM cached_tasks t
                     JOIN cached_cases c ON t.case_id = c.id
                     WHERE t.due_date < DATE('now')
+                      AND t.due_date >= DATE('now', '-200 days')
                       AND (t.completed = 0 OR t.completed IS NULL)
                       AND strftime('%Y', c.created_at) = '2025'
                       {assignee_filter}

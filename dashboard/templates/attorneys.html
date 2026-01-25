@@ -99,8 +99,8 @@
                     <td class="text-center"><strong>{{ attorneys|selectattr('active_cases', 'gt', 0)|sum(attribute='active_cases') }}</strong></td>
                     <td class="text-center"><strong>{{ attorneys|sum(attribute='closed_mtd') }}</strong></td>
                     <td class="text-center"><strong>{{ attorneys|sum(attribute='closed_ytd') }}</strong></td>
-                    <td class="text-right year-2025"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='billed_2025')) }}</strong></td>
-                    <td class="text-right year-2025"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='collected_2025')) }}</strong></td>
+                    <td class="text-right"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='total_billed')) }}</strong></td>
+                    <td class="text-right"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='total_collected')) }}</strong></td>
                     <td class="text-right"><strong>${{ "{:,.0f}".format(attorneys|sum(attribute='total_outstanding')) }}</strong></td>
                     <td class="text-center">-</td>
                     <td colspan="7" class="text-center">-</td>

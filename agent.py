@@ -629,6 +629,60 @@ def templates_show(name: str):
 
 
 # ============================================================================
+# Sync Command
+# ============================================================================
+
+@cli.command("sync")
+@click.option("--force", is_flag=True, help="Force full sync even if cache is fresh")
+@click.option("--entity", "-e", multiple=True, help="Sync specific entities only")
+def sync_data(force: bool, entity: tuple):
+    """Sync all data from MyCase API to local cache.
+
+    This performs a full sync using SyncManager which updates the
+    sync_metadata table and is displayed on the dashboard.
+    """
+    from sync import get_sync_manager
+
+    console.print("\n[bold]Syncing MyCase Data to Cache[/bold]\n")
+
+    # Check auth
+    auth_manager = MyCaseAuth()
+    if not auth_manager.is_authenticated():
+        console.print("[red]Not authenticated. Run 'auth login' first.[/red]")
+        sys.exit(1)
+
+    manager = get_sync_manager()
+
+    entities = list(entity) if entity else None
+    results = manager.sync_all(force_full=force, entities=entities)
+
+    # Display summary
+    console.print("\n[bold]Sync Complete[/bold]")
+    table = Table(title="Sync Results")
+    table.add_column("Entity")
+    table.add_column("New", justify="right")
+    table.add_column("Updated", justify="right")
+    table.add_column("Unchanged", justify="right")
+    table.add_column("Duration", justify="right")
+
+    total_new = 0
+    total_updated = 0
+    for entity_type, result in results.items():
+        table.add_row(
+            entity_type,
+            str(result.inserted),
+            str(result.updated),
+            str(result.unchanged),
+            f"{result.duration_seconds:.1f}s"
+        )
+        total_new += result.inserted
+        total_updated += result.updated
+
+    console.print(table)
+    console.print(f"\n[green]Total: {total_new} new, {total_updated} updated[/green]")
+
+
+# ============================================================================
 # Run Automation Command
 # ============================================================================
 

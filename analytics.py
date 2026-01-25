@@ -81,9 +81,9 @@ class AnalyticsManager:
                 if not invoice_id:
                     continue
 
-                # Get related data
-                case = invoice.get("case", {})
-                contact = invoice.get("contact", {})
+                # Get related data (handle None values)
+                case = invoice.get("case") or {}
+                contact = invoice.get("contact") or {}
 
                 # Get attorney from case if available
                 attorney = {}

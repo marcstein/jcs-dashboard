@@ -50,6 +50,7 @@ class ScheduledTask:
     enabled: bool = True
     notify_on_failure: bool = True
     owner: Optional[str] = None  # Staff member this report is for
+    timeout: int = 300  # Timeout in seconds (default 5 minutes)
 
 
 # ============================================================================
@@ -61,8 +62,9 @@ DAILY_TASKS = [
         name="sync_data",
         description="Sync all data from MyCase (invoices, tasks, events)",
         frequency=TaskFrequency.DAILY,
-        command="run --sync --no-collections --no-deadlines",
+        command="sync",  # Uses SyncManager which updates sync_metadata
         run_at=time(6, 0),  # 6:00 AM daily sync
+        timeout=1800,  # 30 minute timeout for full sync
     ),
     ScheduledTask(
         name="events_report",
@@ -87,6 +89,7 @@ DAILY_TASKS = [
         command="collections dunning --dry-run",  # Start with dry-run, can change to --execute
         run_at=time(7, 30),
         owner="Melissa Scarlett",
+        timeout=600,  # 10 minute timeout for dunning cycle
     ),
     ScheduledTask(
         name="deadline_notifications",
@@ -378,7 +381,7 @@ class Scheduler:
                 capture_output=True,
                 text=True,
                 cwd=str(BASE_DIR),
-                timeout=300,  # 5 minute timeout
+                timeout=task.timeout,
             )
 
             result["output"] = process.stdout
@@ -391,8 +394,9 @@ class Scheduler:
                 result["error"] = f"Command exited with code {process.returncode}"
 
         except subprocess.TimeoutExpired:
-            result["error"] = "Task timed out after 5 minutes"
-            self._log(f"Task {task.name} timed out")
+            timeout_mins = task.timeout // 60
+            result["error"] = f"Task timed out after {timeout_mins} minutes"
+            self._log(f"Task {task.name} timed out after {timeout_mins} minutes")
         except Exception as e:
             result["error"] = str(e)
             self._log(f"Task {task.name} failed: {e}")
