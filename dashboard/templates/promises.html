@@ -102,7 +102,7 @@
             <td>{{ p.promise_date }}</td>
             <td class="text-center {% if p.days_until < 0 %}text-danger{% elif p.days_until == 0 %}text-warning{% endif %}">
                 {% if p.days_until < 0 %}
-                    {{ abs(p.days_until) }}d overdue
+                    {{ (p.days_until * -1) }}d overdue
                 {% elif p.days_until == 0 %}
                     Today
                 {% else %}
