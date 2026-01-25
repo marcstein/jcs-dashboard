@@ -653,11 +653,16 @@ h2 {
     gap: 1rem;
 }
 
+.footer-logo {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
 .footer-brand .logo-law,
 .footer-brand .logo-metrics,
 .footer-brand .logo-ai {
-    font-size: 1.1rem;
-    font-weight: 700;
+    font-size: inherit;
+    font-weight: inherit;
 }
 
 .footer-tagline {
