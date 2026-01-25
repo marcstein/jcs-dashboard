@@ -2057,11 +2057,11 @@ class DashboardData:
                 'contact_name': p.contact_name,
                 'case_id': p.case_id,
                 'case_name': p.case_name,
-                'amount': p.amount,
-                'promise_date': str(p.promise_date),
+                'amount': p.promised_amount,
+                'promise_date': str(p.promised_date),
                 'status': p.status.value,
                 'notes': p.notes,
-                'days_until': (p.promise_date - date.today()).days if p.promise_date >= date.today() else -(date.today() - p.promise_date).days
+                'days_until': (p.promised_date - date.today()).days if p.promised_date >= date.today() else -(date.today() - p.promised_date).days
             } for p in promises]
         except Exception as e:
             print(f"Error getting promises list: {e}")
