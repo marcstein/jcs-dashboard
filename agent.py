@@ -317,6 +317,181 @@ def collections_dunning(dry_run: bool, sync_payments: bool):
         console.print(table)
 
 
+@collections.command("preview")
+@click.option("--stage", type=int, help="Filter by stage (1-4)")
+@click.option("--limit", default=50, help="Max invoices to show")
+@click.option("--export", is_flag=True, help="Export to CSV")
+def collections_preview(stage: int, limit: int, export: bool):
+    """Preview dunning notices that would be sent.
+
+    Stages:
+    1 = Friendly Reminder (5-14 days overdue)
+    2 = Formal Reminder (15-29 days overdue)
+    3 = Urgent Notice (30-44 days overdue)
+    4 = Final Notice (45+ days overdue)
+    """
+    from dashboard.models import DashboardData
+
+    data = DashboardData()
+    summary = data.get_dunning_summary()
+    queue = data.get_dunning_queue(stage=stage)
+
+    # Show summary
+    console.print("\n[bold]Dunning Queue Summary[/bold]\n")
+
+    summary_table = Table(show_header=True, header_style="bold")
+    summary_table.add_column("Stage")
+    summary_table.add_column("Name")
+    summary_table.add_column("Days Overdue")
+    summary_table.add_column("Count", justify="right")
+    summary_table.add_column("Balance Due", justify="right")
+
+    stage_colors = {1: "green", 2: "yellow", 3: "orange3", 4: "red"}
+
+    for stage_num, stage_data in summary['stages'].items():
+        color = stage_colors.get(stage_num, "white")
+        marker = " <--" if stage == stage_num else ""
+        summary_table.add_row(
+            f"[{color}]Stage {stage_num}[/{color}]",
+            stage_data['name'],
+            f"{stage_data['days']} days",
+            str(stage_data['count']),
+            f"${stage_data['balance']:,.2f}{marker}"
+        )
+
+    summary_table.add_row(
+        "[bold]TOTAL[/bold]",
+        "",
+        "",
+        f"[bold]{summary['total_count']}[/bold]",
+        f"[bold]${summary['total_balance']:,.2f}[/bold]"
+    )
+
+    console.print(summary_table)
+
+    if not queue:
+        if stage:
+            console.print(f"\n[yellow]No invoices in Stage {stage}[/yellow]")
+        else:
+            console.print("\n[green]No invoices currently in the dunning queue![/green]")
+        return
+
+    # Export to CSV if requested
+    if export:
+        import csv
+        filename = f"dunning_preview_stage{stage or 'all'}.csv"
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Invoice', 'Case', 'Attorney', 'Balance Due', 'Days Overdue', 'Stage', 'Stage Name', 'Due Date'])
+            for inv in queue:
+                writer.writerow([
+                    inv['invoice_number'],
+                    inv['case_name'],
+                    inv['attorney'],
+                    inv['balance_due'],
+                    inv['days_overdue'],
+                    inv['dunning_stage'],
+                    inv['stage_name'],
+                    inv['due_date']
+                ])
+        console.print(f"\n[green]Exported {len(queue)} invoices to {filename}[/green]")
+        return
+
+    # Show queue
+    filter_msg = f" (Stage {stage} only)" if stage else ""
+    console.print(f"\n[bold]Dunning Queue{filter_msg}[/bold]\n")
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Invoice")
+    table.add_column("Case")
+    table.add_column("Attorney")
+    table.add_column("Balance", justify="right")
+    table.add_column("Days", justify="right")
+    table.add_column("Stage")
+
+    shown = 0
+    for inv in queue[:limit]:
+        color = stage_colors.get(inv['dunning_stage'], "white")
+        table.add_row(
+            inv['invoice_number'],
+            (inv['case_name'] or 'N/A')[:25],
+            (inv['attorney'] or 'N/A')[:15],
+            f"${inv['balance_due']:,.2f}",
+            f"[{color}]{inv['days_overdue']}[/{color}]",
+            f"[{color}]{inv['stage_name']}[/{color}]"
+        )
+        shown += 1
+
+    console.print(table)
+
+    if len(queue) > limit:
+        console.print(f"\n[dim]Showing {shown} of {len(queue)} invoices. Use --limit to show more.[/dim]")
+
+    console.print(f"\n[bold]Next Steps:[/bold]")
+    console.print("  - View in dashboard: http://127.0.0.1:3000/dunning")
+    console.print("  - Run dry-run: uv run python agent.py collections dunning --dry-run")
+    console.print("  - Send for real: uv run python agent.py collections dunning --execute")
+
+
+@collections.command("test-email")
+@click.option("--stage", type=int, default=1, help="Stage to test (1-4)")
+@click.option("--to", "to_email", default="marc.stein@gmail.com", help="Email to send test to")
+def collections_test_email(stage: int, to_email: str):
+    """Send a test dunning email to verify email configuration."""
+    from dunning_emails import DunningEmailManager, DUNNING_STAGES
+
+    if stage < 1 or stage > 4:
+        console.print("[red]Stage must be 1-4[/red]")
+        return
+
+    manager = DunningEmailManager(test_mode=True, test_email=to_email)
+
+    stage_info = DUNNING_STAGES[stage - 1]
+    console.print(f"\n[bold]Testing Stage {stage}: {stage_info.name}[/bold]")
+    console.print(f"Sending to: {to_email}")
+
+    # Get a sample invoice for this stage
+    invoices = manager.get_invoices_for_stage(stage_info, limit=1)
+
+    if not invoices:
+        console.print(f"[yellow]No invoices found in Stage {stage} ({stage_info.min_days}-{stage_info.max_days} days overdue)[/yellow]")
+        console.print("Creating a sample invoice for testing...")
+
+        # Create a fake invoice for testing
+        from dunning_emails import DunningInvoice
+        from datetime import date, timedelta
+
+        invoices = [DunningInvoice(
+            invoice_id=99999,
+            invoice_number="TEST-001",
+            case_id=99999,
+            case_name="SAMPLE.CLIENT - Test Case",
+            client_name="Sample Client",
+            client_email=to_email,
+            total_amount=5000.00,
+            paid_amount=1000.00,
+            balance_due=4000.00,
+            due_date=date.today() - timedelta(days=stage_info.min_days + 2),
+            days_overdue=stage_info.min_days + 2,
+        )]
+
+    inv = invoices[0]
+    console.print(f"  Invoice: {inv.invoice_number}")
+    console.print(f"  Balance: ${inv.balance_due:,.2f}")
+    console.print(f"  Days Overdue: {inv.days_overdue}")
+
+    success, message = manager.send_dunning_notice(stage, inv)
+
+    if success:
+        console.print(f"\n[green]Success: {message}[/green]")
+        console.print(f"\nCheck your inbox at {to_email}")
+    else:
+        console.print(f"\n[red]Failed: {message}[/red]")
+        console.print("\nMake sure you have email configured in .env:")
+        console.print("  - SMTP_USER and SMTP_PASS for Gmail")
+        console.print("  - Or SENDGRID_API_KEY for SendGrid")
+
+
 # ============================================================================
 # Deadline Commands
 # ============================================================================
@@ -3342,6 +3517,103 @@ def phases_case(case_id: int):
         )
 
     console.print(table)
+
+
+@phases.command("notify-attorneys")
+@click.option("--days", default=30, help="Threshold days to consider stalled")
+@click.option("--slack/--no-slack", default=True, help="Send Slack notifications")
+@click.option("--email/--no-email", default=False, help="Send email notifications")
+def phases_notify_attorneys(days: int, slack: bool, email: bool):
+    """Notify attorneys about their stalled cases."""
+    from notifications import NotificationManager
+    from cache import get_cache
+
+    db = get_phase_db()
+    cache = get_cache()
+    notifier = NotificationManager()
+
+    # Get stalled cases
+    stalled = db.get_stalled_cases(days)
+
+    if not stalled:
+        console.print(f"[green]No cases stalled more than {days} days![/green]")
+        return
+
+    # Get attorney info for each case from cache
+    with cache._get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Group stalled cases by attorney
+        by_attorney = {}
+        for case in stalled:
+            case_id = case['case_id']
+            cursor.execute("""
+                SELECT lead_attorney_id, lead_attorney_name
+                FROM cached_cases
+                WHERE id = ?
+            """, (case_id,))
+            row = cursor.fetchone()
+
+            if row and row['lead_attorney_name']:
+                attorney = row['lead_attorney_name']
+                if attorney not in by_attorney:
+                    by_attorney[attorney] = []
+                by_attorney[attorney].append({
+                    'case_id': case_id,
+                    'case_name': case['case_name'] or f"Case {case_id}",
+                    'phase': case['phase_name'] or case['phase_code'],
+                    'days_in_phase': int(case['days_in_phase']) if case['days_in_phase'] else 0,
+                    'stage': case.get('mycase_stage_name') or '-',
+                    'typical_max': case.get('typical_duration_max_days'),
+                })
+
+    if not by_attorney:
+        console.print("[yellow]No stalled cases with assigned attorneys found[/yellow]")
+        return
+
+    # Display summary
+    console.print(f"\n[bold]Stalled Cases by Attorney[/bold] (>{days} days in phase)\n")
+
+    for attorney, cases in sorted(by_attorney.items(), key=lambda x: len(x[1]), reverse=True):
+        console.print(f"[bold]{attorney}[/bold]: {len(cases)} stalled cases")
+        for c in cases[:3]:
+            console.print(f"  - {c['case_name'][:30]} ({c['days_in_phase']}d in {c['phase']})")
+        if len(cases) > 3:
+            console.print(f"  [dim]...and {len(cases) - 3} more[/dim]")
+
+    # Send notifications
+    if slack:
+        # Build Slack message
+        total_stalled = sum(len(cases) for cases in by_attorney.values())
+        summary = {
+            'total_stalled': total_stalled,
+            'threshold_days': days,
+            'attorneys': [
+                {
+                    'name': attorney,
+                    'count': len(cases),
+                    'cases': [
+                        {
+                            'name': c['case_name'][:30],
+                            'days': c['days_in_phase'],
+                            'phase': c['phase'],
+                        }
+                        for c in cases[:5]
+                    ]
+                }
+                for attorney, cases in sorted(by_attorney.items(), key=lambda x: len(x[1]), reverse=True)[:10]
+            ]
+        }
+        success = notifier.send_slack_report("stalled_cases", summary)
+        if success:
+            console.print(f"\n[green]Slack notification sent ({total_stalled} stalled cases)[/green]")
+        else:
+            console.print("[red]Failed to send Slack notification[/red]")
+
+    if email:
+        # Send individual emails to each attorney (placeholder)
+        console.print("[yellow]Email notifications not yet configured[/yellow]")
+        console.print("Configure attorney emails in data/notifications_config.json")
 
 
 # ============================================================================

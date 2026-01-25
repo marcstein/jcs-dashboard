@@ -282,6 +282,56 @@ async def promises_dashboard(request: Request, status: str = None):
     })
 
 
+@router.get("/payments", response_class=HTMLResponse)
+async def payments_analytics(request: Request, year: int = None):
+    """Payment analytics dashboard - time to payment by attorney and case type."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    # Default to current year if not specified
+    current_year = datetime.now().year
+    if year is None:
+        year = current_year
+    available_years = [2025, 2026]
+
+    summary = data.get_payment_analytics_summary(year=year)
+    by_attorney = data.get_time_to_payment_by_attorney(year=year)
+    by_case_type = data.get_time_to_payment_by_case_type(year=year)
+    velocity_trend = data.get_payment_velocity_trend(year=year)
+
+    return templates.TemplateResponse("payments.html", {
+        "request": request,
+        "year": year,
+        "current_year": current_year,
+        "available_years": available_years,
+        "summary": summary,
+        "by_attorney": by_attorney,
+        "by_case_type": by_case_type,
+        "velocity_trend": velocity_trend,
+        "username": request.session.get("username"),
+    })
+
+
+@router.get("/dunning", response_class=HTMLResponse)
+async def dunning_preview(request: Request, stage: int = None):
+    """Dunning notices preview and approval dashboard."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    summary = data.get_dunning_summary()
+    queue = data.get_dunning_queue(stage=stage)
+    history = data.get_dunning_history(limit=20)
+
+    return templates.TemplateResponse("dunning.html", {
+        "request": request,
+        "summary": summary,
+        "queue": queue,
+        "history": history,
+        "current_stage": stage,
+        "username": request.session.get("username"),
+    })
+
+
 @router.get("/reports", response_class=HTMLResponse)
 async def reports_list(request: Request):
     """Reports listing page."""

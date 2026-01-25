@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Analytics - MyCase{% endblock %}
+
+{% block content %}
+<h1>Payment Analytics</h1>
+<p class="page-description">Track time-to-payment metrics by attorney and case type to identify collection patterns.</p>
+
+<!-- Year Selector -->
+<div class="year-selector">
+    {% for y in available_years %}
+    <a href="/payments?year={{ y }}" class="year-btn {% if y == year %}active{% endif %}">{{ y }}</a>
+    {% endfor %}
+</div>
+
+{% if summary %}
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_billed) }}</div>
+        <div class="stat-label">Total Billed ({{ year }})</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_collected) }}</div>
+        <div class="stat-label">Total Collected</div>
+    </div>
+    <div class="stat-card {% if summary.collection_rate < 70 %}stat-danger{% elif summary.collection_rate < 85 %}stat-warning{% else %}stat-success{% endif %}">
+        <div class="stat-value">{{ "%.1f"|format(summary.collection_rate) }}%</div>
+        <div class="stat-label">Collection Rate</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.avg_days_to_payment or 0 }}</div>
+        <div class="stat-label">Avg Days to Payment</div>
+    </div>
+</div>
+
+<div class="metrics-row">
+    <div class="metric-box">
+        <span class="metric-value">{{ summary.total_invoices }}</span>
+        <span class="metric-label">Total Invoices</span>
+    </div>
+    <div class="metric-box">
+        <span class="metric-value">{{ summary.paid_in_full_count }}</span>
+        <span class="metric-label">Paid in Full</span>
+    </div>
+    <div class="metric-box">
+        <span class="metric-value">${{ "{:,.0f}".format(summary.total_outstanding) }}</span>
+        <span class="metric-label">Outstanding</span>
+    </div>
+    <div class="metric-box">
+        <span class="metric-value">{{ summary.avg_dpd_outstanding }}</span>
+        <span class="metric-label">Avg DPD (Outstanding)</span>
+    </div>
+</div>
+{% endif %}
+
+<!-- Time to Payment by Attorney -->
+<div class="section-header">
+    <h2>Time to Payment by Attorney</h2>
+</div>
+{% if by_attorney %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Attorney</th>
+            <th class="text-right">Invoices</th>
+            <th class="text-right">Total Billed</th>
+            <th class="text-right">Collected</th>
+            <th class="text-right">Rate</th>
+            <th class="text-center">Avg Days</th>
+            <th class="text-center">Min/Max</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for atty in by_attorney %}
+        <tr>
+            <td>{{ atty.attorney_name or 'Unknown' }}</td>
+            <td class="text-right">{{ atty.invoice_count }}</td>
+            <td class="text-right">${{ "{:,.0f}".format(atty.total_billed) }}</td>
+            <td class="text-right">${{ "{:,.0f}".format(atty.total_collected) }}</td>
+            <td class="text-right {% if atty.collection_rate < 70 %}text-danger{% elif atty.collection_rate < 85 %}text-warning{% endif %}">
+                {{ "%.1f"|format(atty.collection_rate) }}%
+            </td>
+            <td class="text-center {% if atty.avg_days_to_payment and atty.avg_days_to_payment > 90 %}text-warning{% endif %}">
+                {% if atty.avg_days_to_payment %}{{ atty.avg_days_to_payment }}{% else %}-{% endif %}
+            </td>
+            <td class="text-center text-muted">
+                {% if atty.min_days and atty.max_days %}
+                    {{ atty.min_days }}-{{ atty.max_days }}
+                {% else %}-{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No payment data available for {{ year }}.</p>
+</div>
+{% endif %}
+
+<!-- Time to Payment by Case Type -->
+<div class="section-header">
+    <h2>Time to Payment by Practice Area</h2>
+</div>
+{% if by_case_type %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Practice Area</th>
+            <th class="text-right">Invoices</th>
+            <th class="text-right">Total Billed</th>
+            <th class="text-right">Collected</th>
+            <th class="text-right">Rate</th>
+            <th class="text-center">Avg Days</th>
+            <th class="text-center">Min/Max</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for ct in by_case_type %}
+        <tr>
+            <td>{{ ct.case_type }}</td>
+            <td class="text-right">{{ ct.invoice_count }}</td>
+            <td class="text-right">${{ "{:,.0f}".format(ct.total_billed) }}</td>
+            <td class="text-right">${{ "{:,.0f}".format(ct.total_collected) }}</td>
+            <td class="text-right {% if ct.collection_rate < 70 %}text-danger{% elif ct.collection_rate < 85 %}text-warning{% endif %}">
+                {{ "%.1f"|format(ct.collection_rate) }}%
+            </td>
+            <td class="text-center {% if ct.avg_days_to_payment and ct.avg_days_to_payment > 90 %}text-warning{% endif %}">
+                {% if ct.avg_days_to_payment %}{{ ct.avg_days_to_payment }}{% else %}-{% endif %}
+            </td>
+            <td class="text-center text-muted">
+                {% if ct.min_days and ct.max_days %}
+                    {{ ct.min_days }}-{{ ct.max_days }}
+                {% else %}-{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No case type data available for {{ year }}.</p>
+</div>
+{% endif %}
+
+<!-- Monthly Collection Trend -->
+{% if velocity_trend %}
+<div class="section-header">
+    <h2>Monthly Collection Trend</h2>
+</div>
+<div class="trend-chart">
+    {% for month in velocity_trend %}
+    <div class="trend-bar-container">
+        <div class="trend-label">{{ month.month }}</div>
+        <div class="trend-bar-wrapper">
+            <div class="trend-bar trend-billed" style="width: {{ (month.total_billed / (velocity_trend | map(attribute='total_billed') | max) * 100) if velocity_trend else 0 }}%"></div>
+            <div class="trend-bar trend-collected" style="width: {{ (month.total_collected / (velocity_trend | map(attribute='total_billed') | max) * 100) if velocity_trend else 0 }}%"></div>
+        </div>
+        <div class="trend-values">
+            <span class="trend-rate {% if month.collection_rate < 70 %}text-danger{% elif month.collection_rate < 85 %}text-warning{% else %}text-success{% endif %}">
+                {{ "%.0f"|format(month.collection_rate) }}%
+            </span>
+            {% if month.avg_days_to_payment %}
+            <span class="trend-days">{{ month.avg_days_to_payment }}d</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<div class="trend-legend">
+    <span class="legend-item"><span class="legend-color billed"></span> Billed</span>
+    <span class="legend-item"><span class="legend-color collected"></span> Collected</span>
+</div>
+{% endif %}
+
+<style>
+/* Payment Analytics specific styles */
+.year-selector {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.year-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--text-secondary, #586069);
+    transition: all 0.2s;
+}
+
+.year-btn:hover {
+    border-color: var(--primary-color, #0366d6);
+    color: var(--primary-color, #0366d6);
+}
+
+.year-btn.active {
+    background: var(--primary-color, #0366d6);
+    border-color: var(--primary-color, #0366d6);
+    color: #fff;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1.25rem;
+    text-align: center;
+}
+
+.stat-card.stat-warning {
+    border-left: 4px solid #f9a825;
+}
+
+.stat-card.stat-danger {
+    border-left: 4px solid #dc3545;
+}
+
+.stat-card.stat-success {
+    border-left: 4px solid #28a745;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-top: 0.25rem;
+}
+
+.metrics-row {
+    display: flex;
+    gap: 2rem;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+    padding: 1rem;
+    background: var(--bg-secondary, #f6f8fa);
+    border-radius: 8px;
+}
+
+.metric-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.metric-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary, #24292e);
+}
+
+.metric-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #586069);
+}
+
+.section-header {
+    margin: 2rem 0 1rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    padding-bottom: 0.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+/* Table styles */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.5rem;
+}
+
+.data-table th,
+.data-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+}
+
+.data-table th {
+    background: var(--bg-secondary, #f6f8fa);
+    font-weight: 600;
+    text-align: left;
+}
+
+.data-table tbody tr:hover {
+    background: var(--hover-bg, #f8f9fa);
+}
+
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+.text-muted { color: var(--text-tertiary, #6a737d); }
+.text-warning { color: #f9a825; }
+.text-danger { color: #dc3545; }
+.text-success { color: #28a745; }
+
+/* Trend chart */
+.trend-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.trend-bar-container {
+    display: grid;
+    grid-template-columns: 80px 1fr 100px;
+    align-items: center;
+    gap: 1rem;
+}
+
+.trend-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    text-align: right;
+}
+
+.trend-bar-wrapper {
+    position: relative;
+    height: 24px;
+    background: var(--bg-secondary, #f6f8fa);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.trend-bar {
+    position: absolute;
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+
+.trend-billed {
+    background: #e1e4e8;
+    z-index: 1;
+}
+
+.trend-collected {
+    background: #28a745;
+    z-index: 2;
+}
+
+.trend-values {
+    display: flex;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+}
+
+.trend-rate {
+    font-weight: 600;
+}
+
+.trend-days {
+    color: var(--text-tertiary, #6a737d);
+}
+
+.trend-legend {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+}
+
+.legend-color.billed { background: #e1e4e8; }
+.legend-color.collected { background: #28a745; }
+
+.empty-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--text-secondary, #586069);
+}
+</style>
+{% endblock %}

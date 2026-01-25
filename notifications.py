@@ -428,6 +428,27 @@ class NotificationManager:
                         "short": True,
                     })
 
+        elif report_type == "stalled_cases":
+            # Stalled cases by attorney alert
+            total = summary.get('total_stalled', 0)
+            threshold = summary.get('threshold_days', 30)
+
+            title = f":hourglass: Stalled Cases Alert - {total} cases over {threshold} days"
+            color = "danger" if total > 20 else "warning" if total > 10 else "#439FE0"
+
+            message = f"*{total} cases* have been stalled in their current phase for over {threshold} days.\n\n"
+
+            # Add attorney breakdown
+            attorneys = summary.get('attorneys', [])
+            if attorneys:
+                message += "*By Attorney:*\n"
+                for atty in attorneys[:8]:
+                    message += f"• *{atty['name']}*: {atty['count']} cases\n"
+                    for case in atty.get('cases', [])[:2]:
+                        message += f"  - {case['name']} ({case['days']}d in {case['phase']})\n"
+
+            fields = None
+
         else:
             title = f"MyCase Alert: {report_type}"
             color = "#439FE0"

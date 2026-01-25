@@ -935,6 +935,260 @@ class TestDashboardRoutes:
         routes = [r.path for r in router.routes]
         assert '/promises' in routes
 
+    def test_payments_route_exists(self):
+        """Test that /payments route is defined."""
+        from dashboard.routes import router
+
+        routes = [r.path for r in router.routes]
+        assert '/payments' in routes
+
+
+# ============================================================================
+# Dashboard Payment Analytics Tests
+# ============================================================================
+
+class TestDashboardPaymentAnalytics:
+    """Tests for dashboard payment analytics functionality."""
+
+    def test_dashboard_payment_analytics_methods_exist(self):
+        """Test that dashboard data has payment analytics methods."""
+        from dashboard.models import DashboardData
+
+        assert hasattr(DashboardData, 'get_payment_analytics_summary')
+        assert hasattr(DashboardData, 'get_time_to_payment_by_attorney')
+        assert hasattr(DashboardData, 'get_time_to_payment_by_case_type')
+        assert hasattr(DashboardData, 'get_payment_velocity_trend')
+
+    def test_payment_analytics_summary_returns_dict(self):
+        """Test payment analytics summary returns expected structure."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        summary = data.get_payment_analytics_summary()
+
+        assert isinstance(summary, dict)
+        assert 'year' in summary
+        assert 'total_invoices' in summary
+        assert 'total_billed' in summary
+        assert 'total_collected' in summary
+        assert 'collection_rate' in summary
+        assert 'avg_days_to_payment' in summary
+        assert 'monthly_trend' in summary
+
+    def test_time_to_payment_by_attorney_returns_list(self):
+        """Test time to payment by attorney returns a list."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        by_attorney = data.get_time_to_payment_by_attorney()
+
+        assert isinstance(by_attorney, list)
+
+    def test_time_to_payment_by_case_type_returns_list(self):
+        """Test time to payment by case type returns a list."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        by_case_type = data.get_time_to_payment_by_case_type()
+
+        assert isinstance(by_case_type, list)
+
+    def test_payment_velocity_trend_returns_list(self):
+        """Test payment velocity trend returns a list."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        trend = data.get_payment_velocity_trend()
+
+        assert isinstance(trend, list)
+
+    def test_payment_analytics_accepts_year_parameter(self):
+        """Test payment analytics methods accept year parameter."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+
+        # These should not raise errors with year parameter
+        summary = data.get_payment_analytics_summary(year=2025)
+        by_attorney = data.get_time_to_payment_by_attorney(year=2025)
+        by_case_type = data.get_time_to_payment_by_case_type(year=2025)
+        trend = data.get_payment_velocity_trend(year=2025)
+
+        assert isinstance(summary, dict)
+        assert isinstance(by_attorney, list)
+        assert isinstance(by_case_type, list)
+        assert isinstance(trend, list)
+
+    def test_payment_analytics_summary_year_in_result(self):
+        """Test that year is included in summary result."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        summary = data.get_payment_analytics_summary(year=2025)
+
+        assert summary['year'] == 2025
+
+    def test_attorney_payment_data_structure(self):
+        """Test attorney payment data has expected structure."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        by_attorney = data.get_time_to_payment_by_attorney()
+
+        # If there's data, verify structure
+        if by_attorney:
+            record = by_attorney[0]
+            assert 'attorney_id' in record
+            assert 'attorney_name' in record
+            assert 'invoice_count' in record
+            assert 'total_billed' in record
+            assert 'total_collected' in record
+            assert 'collection_rate' in record
+            assert 'avg_days_to_payment' in record
+
+    def test_case_type_payment_data_structure(self):
+        """Test case type payment data has expected structure."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        by_case_type = data.get_time_to_payment_by_case_type()
+
+        # If there's data, verify structure
+        if by_case_type:
+            record = by_case_type[0]
+            assert 'case_type' in record
+            assert 'invoice_count' in record
+            assert 'total_billed' in record
+            assert 'total_collected' in record
+            assert 'collection_rate' in record
+            assert 'avg_days_to_payment' in record
+
+    def test_velocity_trend_data_structure(self):
+        """Test velocity trend data has expected structure."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        trend = data.get_payment_velocity_trend()
+
+        # If there's data, verify structure
+        if trend:
+            record = trend[0]
+            assert 'month' in record
+            assert 'invoice_count' in record
+            assert 'total_billed' in record
+            assert 'total_collected' in record
+            assert 'collection_rate' in record
+
+
+# ============================================================================
+# Dashboard Dunning Preview Tests
+# ============================================================================
+
+class TestDashboardDunning:
+    """Tests for dashboard dunning preview functionality."""
+
+    def test_dashboard_dunning_methods_exist(self):
+        """Test that dashboard data has dunning-related methods."""
+        from dashboard.models import DashboardData
+
+        assert hasattr(DashboardData, 'get_dunning_queue')
+        assert hasattr(DashboardData, 'get_dunning_summary')
+        assert hasattr(DashboardData, 'get_dunning_history')
+
+    def test_dunning_summary_returns_dict(self):
+        """Test dunning summary returns expected structure."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        summary = data.get_dunning_summary()
+
+        assert isinstance(summary, dict)
+        assert 'stages' in summary
+        assert 'total_count' in summary
+        assert 'total_balance' in summary
+        assert len(summary['stages']) == 4
+
+    def test_dunning_queue_returns_list(self):
+        """Test dunning queue returns a list."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        queue = data.get_dunning_queue()
+
+        assert isinstance(queue, list)
+
+    def test_dunning_queue_stage_filter(self):
+        """Test dunning queue can be filtered by stage."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+
+        # These should not raise errors
+        queue1 = data.get_dunning_queue(stage=1)
+        queue2 = data.get_dunning_queue(stage=2)
+        queue3 = data.get_dunning_queue(stage=3)
+        queue4 = data.get_dunning_queue(stage=4)
+
+        assert isinstance(queue1, list)
+        assert isinstance(queue2, list)
+        assert isinstance(queue3, list)
+        assert isinstance(queue4, list)
+
+    def test_dunning_summary_stages_have_required_keys(self):
+        """Test that dunning summary stages have required keys."""
+        from dashboard.models import DashboardData
+
+        data = DashboardData()
+        summary = data.get_dunning_summary()
+
+        for stage_num, stage_data in summary['stages'].items():
+            assert 'name' in stage_data
+            assert 'days' in stage_data
+            assert 'count' in stage_data
+            assert 'balance' in stage_data
+
+    def test_dunning_route_exists(self):
+        """Test that /dunning route is defined."""
+        from dashboard.routes import router
+
+        routes = [r.path for r in router.routes]
+        assert '/dunning' in routes
+
+    def test_dunning_preview_cli_exists(self):
+        """Test that collections preview command exists."""
+        from click.testing import CliRunner
+        from agent import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ['collections', '--help'])
+
+        assert result.exit_code == 0
+        assert 'preview' in result.output
+
+    def test_dunning_preview_cli_help(self):
+        """Test collections preview command help."""
+        from click.testing import CliRunner
+        from agent import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ['collections', 'preview', '--help'])
+
+        assert result.exit_code == 0
+        assert '--stage' in result.output
+        assert '--limit' in result.output
+        assert '--export' in result.output
+
+    def test_dunning_test_email_cli_exists(self):
+        """Test that collections test-email command exists."""
+        from click.testing import CliRunner
+        from agent import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ['collections', '--help'])
+
+        assert result.exit_code == 0
+        assert 'test-email' in result.output
+
 
 # ============================================================================
 # Run tests

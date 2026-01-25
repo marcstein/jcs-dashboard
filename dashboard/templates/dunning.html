@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+
+{% block title %}Dunning Preview - MyCase{% endblock %}
+
+{% block content %}
+<h1>Dunning Notices Preview</h1>
+<p class="page-description">Review and approve automated collection notices before they're sent to clients.</p>
+
+{% if summary %}
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.total_count }}</div>
+        <div class="stat-label">Total in Queue</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_balance) }}</div>
+        <div class="stat-label">Total Balance Due</div>
+    </div>
+</div>
+
+<!-- Stage Breakdown -->
+<div class="section-header">
+    <h2>Dunning Stages</h2>
+</div>
+<div class="stage-cards">
+    {% for stage_num, stage in summary.stages.items() %}
+    <a href="/dunning?stage={{ stage_num }}" class="stage-card stage-{{ stage_num }} {% if current_stage == stage_num %}active{% endif %}">
+        <div class="stage-header">
+            <span class="stage-number">Stage {{ stage_num }}</span>
+            <span class="stage-days">{{ stage.days }} days</span>
+        </div>
+        <div class="stage-name">{{ stage.name }}</div>
+        <div class="stage-stats">
+            <div class="stage-count">{{ stage.count }} invoices</div>
+            <div class="stage-balance">${{ "{:,.0f}".format(stage.balance) }}</div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+
+{% if current_stage %}
+<div class="filter-notice">
+    Showing Stage {{ current_stage }} invoices only.
+    <a href="/dunning">View all stages</a>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- Dunning Queue -->
+<div class="section-header">
+    <h2>
+        {% if current_stage %}
+            Stage {{ current_stage }} Queue
+        {% else %}
+            Full Dunning Queue
+        {% endif %}
+    </h2>
+</div>
+
+{% if queue %}
+<div class="table-actions">
+    <span class="queue-count">{{ queue|length }} invoices ready for notices</span>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Invoice</th>
+            <th>Case</th>
+            <th>Attorney</th>
+            <th class="text-right">Balance</th>
+            <th class="text-center">Days Overdue</th>
+            <th>Stage</th>
+            <th>Due Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for inv in queue %}
+        <tr class="{% if inv.dunning_stage == 4 %}row-critical{% elif inv.dunning_stage == 3 %}row-danger{% elif inv.dunning_stage == 2 %}row-warning{% endif %}">
+            <td>{{ inv.invoice_number }}</td>
+            <td class="case-name" title="{{ inv.case_name or '' }}">
+                {{ (inv.case_name or 'N/A')[:30] }}{% if inv.case_name and inv.case_name|length > 30 %}...{% endif %}
+            </td>
+            <td>{{ inv.attorney }}</td>
+            <td class="text-right">${{ "{:,.2f}".format(inv.balance_due) }}</td>
+            <td class="text-center {% if inv.days_overdue >= 45 %}text-critical{% elif inv.days_overdue >= 30 %}text-danger{% elif inv.days_overdue >= 15 %}text-warning{% endif %}">
+                {{ inv.days_overdue }}
+            </td>
+            <td>
+                <span class="stage-badge stage-badge-{{ inv.dunning_stage }}">
+                    {{ inv.stage_name }}
+                </span>
+            </td>
+            <td>{{ inv.due_date }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<div class="table-footer">
+    <span>Showing {{ queue|length }} invoices</span>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>
+        {% if current_stage %}
+            No invoices in Stage {{ current_stage }}.
+        {% else %}
+            No invoices currently in the dunning queue.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+<!-- CLI Instructions -->
+<div class="section-header">
+    <h2>How to Send Notices</h2>
+</div>
+<div class="instructions-box">
+    <p><strong>Preview what would be sent (safe):</strong></p>
+    <pre>uv run python agent.py collections dunning --dry-run</pre>
+
+    <p><strong>Preview specific stage only:</strong></p>
+    <pre>uv run python agent.py dunning preview --stage 1</pre>
+
+    <p><strong>Send notices for real (requires email config):</strong></p>
+    <pre>uv run python agent.py collections dunning --execute</pre>
+
+    <p class="warning-text">Notices are currently in <strong>dry-run mode</strong>. No emails will be sent until you change the scheduler to <code>--execute</code>.</p>
+</div>
+
+<!-- Recent History -->
+{% if history %}
+<div class="section-header">
+    <h2>Recently Sent Notices</h2>
+</div>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Sent</th>
+            <th>Invoice</th>
+            <th>Level</th>
+            <th class="text-right">Amount</th>
+            <th>Template</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for h in history %}
+        <tr>
+            <td>{{ h.sent_at }}</td>
+            <td>{{ h.invoice_number }}</td>
+            <td>Level {{ h.notice_level }}</td>
+            <td class="text-right">${{ "{:,.2f}".format(h.amount_due) }}</td>
+            <td>{{ h.template_used }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<style>
+/* Dunning-specific styles */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1.25rem;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary, #24292e);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-top: 0.25rem;
+}
+
+.section-header {
+    margin: 2rem 0 1rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    padding-bottom: 0.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+/* Stage cards */
+.stage-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stage-card {
+    background: var(--card-bg, #fff);
+    border: 2px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+}
+
+.stage-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.stage-card.active {
+    border-color: var(--primary-color, #0366d6);
+    background: var(--primary-light, #f0f7ff);
+}
+
+.stage-1 { border-top: 4px solid #28a745; }
+.stage-2 { border-top: 4px solid #f9a825; }
+.stage-3 { border-top: 4px solid #fd7e14; }
+.stage-4 { border-top: 4px solid #dc3545; }
+
+.stage-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.stage-number {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.stage-days {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #586069);
+    background: var(--bg-secondary, #f6f8fa);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+}
+
+.stage-name {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.stage-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+}
+
+.stage-count {
+    color: var(--text-secondary, #586069);
+}
+
+.stage-balance {
+    font-weight: 600;
+}
+
+/* Stage badges */
+.stage-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.stage-badge-1 { background: #d4edda; color: #155724; }
+.stage-badge-2 { background: #fff3cd; color: #856404; }
+.stage-badge-3 { background: #ffe5d0; color: #8a4500; }
+.stage-badge-4 { background: #f8d7da; color: #721c24; }
+
+/* Row colors */
+.row-warning { background-color: #fff8e1; }
+.row-danger { background-color: #fff3e0; }
+.row-critical { background-color: #ffebee; }
+
+.text-warning { color: #f9a825; }
+.text-danger { color: #fd7e14; }
+.text-critical { color: #dc3545; font-weight: 700; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+
+.filter-notice {
+    background: var(--primary-light, #e3f2fd);
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.filter-notice a {
+    margin-left: 0.5rem;
+}
+
+.table-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.queue-count {
+    font-size: 0.9rem;
+    color: var(--text-secondary, #586069);
+}
+
+.case-name {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.table-footer {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+}
+
+.empty-state {
+    padding: 3rem;
+    text-align: center;
+    color: var(--text-secondary, #586069);
+}
+
+/* Instructions box */
+.instructions-box {
+    background: var(--bg-secondary, #f6f8fa);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.instructions-box p {
+    margin: 0 0 0.5rem 0;
+}
+
+.instructions-box pre {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin: 0 0 1rem 0;
+    overflow-x: auto;
+    font-size: 0.9rem;
+}
+
+.instructions-box .warning-text {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: #fff3cd;
+    border-radius: 4px;
+    color: #856404;
+}
+
+.instructions-box code {
+    background: #e1e4e8;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+}
+
+/* Table styles */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1rem;
+}
+
+.data-table th,
+.data-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+}
+
+.data-table th {
+    background: var(--bg-secondary, #f6f8fa);
+    font-weight: 600;
+    text-align: left;
+}
+
+.data-table tbody tr:hover {
+    background: var(--hover-bg, #f8f9fa);
+}
+
+@media (max-width: 900px) {
+    .stage-cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .stage-cards {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

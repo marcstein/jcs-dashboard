@@ -2079,3 +2079,463 @@ class DashboardData:
         except Exception as e:
             print(f"Error getting contact reliability: {e}")
             return {'total': 0, 'kept': 0, 'broken': 0, 'pending': 0, 'rate': 0}
+
+    # =========================================================================
+    # Payment Analytics Methods
+    # =========================================================================
+
+    def get_payment_analytics_summary(self, year: int = None) -> Dict:
+        """Get overall payment analytics summary."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
+        try:
+            if not self.cache_db_path.exists():
+                return self._empty_payment_analytics()
+
+            with self._get_cache_connection() as conn:
+                cursor = conn.cursor()
+
+                # Overall payment stats for the year
+                cursor.execute(f"""
+                    SELECT
+                        COUNT(*) as total_invoices,
+                        SUM(total_amount) as total_billed,
+                        SUM(paid_amount) as total_collected,
+                        SUM(balance_due) as total_outstanding,
+                        SUM(CASE WHEN balance_due = 0 THEN 1 ELSE 0 END) as paid_in_full,
+                        AVG(CASE WHEN balance_due = 0 AND paid_amount > 0
+                            THEN julianday(DATE('now')) - julianday(invoice_date) END) as avg_days_to_payment
+                    FROM cached_invoices
+                    WHERE strftime('%Y', invoice_date) = '{year}'
+                """)
+                row = cursor.fetchone()
+
+                total_billed = row['total_billed'] or 0
+                total_collected = row['total_collected'] or 0
+
+                # Get average days to payment from paid invoices
+                cursor.execute(f"""
+                    SELECT AVG(julianday(DATE('now')) - julianday(due_date)) as avg_dpd
+                    FROM cached_invoices
+                    WHERE strftime('%Y', invoice_date) = '{year}'
+                      AND balance_due > 0
+                """)
+                dpd_row = cursor.fetchone()
+                avg_dpd = round(dpd_row['avg_dpd'], 1) if dpd_row and dpd_row['avg_dpd'] else 0
+
+                # Get monthly trend
+                cursor.execute(f"""
+                    SELECT
+                        strftime('%m', invoice_date) as month,
+                        SUM(total_amount) as billed,
+                        SUM(paid_amount) as collected
+                    FROM cached_invoices
+                    WHERE strftime('%Y', invoice_date) = '{year}'
+                    GROUP BY strftime('%m', invoice_date)
+                    ORDER BY month
+                """)
+                monthly_trend = [{
+                    'month': r['month'],
+                    'billed': r['billed'] or 0,
+                    'collected': r['collected'] or 0,
+                    'collection_rate': round((r['collected'] or 0) / r['billed'] * 100, 1) if r['billed'] else 0
+                } for r in cursor.fetchall()]
+
+                return {
+                    'year': year,
+                    'total_invoices': row['total_invoices'] or 0,
+                    'total_billed': total_billed,
+                    'total_collected': total_collected,
+                    'total_outstanding': row['total_outstanding'] or 0,
+                    'collection_rate': round(total_collected / total_billed * 100, 1) if total_billed > 0 else 0,
+                    'paid_in_full_count': row['paid_in_full'] or 0,
+                    'avg_days_to_payment': round(row['avg_days_to_payment'], 1) if row['avg_days_to_payment'] else 0,
+                    'avg_dpd_outstanding': avg_dpd,
+                    'monthly_trend': monthly_trend,
+                }
+        except Exception as e:
+            print(f"Error getting payment analytics summary: {e}")
+            return self._empty_payment_analytics()
+
+    def _empty_payment_analytics(self) -> Dict:
+        """Return empty payment analytics structure."""
+        return {
+            'year': datetime.now().year,
+            'total_invoices': 0,
+            'total_billed': 0,
+            'total_collected': 0,
+            'total_outstanding': 0,
+            'collection_rate': 0,
+            'paid_in_full_count': 0,
+            'avg_days_to_payment': 0,
+            'avg_dpd_outstanding': 0,
+            'monthly_trend': [],
+        }
+
+    def get_time_to_payment_by_attorney(self, year: int = None) -> List[Dict]:
+        """Get time-to-payment statistics grouped by attorney."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
+        try:
+            if not self.cache_db_path.exists():
+                return []
+
+            with self._get_cache_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute(f"""
+                    SELECT
+                        c.lead_attorney_id as attorney_id,
+                        c.lead_attorney_name as attorney_name,
+                        COUNT(i.id) as invoice_count,
+                        SUM(i.total_amount) as total_billed,
+                        SUM(i.paid_amount) as total_collected,
+                        SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_in_full,
+                        AVG(CASE WHEN i.balance_due = 0 AND i.paid_amount > 0
+                            THEN julianday(DATE('now')) - julianday(i.invoice_date) END) as avg_days,
+                        MIN(CASE WHEN i.balance_due = 0
+                            THEN julianday(DATE('now')) - julianday(i.invoice_date) END) as min_days,
+                        MAX(CASE WHEN i.balance_due = 0
+                            THEN julianday(DATE('now')) - julianday(i.invoice_date) END) as max_days
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id
+                    WHERE strftime('%Y', i.invoice_date) = '{year}'
+                      AND c.lead_attorney_name IS NOT NULL
+                    GROUP BY c.lead_attorney_id, c.lead_attorney_name
+                    ORDER BY total_billed DESC
+                """)
+
+                results = []
+                for row in cursor.fetchall():
+                    total_billed = row['total_billed'] or 0
+                    total_collected = row['total_collected'] or 0
+                    collection_rate = (total_collected / total_billed * 100) if total_billed > 0 else 0
+
+                    results.append({
+                        'attorney_id': row['attorney_id'],
+                        'attorney_name': row['attorney_name'],
+                        'invoice_count': row['invoice_count'] or 0,
+                        'total_billed': total_billed,
+                        'total_collected': total_collected,
+                        'collection_rate': round(collection_rate, 1),
+                        'paid_in_full': row['paid_in_full'] or 0,
+                        'avg_days_to_payment': round(row['avg_days'], 1) if row['avg_days'] else None,
+                        'min_days': int(row['min_days']) if row['min_days'] else None,
+                        'max_days': int(row['max_days']) if row['max_days'] else None,
+                    })
+                return results
+        except Exception as e:
+            print(f"Error getting time to payment by attorney: {e}")
+            return []
+
+    def get_time_to_payment_by_case_type(self, year: int = None) -> List[Dict]:
+        """Get time-to-payment statistics grouped by case type (practice area)."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
+        try:
+            if not self.cache_db_path.exists():
+                return []
+
+            with self._get_cache_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute(f"""
+                    SELECT
+                        COALESCE(c.practice_area, 'Unknown') as case_type,
+                        COUNT(i.id) as invoice_count,
+                        SUM(i.total_amount) as total_billed,
+                        SUM(i.paid_amount) as total_collected,
+                        SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_in_full,
+                        AVG(CASE WHEN i.balance_due = 0 AND i.paid_amount > 0
+                            THEN julianday(DATE('now')) - julianday(i.invoice_date) END) as avg_days,
+                        MIN(CASE WHEN i.balance_due = 0
+                            THEN julianday(DATE('now')) - julianday(i.invoice_date) END) as min_days,
+                        MAX(CASE WHEN i.balance_due = 0
+                            THEN julianday(DATE('now')) - julianday(i.invoice_date) END) as max_days
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id
+                    WHERE strftime('%Y', i.invoice_date) = '{year}'
+                    GROUP BY COALESCE(c.practice_area, 'Unknown')
+                    ORDER BY total_billed DESC
+                """)
+
+                results = []
+                for row in cursor.fetchall():
+                    total_billed = row['total_billed'] or 0
+                    total_collected = row['total_collected'] or 0
+                    collection_rate = (total_collected / total_billed * 100) if total_billed > 0 else 0
+
+                    results.append({
+                        'case_type': row['case_type'],
+                        'invoice_count': row['invoice_count'] or 0,
+                        'total_billed': total_billed,
+                        'total_collected': total_collected,
+                        'collection_rate': round(collection_rate, 1),
+                        'paid_in_full': row['paid_in_full'] or 0,
+                        'avg_days_to_payment': round(row['avg_days'], 1) if row['avg_days'] else None,
+                        'min_days': int(row['min_days']) if row['min_days'] else None,
+                        'max_days': int(row['max_days']) if row['max_days'] else None,
+                    })
+                return results
+        except Exception as e:
+            print(f"Error getting time to payment by case type: {e}")
+            return []
+
+    def get_payment_velocity_trend(self, year: int = None, months_back: int = 12) -> List[Dict]:
+        """Get payment velocity (days to payment) trend over time."""
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+
+        try:
+            if not self.cache_db_path.exists():
+                return []
+
+            with self._get_cache_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get monthly payment velocity
+                cursor.execute(f"""
+                    SELECT
+                        strftime('%Y-%m', invoice_date) as month,
+                        COUNT(*) as invoice_count,
+                        SUM(total_amount) as total_billed,
+                        SUM(paid_amount) as total_collected,
+                        SUM(CASE WHEN balance_due = 0 THEN 1 ELSE 0 END) as paid_count,
+                        AVG(CASE WHEN balance_due = 0 AND paid_amount > 0
+                            THEN julianday(DATE('now')) - julianday(invoice_date) END) as avg_days
+                    FROM cached_invoices
+                    WHERE invoice_date >= DATE('now', '-{months_back} months')
+                    GROUP BY strftime('%Y-%m', invoice_date)
+                    ORDER BY month
+                """)
+
+                results = []
+                for row in cursor.fetchall():
+                    total_billed = row['total_billed'] or 0
+                    total_collected = row['total_collected'] or 0
+
+                    results.append({
+                        'month': row['month'],
+                        'invoice_count': row['invoice_count'] or 0,
+                        'total_billed': total_billed,
+                        'total_collected': total_collected,
+                        'collection_rate': round(total_collected / total_billed * 100, 1) if total_billed > 0 else 0,
+                        'paid_count': row['paid_count'] or 0,
+                        'avg_days_to_payment': round(row['avg_days'], 1) if row['avg_days'] else None,
+                    })
+                return results
+        except Exception as e:
+            print(f"Error getting payment velocity trend: {e}")
+            return []
+
+    # =========================================================================
+    # Dunning Preview Methods
+    # =========================================================================
+
+    def get_dunning_queue(self, stage: int = None) -> List[Dict]:
+        """
+        Get invoices eligible for dunning notices.
+
+        Stages:
+        1: 5-14 days overdue (Friendly Reminder)
+        2: 15-29 days overdue (Formal Reminder)
+        3: 30-44 days overdue (Urgent Notice)
+        4: 45+ days overdue (Final Notice)
+        """
+        try:
+            if not self.cache_db_path.exists():
+                return []
+
+            with self._get_cache_connection() as conn:
+                cursor = conn.cursor()
+
+                # Build stage filter
+                stage_filter = ""
+                if stage == 1:
+                    stage_filter = "AND days_overdue BETWEEN 5 AND 14"
+                elif stage == 2:
+                    stage_filter = "AND days_overdue BETWEEN 15 AND 29"
+                elif stage == 3:
+                    stage_filter = "AND days_overdue BETWEEN 30 AND 44"
+                elif stage == 4:
+                    stage_filter = "AND days_overdue >= 45"
+
+                cursor.execute(f"""
+                    SELECT
+                        i.id as invoice_id,
+                        i.invoice_number,
+                        i.case_id,
+                        c.name as case_name,
+                        c.lead_attorney_name,
+                        i.total_amount,
+                        i.paid_amount,
+                        i.balance_due,
+                        i.due_date,
+                        CAST(julianday('now') - julianday(i.due_date) AS INTEGER) as days_overdue,
+                        CASE
+                            WHEN CAST(julianday('now') - julianday(i.due_date) AS INTEGER) BETWEEN 5 AND 14 THEN 1
+                            WHEN CAST(julianday('now') - julianday(i.due_date) AS INTEGER) BETWEEN 15 AND 29 THEN 2
+                            WHEN CAST(julianday('now') - julianday(i.due_date) AS INTEGER) BETWEEN 30 AND 44 THEN 3
+                            WHEN CAST(julianday('now') - julianday(i.due_date) AS INTEGER) >= 45 THEN 4
+                            ELSE 0
+                        END as dunning_stage
+                    FROM cached_invoices i
+                    LEFT JOIN cached_cases c ON c.id = i.case_id
+                    WHERE i.balance_due > 0
+                    AND CAST(julianday('now') - julianday(i.due_date) AS INTEGER) >= 5
+                    {stage_filter}
+                    ORDER BY days_overdue DESC
+                """)
+
+                results = []
+                for row in cursor.fetchall():
+                    stage_num = row['dunning_stage']
+                    stage_names = {
+                        1: 'Friendly Reminder',
+                        2: 'Formal Reminder',
+                        3: 'Urgent Notice',
+                        4: 'Final Notice'
+                    }
+                    results.append({
+                        'invoice_id': row['invoice_id'],
+                        'invoice_number': row['invoice_number'],
+                        'case_id': row['case_id'],
+                        'case_name': row['case_name'] or 'Unknown',
+                        'attorney': row['lead_attorney_name'] or 'Unassigned',
+                        'total_amount': row['total_amount'] or 0,
+                        'paid_amount': row['paid_amount'] or 0,
+                        'balance_due': row['balance_due'] or 0,
+                        'due_date': row['due_date'],
+                        'days_overdue': row['days_overdue'],
+                        'dunning_stage': stage_num,
+                        'stage_name': stage_names.get(stage_num, 'N/A'),
+                    })
+                return results
+        except Exception as e:
+            print(f"Error getting dunning queue: {e}")
+            return []
+
+    def get_dunning_summary(self) -> Dict:
+        """Get summary of dunning queue by stage."""
+        try:
+            if not self.cache_db_path.exists():
+                return self._empty_dunning_summary()
+
+            with self._get_cache_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT
+                        CASE
+                            WHEN CAST(julianday('now') - julianday(due_date) AS INTEGER) BETWEEN 5 AND 14 THEN 1
+                            WHEN CAST(julianday('now') - julianday(due_date) AS INTEGER) BETWEEN 15 AND 29 THEN 2
+                            WHEN CAST(julianday('now') - julianday(due_date) AS INTEGER) BETWEEN 30 AND 44 THEN 3
+                            WHEN CAST(julianday('now') - julianday(due_date) AS INTEGER) >= 45 THEN 4
+                            ELSE 0
+                        END as stage,
+                        COUNT(*) as count,
+                        SUM(balance_due) as total_balance
+                    FROM cached_invoices
+                    WHERE balance_due > 0
+                    AND CAST(julianday('now') - julianday(due_date) AS INTEGER) >= 5
+                    GROUP BY stage
+                    ORDER BY stage
+                """)
+
+                stages = {
+                    1: {'name': 'Friendly Reminder', 'days': '5-14', 'count': 0, 'balance': 0},
+                    2: {'name': 'Formal Reminder', 'days': '15-29', 'count': 0, 'balance': 0},
+                    3: {'name': 'Urgent Notice', 'days': '30-44', 'count': 0, 'balance': 0},
+                    4: {'name': 'Final Notice', 'days': '45+', 'count': 0, 'balance': 0},
+                }
+
+                total_count = 0
+                total_balance = 0
+
+                for row in cursor.fetchall():
+                    stage = row['stage']
+                    if stage in stages:
+                        stages[stage]['count'] = row['count']
+                        stages[stage]['balance'] = row['total_balance'] or 0
+                        total_count += row['count']
+                        total_balance += row['total_balance'] or 0
+
+                return {
+                    'stages': stages,
+                    'total_count': total_count,
+                    'total_balance': total_balance,
+                }
+        except Exception as e:
+            print(f"Error getting dunning summary: {e}")
+            return self._empty_dunning_summary()
+
+    def _empty_dunning_summary(self) -> Dict:
+        """Return empty dunning summary structure."""
+        return {
+            'stages': {
+                1: {'name': 'Friendly Reminder', 'days': '5-14', 'count': 0, 'balance': 0},
+                2: {'name': 'Formal Reminder', 'days': '15-29', 'count': 0, 'balance': 0},
+                3: {'name': 'Urgent Notice', 'days': '30-44', 'count': 0, 'balance': 0},
+                4: {'name': 'Final Notice', 'days': '45+', 'count': 0, 'balance': 0},
+            },
+            'total_count': 0,
+            'total_balance': 0,
+        }
+
+    def get_dunning_history(self, limit: int = 50) -> List[Dict]:
+        """Get recent dunning notices sent."""
+        try:
+            if not self.db_path.exists():
+                return []
+
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Check if dunning_history table exists
+                cursor.execute("""
+                    SELECT name FROM sqlite_master
+                    WHERE type='table' AND name='dunning_history'
+                """)
+                if not cursor.fetchone():
+                    return []
+
+                cursor.execute(f"""
+                    SELECT
+                        invoice_id,
+                        invoice_number,
+                        contact_id,
+                        case_id,
+                        notice_level,
+                        days_overdue,
+                        amount_due,
+                        template_used,
+                        sent_at
+                    FROM dunning_history
+                    ORDER BY sent_at DESC
+                    LIMIT {limit}
+                """)
+
+                results = []
+                for row in cursor.fetchall():
+                    results.append({
+                        'invoice_id': row['invoice_id'],
+                        'invoice_number': row['invoice_number'],
+                        'contact_id': row['contact_id'],
+                        'case_id': row['case_id'],
+                        'notice_level': row['notice_level'],
+                        'days_overdue': row['days_overdue'],
+                        'amount_due': row['amount_due'],
+                        'template_used': row['template_used'],
+                        'sent_at': row['sent_at'],
+                    })
+                return results
+        except Exception as e:
+            print(f"Error getting dunning history: {e}")
+            return []

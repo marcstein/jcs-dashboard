@@ -155,6 +155,14 @@ DAILY_TASKS = [
         owner="Melissa Scarlett",
         notify_on_failure=True,
     ),
+    ScheduledTask(
+        name="attorney_stalled_cases",
+        description="Notify attorneys about stalled cases (30+ days in phase)",
+        frequency=TaskFrequency.DAILY,
+        command="phases notify-attorneys --days 30",
+        run_at=time(8, 30),  # After morning sync
+        notify_on_failure=True,
+    ),
 ]
 
 WEEKLY_TASKS = [

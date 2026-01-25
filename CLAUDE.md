@@ -130,6 +130,16 @@ uv run python agent.py plans noiw-status              # Show workflow status sum
 uv run python agent.py plans noiw-list pending        # List cases by status
 uv run python agent.py plans noiw-update <case> <inv> <status>  # Update case status
 
+# Dunning / Collections
+uv run python agent.py collections report             # Generate aging report
+uv run python agent.py collections preview            # Preview dunning queue (all stages)
+uv run python agent.py collections preview --stage 1  # Preview stage 1 only (5-14 days)
+uv run python agent.py collections preview --stage 4  # Preview stage 4 only (45+ days)
+uv run python agent.py collections preview --export   # Export queue to CSV
+uv run python agent.py collections dunning --dry-run  # Simulate sending notices
+uv run python agent.py collections dunning --execute  # LIVE: Actually send notices
+uv run python agent.py collections test-email --stage 1 --to email@example.com  # Test email config
+
 # Quality
 uv run python agent.py quality summary  # Quality audit
 uv run python agent.py quality audit    # Run audit on recent cases
@@ -300,6 +310,8 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 - `/phases` - Case phase distribution and stalled cases
 - `/trends` - Historical KPI trends with sparklines
 - `/promises` - Payment promise tracking and reliability
+- `/payments` - Payment analytics: time-to-payment by attorney and case type
+- `/dunning` - Dunning notices preview and approval
 - `/staff/{name}` - Individual staff detail pages
 - `/wonky` - Invoices requiring attention
 
@@ -336,3 +348,8 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 17. Added license deadline SMS alerts (`tasks license-notify --sms`)
 18. Added dashboard Promises page (`/promises`) with promise-keeping rate tracking
 19. Added NOIW/payment email templates (noiw_warning, noiw_final_notice, payment_plan_confirmation, promise_reminder, promise_broken)
+20. Added attorney stalled case notifications (`phases notify-attorneys`)
+21. Added dashboard Payment Analytics page (`/payments`) with time-to-payment by attorney and case type
+22. Added dashboard Dunning Preview page (`/dunning`) with stage breakdown and approval workflow
+23. Added `collections preview` CLI command to preview dunning notices before sending
+24. Added `collections test-email` CLI command to test email configuration
