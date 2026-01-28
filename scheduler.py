@@ -67,6 +67,14 @@ DAILY_TASKS = [
         timeout=1800,  # 30 minute timeout for full sync
     ),
     ScheduledTask(
+        name="phase_sync",
+        description="Sync case phases from MyCase stages (tracks transitions for velocity)",
+        frequency=TaskFrequency.DAILY,
+        command="phases sync",
+        run_at=time(6, 20),  # 6:20 AM - after main sync
+        timeout=300,  # 5 minute timeout
+    ),
+    ScheduledTask(
         name="events_report",
         description="Send daily upcoming events report to managing partner",
         frequency=TaskFrequency.DAILY,
