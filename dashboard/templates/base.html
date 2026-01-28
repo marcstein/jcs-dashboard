@@ -212,16 +212,17 @@
                 chatInput.focus();
             });
 
-            // Close chat
+            // Close chat completely
             function closeChat() {
                 chatSidebar.classList.remove('open');
+                chatSidebar.classList.remove('expanded');
                 chatOverlay.classList.remove('visible');
             }
 
             chatClose.addEventListener('click', closeChat);
             chatOverlay.addEventListener('click', closeChat);
 
-            // Expand/collapse chat
+            // Expand/collapse chat (toggle between normal and expanded)
             chatExpand.addEventListener('click', function() {
                 chatSidebar.classList.toggle('expanded');
             });
