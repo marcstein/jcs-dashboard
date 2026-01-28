@@ -1642,12 +1642,12 @@ class DashboardData:
             with self._get_phases_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get phase distribution from case_phases table
+                # Get phase distribution from case_phase_history (current = exited_at IS NULL)
                 cursor.execute("""
                     SELECT p.code, p.name, p.short_name, p.display_order as sequence,
-                           COUNT(cp.case_id) as case_count
+                           COUNT(cph.case_id) as case_count
                     FROM phases p
-                    LEFT JOIN case_phases cp ON p.code = cp.current_phase
+                    LEFT JOIN case_phase_history cph ON p.code = cph.phase_code AND cph.exited_at IS NULL
                     WHERE p.firm_id IS NULL
                     GROUP BY p.code, p.name, p.short_name, p.display_order
                     ORDER BY p.display_order
@@ -1693,12 +1693,13 @@ class DashboardData:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    SELECT cp.case_id, cp.case_name, cp.current_phase, cp.phase_entered_at,
+                    SELECT cph.case_id, cph.case_name, cph.phase_code as current_phase, cph.entered_at as phase_entered_at,
                            p.name as phase_name, p.short_name,
-                           CAST(julianday('now') - julianday(cp.phase_entered_at) AS INTEGER) as days_in_phase
-                    FROM case_phases cp
-                    JOIN phases p ON cp.current_phase = p.code
-                    WHERE julianday('now') - julianday(cp.phase_entered_at) >= ?
+                           CAST(julianday('now') - julianday(cph.entered_at) AS INTEGER) as days_in_phase
+                    FROM case_phase_history cph
+                    JOIN phases p ON cph.phase_code = p.code
+                    WHERE cph.exited_at IS NULL
+                      AND julianday('now') - julianday(cph.entered_at) >= ?
                     ORDER BY days_in_phase DESC
                     LIMIT 50
                 """, (threshold_days,))
@@ -1725,9 +1726,10 @@ class DashboardData:
             with self._get_phases_connection() as phases_conn:
                 phases_cursor = phases_conn.cursor()
 
-                # Get case IDs and phases
+                # Get case IDs and current phases (exited_at IS NULL = current)
                 phases_cursor.execute("""
-                    SELECT case_id, current_phase FROM case_phases
+                    SELECT case_id, phase_code as current_phase FROM case_phase_history
+                    WHERE exited_at IS NULL
                 """)
                 case_phases = {r['case_id']: r['current_phase'] for r in phases_cursor.fetchall()}
 
@@ -1782,11 +1784,11 @@ class DashboardData:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    SELECT cp.case_id, cp.case_name, cp.phase_entered_at,
-                           CAST(julianday('now') - julianday(cp.phase_entered_at) AS INTEGER) as days_in_phase
-                    FROM case_phases cp
-                    WHERE cp.current_phase = ?
-                    ORDER BY cp.phase_entered_at ASC
+                    SELECT cph.case_id, cph.case_name, cph.entered_at as phase_entered_at,
+                           CAST(julianday('now') - julianday(cph.entered_at) AS INTEGER) as days_in_phase
+                    FROM case_phase_history cph
+                    WHERE cph.phase_code = ? AND cph.exited_at IS NULL
+                    ORDER BY cph.entered_at ASC
                     LIMIT ?
                 """, (phase_code, limit))
 
