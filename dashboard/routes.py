@@ -669,32 +669,35 @@ You help users query and analyze law firm data from their MyCase practice manage
 
 {MYCASE_SCHEMA}
 
+CRITICAL: You MUST respond with ONLY valid JSON - no other text before or after.
+The system will execute your SQL query and show the results to the user.
+NEVER show SQL queries to users - they cannot run them. The system handles execution automatically.
+
 When the user asks a question:
 1. Determine if it requires a database query
-2. If yes, generate a SQLite query to answer their question
-3. Return your response in this exact JSON format:
+2. If yes, generate a SQLite query - the system will run it and show results
+3. Return ONLY this JSON format (no markdown, no extra text):
 
 For database queries:
-{{"type": "query", "sql": "SELECT ...", "explanation": "Brief explanation of what this query does"}}
+{{"type": "query", "sql": "SELECT ...", "explanation": "Brief explanation"}}
 
 For general questions (no query needed):
 {{"type": "text", "response": "Your helpful response here"}}
 
 Guidelines:
-- Always use proper SQLite syntax
-- For monetary values, format with $ and commas
-- Round percentages to 1 decimal place
+- ALWAYS return valid JSON only - nothing else
+- Use proper SQLite syntax
 - Limit results to 20 rows unless user asks for more
 - Order results meaningfully (by amount, date, etc.)
 - When comparing attorneys, include collection rate calculations
-- For time-based queries, default to 2025 unless specified otherwise
+- For time-based queries, default to current year unless specified
 - Use aggregates (SUM, COUNT, AVG) when asking about totals or averages
 - Join tables as needed to get complete information
+- For monetary columns use aliases like "total_billed" or "balance_due" (system auto-formats as currency)
+- For percentages use aliases containing "rate" or "pct" (system auto-formats with %)
 
-Example queries:
-- "Show billing by attorney" → Query cached_invoices joined with cached_cases, grouped by lead_attorney_name
-- "Collection rate by case type" → SUM(paid_amount)/SUM(total_amount)*100 grouped by case_type_name
-- "Overdue tasks" → Query cached_tasks WHERE status='Pending' AND due_date < DATE('now')
+Example - user asks "Show billing by attorney":
+{{"type": "query", "sql": "SELECT lead_attorney_name, COUNT(*) as invoice_count, SUM(total_amount) as total_billed, SUM(paid_amount) as collected FROM cached_invoices i JOIN cached_cases c ON i.case_id = c.id WHERE strftime('%Y', invoice_date) = '2025' GROUP BY lead_attorney_name ORDER BY total_billed DESC LIMIT 20", "explanation": "Billing by attorney for 2025"}}
 """
 
 
@@ -830,7 +833,7 @@ async def api_chat(request: Request):
 
                 if error:
                     return JSONResponse({
-                        "response": f"**Query Error:** {error}\n\nSQL attempted: `{sql}`"
+                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question."
                     })
 
                 formatted = format_query_results(rows, explanation)
@@ -841,8 +844,49 @@ async def api_chat(request: Request):
                 return JSONResponse({"response": parsed.get("response", assistant_text)})
 
         except json.JSONDecodeError:
-            # If not valid JSON, return as-is
-            return JSONResponse({"response": assistant_text})
+            # JSON parsing failed - try to extract and execute SQL if present
+            sql_match = None
+
+            # Look for SQL in various formats
+            import re
+
+            # Try to find SELECT statement in the response
+            sql_patterns = [
+                r'```sql\s*(SELECT[^`]+)```',  # ```sql SELECT ... ```
+                r'`(SELECT[^`]+)`',             # `SELECT ...`
+                r'"sql":\s*"(SELECT[^"]+)"',    # "sql": "SELECT ..."
+                r"'sql':\s*'(SELECT[^']+)'",    # 'sql': 'SELECT ...'
+                r'(SELECT\s+.+?(?:LIMIT\s+\d+|;|\Z))',  # Raw SELECT statement
+            ]
+
+            for pattern in sql_patterns:
+                match = re.search(pattern, assistant_text, re.IGNORECASE | re.DOTALL)
+                if match:
+                    sql_match = match.group(1).strip().rstrip(';')
+                    break
+
+            if sql_match:
+                # Found SQL - execute it
+                rows, error = execute_chat_query(sql_match)
+
+                if error:
+                    return JSONResponse({
+                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question."
+                    })
+
+                formatted = format_query_results(rows, "")
+                return JSONResponse({"response": formatted})
+
+            # No SQL found - return the text response but clean it up
+            # Remove any JSON-like formatting that might confuse users
+            clean_response = assistant_text
+            clean_response = re.sub(r'\{["\']type["\'].*?\}', '', clean_response, flags=re.DOTALL)
+            clean_response = clean_response.strip()
+
+            if clean_response:
+                return JSONResponse({"response": clean_response})
+            else:
+                return JSONResponse({"response": "I couldn't process that request. Please try rephrasing your question."})
 
     except Exception as e:
         return JSONResponse({"error": f"Chat error: {str(e)}"})
