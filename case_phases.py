@@ -231,6 +231,34 @@ DEFAULT_STAGE_MAPPINGS = [
     # Motion/Hearing stages
     {"stage_name": "Waiting for Hearing to be Scheduled", "phase_code": "motions"},
     {"stage_name": "PCR - Reviewing Case File for Appeal", "phase_code": "motions"},
+
+    # === Phase-Named Stages (new naming convention) ===
+    # Phase 1.x → Intake
+    {"stage_name": "Phase 1: Intake & Case Initiation", "phase_code": "intake"},
+    {"stage_name": "Phase 1.1: CaseNet Checklist", "phase_code": "intake"},
+    {"stage_name": "Phase 1.2: In Warrant - Initial Case Filing", "phase_code": "intake"},
+    {"stage_name": "Phase 1.3: In Jail - Awaiting Bond Reduction", "phase_code": "intake"},
+
+    # Phase 2.x → Discovery
+    {"stage_name": "Phase 2: Discovery & Investigation", "phase_code": "discovery"},
+    {"stage_name": "Phase 2.1: Supplemental Discovery Needed", "phase_code": "discovery"},
+
+    # Phase 3.x → Motions
+    {"stage_name": "Phase 3: Legal Analysis & Motion Practice", "phase_code": "motions"},
+
+    # Phase 4.x → Strategy
+    {"stage_name": "Phase 4: Case Strategy & Negotiation", "phase_code": "strategy"},
+    {"stage_name": "Phase 4.2: Awaiting Client Program Complitions", "phase_code": "strategy"},
+
+    # Phase 5.x → Trial Prep
+    {"stage_name": "Phase 5: Trial Preparation", "phase_code": "trial_prep"},
+
+    # Phase 6.x → Disposition
+    {"stage_name": "Phase 6: Disposition & Sentencing", "phase_code": "disposition"},
+
+    # Phase 7.x → Post-Disposition/Closing
+    {"stage_name": "Phase 7: Post Disposition & Case Closure", "phase_code": "post_disposition"},
+    {"stage_name": "Phase 7.1: Awaiting DOR Case Being Finalized", "phase_code": "post_disposition"},
 ]
 
 
