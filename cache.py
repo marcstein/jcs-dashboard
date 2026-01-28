@@ -468,7 +468,7 @@ class MyCaseCache:
                 case.get('date_closed') or case.get('closed_date'),
                 lead_attorney_id,
                 lead_attorney_name,
-                case.get('case_stage', {}).get('name') if isinstance(case.get('case_stage'), dict) else None,
+                case.get('case_stage', {}).get('name') if isinstance(case.get('case_stage'), dict) else case.get('case_stage'),
                 case.get('created_at'),
                 case.get('updated_at'),
                 json.dumps(case),
