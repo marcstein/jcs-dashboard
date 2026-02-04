@@ -998,6 +998,20 @@ Only include variables where you found a clear value. If unsure, don't include i
                     key = v.name.lower().replace(' ', '_')
                     replacements[key] = v.value
 
+            # Add variable aliases (map different names for same concept)
+            # This handles mismatches between DOCUMENT_TYPES and template placeholders
+            VARIABLE_ALIASES = {
+                'petitioner_name': 'defendant_name',  # DOR cases: defendant is petitioner
+                'plaintiff_name': 'defendant_name',
+                'client_name': 'defendant_name',
+                'respondent_name': 'defendant_name',
+            }
+            for alias, canonical in VARIABLE_ALIASES.items():
+                if alias in replacements and canonical not in replacements:
+                    replacements[canonical] = replacements[alias]
+                elif canonical in replacements and alias not in replacements:
+                    replacements[alias] = replacements[canonical]
+
             # Format monetary values with $ sign
             for key in ['bond_amount', 'fine_amount', 'amount']:
                 if key in replacements:
