@@ -747,15 +747,37 @@ class DocumentEngine:
                     # PostgreSQL full-text search with tsvector
                     # Convert OR-separated words to tsquery format (word1 | word2)
                     pg_query = ' | '.join(words)
-                    cursor.execute("""
-                        SELECT * FROM templates
-                        WHERE firm_id = %s
-                          AND is_active = TRUE
-                          AND to_tsvector('english', name || ' ' || COALESCE(category, '') || ' ' || COALESCE(tags, ''))
-                              @@ to_tsquery('english', %s)
-                        ORDER BY ts_rank(to_tsvector('english', name), to_tsquery('english', %s)) DESC
-                        LIMIT %s
-                    """, (firm_id, pg_query, pg_query, limit))
+
+                    # Check if query contains a county name
+                    county_words = ['county', 'jefferson', 'st louis', 'saint louis', 'jackson',
+                                    'clay', 'platte', 'cass', 'cole', 'greene', 'boone',
+                                    'buchanan', 'jasper', 'franklin', 'lincoln', 'warren',
+                                    'ste genevieve', 'cape girardeau', 'scott', 'perry']
+                    has_county = any(cw in search_query for cw in county_words)
+
+                    if has_county:
+                        # If county specified, search normally
+                        cursor.execute("""
+                            SELECT * FROM templates
+                            WHERE firm_id = %s
+                              AND is_active = TRUE
+                              AND to_tsvector('english', name || ' ' || COALESCE(category, '') || ' ' || COALESCE(tags, ''))
+                                  @@ to_tsquery('english', %s)
+                            ORDER BY ts_rank(to_tsvector('english', name), to_tsquery('english', %s)) DESC
+                            LIMIT %s
+                        """, (firm_id, pg_query, pg_query, limit))
+                    else:
+                        # If no county specified, prefer shorter (more generic) template names
+                        cursor.execute("""
+                            SELECT * FROM templates
+                            WHERE firm_id = %s
+                              AND is_active = TRUE
+                              AND to_tsvector('english', name || ' ' || COALESCE(category, '') || ' ' || COALESCE(tags, ''))
+                                  @@ to_tsquery('english', %s)
+                            ORDER BY LENGTH(name) ASC,
+                                     ts_rank(to_tsvector('english', name), to_tsquery('english', %s)) DESC
+                            LIMIT %s
+                        """, (firm_id, pg_query, pg_query, limit))
                 else:
                     # SQLite FTS5 search
                     cursor.execute("""
