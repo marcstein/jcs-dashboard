@@ -5,9 +5,15 @@ Preprocess Templates in PostgreSQL
 Updates all Word templates in the database to use standardized {{placeholder}} syntax.
 This is a one-time migration that:
 1. Reads each template's .docx content
-2. Detects sample data (names, addresses, case numbers, etc.)
+2. Detects sample data by STRUCTURE (not hardcoded values)
 3. Replaces sample data with {{placeholders}}
 4. Updates the template in PostgreSQL
+
+GENERALIZED APPROACH:
+- Party names detected by position relative to role keywords (Plaintiff, Defendant, etc.)
+- Jurisdictions detected by structural patterns (CIRCUIT COURT OF X COUNTY)
+- Fixed entities (STATE OF MISSOURI, etc.) are never replaced
+- Works with any firm's templates without requiring specific variable strings
 
 Run with:
     python preprocess_templates_pg.py --dry-run    # Preview changes without updating
@@ -23,7 +29,7 @@ import signal
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 from dataclasses import dataclass
 
 # Handle broken pipe errors gracefully (when piping to head, etc.)
@@ -68,8 +74,10 @@ PLACEHOLDERS = {
     'defendant_name': '{{defendant_name}}',
     'plaintiff_name': '{{plaintiff_name}}',
     'petitioner_name': '{{petitioner_name}}',
+    'respondent_name': '{{respondent_name}}',
     'case_number': '{{case_number}}',
     'county': '{{county}}',
+    'court_name': '{{court_name}}',
     'division': '{{division}}',
     'bond_amount': '{{bond_amount}}',
     'fine_amount': '{{fine_amount}}',
@@ -86,52 +94,60 @@ PLACEHOLDERS = {
     'service_date': '{{service_date}}',
 }
 
-# Known sample values to replace (firm-specific data)
-KNOWN_FIRM_VALUES = {
-    # Addresses
-    "75 West Lockwood Ave., Suite 250": "{{firm_address}}",
-    "75 West Lockwood Ave, Suite 250": "{{firm_address}}",
-    "120 S. Central Ave. Suite 1550": "{{firm_address}}",
-    "120 S. Central Ave Suite 1550": "{{firm_address}}",
-    "120 S Central Ave Suite 1550": "{{firm_address}}",
-    "120 S. Central Avenue, Suite 1550": "{{firm_address}}",
-    
-    # City/State/Zip
-    "Webster Groves, MO 63119": "{{firm_city_state_zip}}",
-    "Webster Groves, Missouri 63119": "{{firm_city_state_zip}}",
-    "Clayton, MO 63105": "{{firm_city_state_zip}}",
-    "Clayton, Missouri 63105": "{{firm_city_state_zip}}",
-    
-    # Firm names
-    "John C. Schleiffarth, P.C.": "{{firm_name}}",
-    "John C. Schleiffarth, PC": "{{firm_name}}",
-    "John C. Schleiffarth P.C.": "{{firm_name}}",
-    "JOHN C. SCHLEIFFARTH, P.C.": "{{firm_name}}",
+# =============================================================================
+# FIXED ENTITIES - These should NEVER be replaced with placeholders
+# =============================================================================
+
+FIXED_ENTITIES = {
+    # Government entities that appear as plaintiffs
+    "STATE OF MISSOURI",
+    "STATE",
+    "DIRECTOR OF REVENUE",
+    "DEPARTMENT OF REVENUE",
+    "MISSOURI DEPARTMENT OF REVENUE",
+    "DIVISION OF MOTOR VEHICLES",
+    "UNITED STATES",
+    "UNITED STATES OF AMERICA",
+    "PEOPLE OF THE STATE",
+
+    # Common legal terms that might look like names
+    "PLAINTIFF",
+    "PLAINTIFFS",
+    "DEFENDANT",
+    "DEFENDANTS",
+    "PETITIONER",
+    "PETITIONERS",
+    "RESPONDENT",
+    "RESPONDENTS",
+    "APPELLANT",
+    "APPELLEE",
 }
 
-# Known sample defendant/petitioner names (from actual templates)
-KNOWN_SAMPLE_DEFENDANTS = [
-    "JAMES GADDY", "James Gaddy",
-    "JOE FULSOM", "Joe Fulsom",
-    "JOHN DOE", "John Doe",
-    "JANE DOE", "Jane Doe",
-    "TYRONE JONES", "Tyrone Jones",
-    "SAMPLE DEFENDANT", "Sample Defendant",
-    "RICHARD HORAK", "Richard Horak",
-    "DEMESHA HARRIS", "Demesha Harris",
-    "DAVID SMITH", "David Smith",
-    "MICHAEL JOHNSON", "Michael Johnson",
+# Prefixes for entities that should NOT be replaced
+# These are structural elements, not parties
+FIXED_ENTITY_PREFIXES = [
+    "CITY OF",
+    "COUNTY OF",
+    "STATE OF",
+    "VILLAGE OF",
+    "TOWNSHIP OF",
+    "MUNICIPALITY OF",
+    "COMMONWEALTH OF",
+    "CIRCUIT COURT",
+    "ASSOCIATE CIRCUIT",
+    "MUNICIPAL COURT",
+    "PROBATE COURT",
+    "DISTRICT COURT",
+    "SUPERIOR COURT",
+    "IN THE",
+    "IN RE",
 ]
 
-# Known sample plaintiff names (for civil cases)
-KNOWN_SAMPLE_PLAINTIFFS = [
-    "JOHN SMITH", "John Smith",
-    "JANE SMITH", "Jane Smith",
-    "SAMPLE PLAINTIFF", "Sample Plaintiff",
-    "ABC COMPANY", "ABC Company",
-    "XYZ CORPORATION", "XYZ Corporation",
-    "ACME INC", "Acme Inc",
-]
+# Role keywords that identify party types in case captions
+PLAINTIFF_ROLES = ['Plaintiff', 'PLAINTIFF', 'Plaintiffs', 'PLAINTIFFS']
+DEFENDANT_ROLES = ['Defendant', 'DEFENDANT', 'Defendants', 'DEFENDANTS']
+PETITIONER_ROLES = ['Petitioner', 'PETITIONER', 'Petitioners', 'PETITIONERS']
+RESPONDENT_ROLES = ['Respondent', 'RESPONDENT', 'Respondents', 'RESPONDENTS']
 
 # Patterns for detecting values to replace
 PATTERNS = {
@@ -152,6 +168,19 @@ PATTERNS = {
 
     # Dates: "12/3/2024", "1/15/2025"
     'service_date_numeric': re.compile(r'\b\d{1,2}/\d{1,2}/\d{4}\b'),
+
+    # Court pattern: CIRCUIT COURT OF X COUNTY (or similar)
+    'court_county': re.compile(
+        r'((?:CIRCUIT|ASSOCIATE CIRCUIT|MUNICIPAL|DISTRICT|PROBATE|SUPERIOR)\s+COURT\s+OF\s+)'
+        r'([A-Z][A-Z\s]+?)'
+        r'(\s+COUNTY)',
+        re.IGNORECASE
+    ),
+
+    # Standalone county: "X County, Missouri" or "X County"
+    'county_standalone': re.compile(
+        r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+County\b'
+    ),
 }
 
 
@@ -164,6 +193,104 @@ class ProcessingResult:
     replacements_made: int
     processed_content: Optional[bytes]
     error: Optional[str] = None
+
+
+def is_fixed_entity(text: str) -> bool:
+    """Check if text is a fixed entity that should NOT be replaced."""
+    text_upper = text.strip().upper()
+
+    # Check exact matches
+    if text_upper in FIXED_ENTITIES:
+        return True
+
+    # Check prefixes
+    for prefix in FIXED_ENTITY_PREFIXES:
+        if text_upper.startswith(prefix):
+            return True
+
+    return False
+
+
+def looks_like_person_name(text: str) -> bool:
+    """
+    Check if text looks like a person's name.
+
+    Person names typically:
+    - Are 2-4 words
+    - Don't contain certain keywords
+    - Are either ALL CAPS or Title Case
+    """
+    text = text.strip()
+
+    if not text:
+        return False
+
+    # Skip if it's a fixed entity
+    if is_fixed_entity(text):
+        return False
+
+    # Skip if it contains certain keywords
+    skip_words = [
+        'COURT', 'COUNTY', 'STATE', 'CITY', 'VILLAGE', 'TOWNSHIP',
+        'CIRCUIT', 'DIVISION', 'CASE', 'NO.', 'NUMBER', 'VS', 'V.',
+        'PLAINTIFF', 'DEFENDANT', 'PETITIONER', 'RESPONDENT',
+        'DEPARTMENT', 'REVENUE', 'DIRECTOR', 'MUNICIPALITY',
+        'INC', 'LLC', 'CORP', 'COMPANY', 'CORPORATION', 'LTD',
+    ]
+    text_upper = text.upper()
+    for word in skip_words:
+        if word in text_upper:
+            return False
+
+    # Count words
+    words = text.split()
+    if len(words) < 1 or len(words) > 5:
+        return False
+
+    # Check if it looks like a name (Title Case or ALL CAPS)
+    is_all_caps = text.isupper()
+    is_title_case = all(w[0].isupper() for w in words if w)
+
+    if not (is_all_caps or is_title_case):
+        return False
+
+    # Check that each word looks like a name part
+    for word in words:
+        # Remove common suffixes/titles
+        clean_word = word.rstrip('.,;:')
+        if clean_word in ['JR', 'SR', 'II', 'III', 'IV']:
+            continue
+        # Name parts should be at least 2 characters (initials are OK)
+        if len(clean_word) < 1:
+            return False
+
+    return True
+
+
+def extract_name_from_caption_line(line: str) -> Optional[str]:
+    """
+    Extract a party name from a case caption line.
+
+    Handles various formats:
+    - "JOHN SMITH,"
+    - "John Smith, )"
+    - "JOHN SMITH  )"
+    - "JANE DOE"
+    """
+    line = line.strip()
+
+    if not line:
+        return None
+
+    # Remove trailing punctuation and parentheses
+    # Common caption formats: "NAME," or "NAME, )" or "NAME )"
+    cleaned = re.sub(r'[,\)\s]+$', '', line)
+    cleaned = cleaned.strip()
+
+    if looks_like_person_name(cleaned):
+        return cleaned
+
+    return None
 
 
 def get_pg_connection():
@@ -179,11 +306,98 @@ def get_pg_connection():
     return psycopg2.connect(conn_string)
 
 
-def process_template(template_id: int, name: str, content: bytes) -> ProcessingResult:
+def analyze_document_structure(doc) -> Dict[str, str]:
+    """
+    Analyze document structure to find party names by their position
+    relative to role keywords.
+
+    Returns a dict mapping actual names found -> placeholder to use
+    """
+    name_mappings = {}
+
+    # Collect all paragraph texts
+    paragraphs = []
+    for para in doc.paragraphs:
+        paragraphs.append(para.text.strip())
+
+    # Also collect from tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    paragraphs.append(para.text.strip())
+
+    # Look for case caption patterns
+    # Typically structured as:
+    #   NAME
+    #   Plaintiff,
+    # vs.
+    #   NAME
+    #   Defendant.
+
+    for i, text in enumerate(paragraphs):
+        text_stripped = text.strip()
+
+        # Check if this line contains a role keyword
+        role_found = None
+        placeholder = None
+
+        for role in PLAINTIFF_ROLES:
+            if role in text_stripped:
+                role_found = 'plaintiff'
+                placeholder = '{{plaintiff_name}}'
+                break
+
+        if not role_found:
+            for role in DEFENDANT_ROLES:
+                if role in text_stripped:
+                    role_found = 'defendant'
+                    placeholder = '{{defendant_name}}'
+                    break
+
+        if not role_found:
+            for role in PETITIONER_ROLES:
+                if role in text_stripped:
+                    role_found = 'petitioner'
+                    placeholder = '{{petitioner_name}}'
+                    break
+
+        if not role_found:
+            for role in RESPONDENT_ROLES:
+                if role in text_stripped:
+                    role_found = 'respondent'
+                    placeholder = '{{respondent_name}}'
+                    break
+
+        if role_found and placeholder:
+            # Look at the previous paragraph(s) for the party name
+            # The name typically appears 1-3 lines before the role
+            for j in range(max(0, i-3), i):
+                prev_text = paragraphs[j]
+                name = extract_name_from_caption_line(prev_text)
+                if name and name not in name_mappings:
+                    name_mappings[name] = placeholder
+                    break
+
+            # Also check if name is on the same line (format: "JOHN SMITH, Plaintiff")
+            # Extract the part before the role keyword
+            for role in (PLAINTIFF_ROLES + DEFENDANT_ROLES + PETITIONER_ROLES + RESPONDENT_ROLES):
+                if role in text_stripped:
+                    parts = text_stripped.split(role)
+                    if parts[0].strip():
+                        name = extract_name_from_caption_line(parts[0])
+                        if name and name not in name_mappings:
+                            name_mappings[name] = placeholder
+                    break
+
+    return name_mappings
+
+
+def process_template(template_id: int, name: str, content: bytes, verbose: bool = False) -> ProcessingResult:
     """Process a single template, replacing sample data with placeholders."""
     variables_found = set()
     replacements_made = 0
-    
+
     try:
         doc = Document(io.BytesIO(content))
     except Exception as e:
@@ -195,96 +409,55 @@ def process_template(template_id: int, name: str, content: bytes) -> ProcessingR
             processed_content=None,
             error=str(e)
         )
-    
+
+    # First pass: analyze document structure to find party names
+    name_mappings = analyze_document_structure(doc)
+
+    if verbose and name_mappings:
+        print(f"    Detected names: {name_mappings}")
+
     def replace_in_text(text: str) -> Tuple[str, int]:
         """Replace sample values with placeholders in text."""
         if not text:
             return text, 0
-        
+
         new_text = text
         count = 0
-        
-        # 1. Replace known firm values (addresses, names)
-        for sample_value, placeholder in KNOWN_FIRM_VALUES.items():
-            if sample_value in new_text:
-                new_text = new_text.replace(sample_value, placeholder)
+
+        # 1. Replace party names found through structural analysis
+        for actual_name, placeholder in name_mappings.items():
+            if actual_name in new_text and placeholder not in new_text:
+                new_text = new_text.replace(actual_name, placeholder)
                 variables_found.add(placeholder.strip('{}'))
                 count += 1
-        
-        # 2. Replace known sample defendant names
-        for sample_name in KNOWN_SAMPLE_DEFENDANTS:
-            if sample_name in new_text:
-                # Check context - only replace if it's a defendant reference
-                # Avoid replacing in "STATE OF MISSOURI" or "Plaintiff" lines
-                if 'STATE OF MISSOURI' not in new_text and 'Plaintiff' not in new_text:
-                    # Replace with appropriate case
-                    if sample_name.isupper():
-                        new_text = new_text.replace(sample_name, '{{defendant_name}}')
-                    else:
-                        new_text = new_text.replace(sample_name, '{{defendant_name}}')
-                    variables_found.add('defendant_name')
-                    count += 1
 
-        # 2b. Replace known sample plaintiff names (from list)
-        for sample_name in KNOWN_SAMPLE_PLAINTIFFS:
-            if sample_name in new_text:
-                # Only replace if it looks like a plaintiff context (not defendant/state)
-                if 'Defendant' not in new_text and 'STATE OF MISSOURI' not in new_text:
-                    new_text = new_text.replace(sample_name, '{{plaintiff_name}}')
-                    variables_found.add('plaintiff_name')
-                    count += 1
-
-        # 2c. Detect plaintiff name by position (NAME, followed by Plaintiff)
-        # Pattern: "JOHN SMITH," or "John Smith," followed later by "Plaintiff"
-        if 'Plaintiff' in new_text and '{{plaintiff_name}}' not in new_text:
-            # Match: NAME (caps or title case), comma, then Plaintiff on same or next part
-            plaintiff_pattern = re.compile(
-                r'^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*),?\s*$'  # Name alone on line
-            )
-            # Also try: NAME, ) pattern (case caption style)
-            plaintiff_pattern2 = re.compile(
-                r'^([A-Z][A-Z\s\.]+),\s*\)?$'  # ALL CAPS NAME, )
-            )
-            match = plaintiff_pattern.match(new_text.strip()) or plaintiff_pattern2.match(new_text.strip())
-            if match:
-                name = match.group(1).strip()
-                # Make sure it's not a known entity
-                if name not in ['STATE OF MISSOURI', 'DIRECTOR OF REVENUE', 'STATE', 'CITY']:
-                    new_text = new_text.replace(name, '{{plaintiff_name}}')
-                    variables_found.add('plaintiff_name')
-                    count += 1
-
-        # 2d. Detect defendant name by position (NAME, followed by Defendant)
-        if 'Defendant' in new_text and '{{defendant_name}}' not in new_text:
-            defendant_pattern = re.compile(
-                r'^([A-Z][A-Z\s\.]+),\s*\)?$'  # ALL CAPS NAME, )
-            )
-            match = defendant_pattern.match(new_text.strip())
-            if match:
-                name = match.group(1).strip()
-                if name not in ['STATE OF MISSOURI', 'DIRECTOR OF REVENUE', 'STATE', 'CITY']:
-                    new_text = new_text.replace(name, '{{defendant_name}}')
-                    variables_found.add('defendant_name')
-                    count += 1
-
-        # 3. Replace case numbers
+        # 2. Replace case numbers
         if PATTERNS['case_number'].search(new_text):
-            # Don't replace if it looks like a template already
             if '{{case_number}}' not in new_text:
                 new_text = PATTERNS['case_number'].sub('{{case_number}}', new_text)
                 variables_found.add('case_number')
                 count += 1
-        
-        # 4. Replace division numbers
+
+        # 3. Replace division numbers
         div_match = PATTERNS['division'].search(new_text)
         if div_match and '{{division}}' not in new_text:
             new_text = PATTERNS['division'].sub(r'\g<1>{{division}}', new_text)
             variables_found.add('division')
             count += 1
-        
+
+        # 4. Replace court county patterns (CIRCUIT COURT OF X COUNTY)
+        court_match = PATTERNS['court_county'].search(new_text)
+        if court_match and '{{county}}' not in new_text:
+            county_name = court_match.group(2).strip()
+            # Don't replace if it already looks like a placeholder
+            if not county_name.startswith('{{'):
+                new_text = PATTERNS['court_county'].sub(r'\g<1>{{county}}\g<3>', new_text)
+                variables_found.add('county')
+                count += 1
+
         # 5. Replace dollar amounts (be careful - only in bond/fine contexts)
         if PATTERNS['dollar_amount'].search(new_text):
-            if '{{bond_amount}}' not in new_text and '{{fine_amount}}' not in new_text:
+            if '{{bond_amount}}' not in new_text and '{{fine_amount}}' not in new_text and '{{amount}}' not in new_text:
                 # Determine which placeholder based on context
                 lower_text = new_text.lower()
                 if 'bond' in lower_text:
@@ -295,44 +468,31 @@ def process_template(template_id: int, name: str, content: bytes) -> ProcessingR
                     new_text = PATTERNS['dollar_amount'].sub('{{fine_amount}}', new_text)
                     variables_found.add('fine_amount')
                     count += 1
-        
-        # 6. Replace county names in "CIRCUIT COURT OF X COUNTY"
-        county_match = re.search(r'CIRCUIT COURT OF ([A-Z][A-Z\s\.]+) COUNTY', new_text)
-        if county_match and '{{county}}' not in new_text:
-            county_name = county_match.group(1)
-            if county_name not in ['THE', 'SAID']:  # Avoid false positives
-                new_text = re.sub(
-                    r'CIRCUIT COURT OF [A-Z][A-Z\s\.]+ COUNTY',
-                    'CIRCUIT COURT OF {{county}} COUNTY',
-                    new_text
-                )
-                variables_found.add('county')
-                count += 1
 
-        # 7. Replace dates (December 3, 2024 -> {{service_date}})
-        if PATTERNS['service_date'].search(new_text) and '{{service_date}}' not in new_text:
+        # 6. Replace dates (December 3, 2024 -> {{service_date}})
+        if PATTERNS['service_date'].search(new_text) and '{{service_date}}' not in new_text and '{{date}}' not in new_text:
             new_text = PATTERNS['service_date'].sub('{{service_date}}', new_text)
             variables_found.add('service_date')
             count += 1
 
-        # 8. Replace numeric dates (12/3/2024 -> {{service_date}})
-        if PATTERNS['service_date_numeric'].search(new_text) and '{{service_date}}' not in new_text:
+        # 7. Replace numeric dates (12/3/2024 -> {{service_date}})
+        if PATTERNS['service_date_numeric'].search(new_text) and '{{service_date}}' not in new_text and '{{date}}' not in new_text:
             new_text = PATTERNS['service_date_numeric'].sub('{{service_date}}', new_text)
             variables_found.add('service_date')
             count += 1
 
         return new_text, count
-    
+
     def process_paragraph(paragraph):
         """Process a paragraph, preserving formatting."""
         nonlocal replacements_made
-        
+
         full_text = paragraph.text
         if not full_text:
             return
-        
+
         new_text, count = replace_in_text(full_text)
-        
+
         if new_text != full_text:
             replacements_made += count
             # Update the paragraph while preserving formatting
@@ -345,22 +505,22 @@ def process_template(template_id: int, name: str, content: bytes) -> ProcessingR
                     run.text = ''
             else:
                 paragraph.text = new_text
-    
+
     # Process all paragraphs
     for paragraph in doc.paragraphs:
         process_paragraph(paragraph)
-    
+
     # Process tables
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
                     process_paragraph(paragraph)
-    
+
     # Save processed document
     output = io.BytesIO()
     doc.save(output)
-    
+
     return ProcessingResult(
         template_id=template_id,
         template_name=name,
@@ -377,74 +537,76 @@ def main():
     parser.add_argument('--firm', type=str, help='Process only templates for this firm_id')
     parser.add_argument('--limit', type=int, default=0, help='Limit number of templates to process')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed output')
+    parser.add_argument('--show-names', action='store_true', help='Show detected names for each template')
     args = parser.parse_args()
-    
+
     if not args.dry_run and not args.update:
         print("Please specify --dry-run or --update")
         parser.print_help()
         return
-    
+
     print("=" * 60)
     print("Template Preprocessor for PostgreSQL")
+    print("GENERALIZED APPROACH - Structure-based detection")
     print("=" * 60)
     print(f"\nMode: {'DRY RUN (no changes)' if args.dry_run else 'UPDATE DATABASE'}")
     print(f"PostgreSQL: {PG_CONFIG['host']}:{PG_CONFIG['port']}/{PG_CONFIG['database']}")
-    
+
     try:
         conn = get_pg_connection()
         print("✓ Connected to PostgreSQL")
     except Exception as e:
         print(f"✗ Failed to connect: {e}")
         return
-    
+
     # Fetch templates
     with conn.cursor() as cur:
         query = "SELECT id, name, file_content FROM templates WHERE is_active = TRUE"
         params = []
-        
+
         if args.firm:
             query += " AND firm_id = %s"
             params.append(args.firm)
-        
+
         query += " ORDER BY id"
-        
+
         if args.limit:
             query += " LIMIT %s"
             params.append(args.limit)
-        
+
         cur.execute(query, params)
         templates = cur.fetchall()
-    
+
     print(f"\nFound {len(templates)} templates to process")
-    
+
     # Process templates
     results = []
     updated = 0
     errors = 0
     skipped = 0
-    
+
     for i, (template_id, name, content) in enumerate(templates):
         if content is None:
             skipped += 1
             continue
-        
+
         # Handle memoryview from PostgreSQL
         if hasattr(content, 'tobytes'):
             content = content.tobytes()
-        
-        result = process_template(template_id, name, content)
+
+        result = process_template(template_id, name, content, verbose=args.show_names)
         results.append(result)
-        
+
         if result.error:
             errors += 1
             if args.verbose:
                 print(f"  ✗ {name}: {result.error}")
             continue
-        
+
         if result.replacements_made > 0:
             if args.verbose:
                 print(f"  ✓ {name}: {result.replacements_made} replacements, vars: {result.variables_found}")
-            
+
             if args.update and result.processed_content:
                 # Update the database
                 with conn.cursor() as cur:
@@ -457,16 +619,16 @@ def main():
             skipped += 1
             if args.verbose:
                 print(f"  - {name}: no changes needed")
-        
+
         # Progress indicator
         if (i + 1) % 100 == 0:
             print(f"  Progress: {i + 1}/{len(templates)}")
-    
+
     if args.update:
         conn.commit()
-    
+
     conn.close()
-    
+
     # Summary
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -475,18 +637,18 @@ def main():
     print(f"Updated:             {updated}")
     print(f"Skipped (no change): {skipped}")
     print(f"Errors:              {errors}")
-    
+
     # Variable usage stats
     var_counts = {}
     for r in results:
         for v in r.variables_found:
             var_counts[v] = var_counts.get(v, 0) + 1
-    
+
     if var_counts:
         print("\nVariables found:")
         for var, count in sorted(var_counts.items(), key=lambda x: -x[1]):
             print(f"  {var}: {count} templates")
-    
+
     if args.dry_run:
         print("\n⚠ DRY RUN - no changes were made")
         print("Run with --update to apply changes")
