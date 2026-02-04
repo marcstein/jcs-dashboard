@@ -1077,11 +1077,13 @@ async def api_documents_chat(request: Request):
         # Get response from document chat
         response_text = chat_engine.chat(user_message)
 
-        # Check if a document was generated (look for file path in session)
+        # Check if a document was generated
         download_url = None
-        if hasattr(chat_engine, '_last_generated_path') and chat_engine._last_generated_path:
-            # Create download URL
-            download_url = f"/api/documents/download/{session_id}"
+        session = chat_engine.get_session()
+        if session.output_path and session.output_path.exists():
+            # Create download URL using the filename
+            filename = session.output_path.name
+            download_url = f"/api/documents/download-file/{filename}"
 
         return JSONResponse({
             "response": response_text,
@@ -1097,7 +1099,7 @@ async def api_documents_chat(request: Request):
 
 @router.get("/api/documents/download/{session_id}")
 async def api_documents_download(request: Request, session_id: str):
-    """Download generated document."""
+    """Download generated document by session ID."""
     if not is_authenticated(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -1105,20 +1107,48 @@ async def api_documents_download(request: Request, session_id: str):
         return JSONResponse({"error": "Session not found"}, status_code=404)
 
     chat_engine = _doc_sessions[session_id]
+    session = chat_engine.get_session()
 
-    if not hasattr(chat_engine, '_last_generated_path') or not chat_engine._last_generated_path:
+    if not session.output_path or not session.output_path.exists():
         return JSONResponse({"error": "No document generated"}, status_code=404)
 
-    file_path = Path(chat_engine._last_generated_path)
-    if not file_path.exists():
-        return JSONResponse({"error": "Document file not found"}, status_code=404)
-
     # Read file and return as download
-    content = file_path.read_bytes()
-    filename = file_path.name
+    content = session.output_path.read_bytes()
+    filename = session.output_path.name
 
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/api/documents/download-file/{filename:path}")
+async def api_documents_download_file(request: Request, filename: str):
+    """Download generated document by filename."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    # Security: only allow files from the generated directory
+    generated_dir = Path(__file__).parent.parent / "data" / "generated"
+    file_path = generated_dir / filename
+
+    # Prevent directory traversal attacks
+    try:
+        file_path = file_path.resolve()
+        if not str(file_path).startswith(str(generated_dir.resolve())):
+            return JSONResponse({"error": "Access denied"}, status_code=403)
+    except Exception:
+        return JSONResponse({"error": "Invalid path"}, status_code=400)
+
+    if not file_path.exists():
+        return JSONResponse({"error": "Document not found"}, status_code=404)
+
+    # Read file and return as download
+    content = file_path.read_bytes()
+
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={file_path.name}"}
     )
