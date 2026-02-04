@@ -16,6 +16,7 @@
             </a>
         </div>
         <div class="nav-links">
+            <a href="/documents" class="{% if request.url.path == '/documents' %}active{% endif %}">Documents</a>
             <a href="/attorneys" class="{% if '/attorney' in request.url.path %}active{% endif %}">Attorneys</a>
             <a href="/ar" class="{% if request.url.path == '/ar' %}active{% endif %}">A/R</a>
             <a href="/noiw" class="{% if request.url.path == '/noiw' %}active{% endif %}">NOIW</a>

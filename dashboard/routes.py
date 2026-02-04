@@ -1023,3 +1023,102 @@ async def case_detail(request: Request, case_id: int):
         "docket_entries": docket_entries,
         "documents": documents,
     })
+
+
+# ============================================================================
+# Document Generation
+# ============================================================================
+
+# Store active document chat sessions
+_doc_sessions = {}
+
+@router.get("/documents", response_class=HTMLResponse)
+async def documents_page(request: Request):
+    """Document generation page."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    return templates.TemplateResponse("documents.html", {
+        "request": request,
+        "username": request.session.get("username"),
+    })
+
+
+@router.post("/api/documents/chat")
+async def api_documents_chat(request: Request):
+    """Document generation chat API endpoint."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+        user_message = body.get("message", "").strip()
+        session_id = body.get("session_id")
+
+        if not user_message:
+            return JSONResponse({"error": "No message provided"})
+
+        # Import document chat engine
+        try:
+            from document_chat import DocumentChatEngine
+        except ImportError as e:
+            return JSONResponse({"error": f"Document system not available: {e}"})
+
+        # Get or create session
+        if session_id and session_id in _doc_sessions:
+            chat_engine = _doc_sessions[session_id]
+        else:
+            # Create new session
+            firm_id = "jcs_law"  # Default firm for now
+            chat_engine = DocumentChatEngine(firm_id=firm_id)
+            session_id = f"doc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{id(chat_engine)}"
+            _doc_sessions[session_id] = chat_engine
+
+        # Get response from document chat
+        response_text = chat_engine.chat(user_message)
+
+        # Check if a document was generated (look for file path in session)
+        download_url = None
+        if hasattr(chat_engine, '_last_generated_path') and chat_engine._last_generated_path:
+            # Create download URL
+            download_url = f"/api/documents/download/{session_id}"
+
+        return JSONResponse({
+            "response": response_text,
+            "session_id": session_id,
+            "download_url": download_url
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)})
+
+
+@router.get("/api/documents/download/{session_id}")
+async def api_documents_download(request: Request, session_id: str):
+    """Download generated document."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if session_id not in _doc_sessions:
+        return JSONResponse({"error": "Session not found"}, status_code=404)
+
+    chat_engine = _doc_sessions[session_id]
+
+    if not hasattr(chat_engine, '_last_generated_path') or not chat_engine._last_generated_path:
+        return JSONResponse({"error": "No document generated"}, status_code=404)
+
+    file_path = Path(chat_engine._last_generated_path)
+    if not file_path.exists():
+        return JSONResponse({"error": "Document file not found"}, status_code=404)
+
+    # Read file and return as download
+    content = file_path.read_bytes()
+    filename = file_path.name
+
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
