@@ -236,6 +236,11 @@ def looks_like_person_name(text: str) -> bool:
         'PLAINTIFF', 'DEFENDANT', 'PETITIONER', 'RESPONDENT',
         'DEPARTMENT', 'REVENUE', 'DIRECTOR', 'MUNICIPALITY',
         'INC', 'LLC', 'CORP', 'COMPANY', 'CORPORATION', 'LTD',
+        # Common legal phrases that are NOT names
+        'COMES', 'NOW', 'HEREBY', 'WHEREFORE', 'RESPECTFULLY',
+        'SUBMITTED', 'MOTION', 'ORDER', 'JUDGMENT', 'DECREE',
+        'PURSUANT', 'THEREFORE', 'PRAYER', 'RELIEF', 'REQUEST',
+        'NOTICE', 'HEARING', 'TRIAL', 'APPEAL', 'CERTIFICATE',
     ]
     text_upper = text.upper()
     for word in skip_words:
@@ -306,10 +311,44 @@ def get_pg_connection():
     return psycopg2.connect(conn_string)
 
 
+def is_caption_line(text: str) -> bool:
+    """
+    Check if a line looks like it's part of a case caption (not body text).
+
+    Caption lines typically:
+    - Contain ) for court formatting
+    - Are short (< 60 chars)
+    - Don't contain common body text phrases
+    """
+    text = text.strip()
+
+    # Body text indicators - these are NOT caption lines
+    body_indicators = [
+        'COMES NOW', 'NOW COMES', 'HEREBY', 'WHEREFORE',
+        'RESPECTFULLY', 'SUBMITTED', 'UNDERSIGNED',
+        'by and through', 'moves this court', 'requests that',
+        'prays that', 'states as follows', 'alleges',
+    ]
+    text_upper = text.upper()
+    for indicator in body_indicators:
+        if indicator in text_upper:
+            return False
+
+    # Caption indicators
+    if ')' in text:
+        return True
+    if len(text) < 60 and text.endswith(','):
+        return True
+    if len(text) < 40:
+        return True
+
+    return False
+
+
 def analyze_document_structure(doc) -> Dict[str, str]:
     """
     Analyze document structure to find party names by their position
-    relative to role keywords.
+    relative to role keywords in the CAPTION area only.
 
     Returns a dict mapping actual names found -> placeholder to use
     """
@@ -327,7 +366,7 @@ def analyze_document_structure(doc) -> Dict[str, str]:
                 for para in cell.paragraphs:
                     paragraphs.append(para.text.strip())
 
-    # Look for case caption patterns
+    # Look for case caption patterns (only in first 25 paragraphs - caption area)
     # Typically structured as:
     #   NAME
     #   Plaintiff,
@@ -335,8 +374,15 @@ def analyze_document_structure(doc) -> Dict[str, str]:
     #   NAME
     #   Defendant.
 
-    for i, text in enumerate(paragraphs):
+    caption_limit = min(25, len(paragraphs))
+
+    for i in range(caption_limit):
+        text = paragraphs[i]
         text_stripped = text.strip()
+
+        # Skip if this doesn't look like a caption line
+        if not is_caption_line(text_stripped):
+            continue
 
         # Check if this line contains a role keyword
         role_found = None
@@ -374,10 +420,11 @@ def analyze_document_structure(doc) -> Dict[str, str]:
             # The name typically appears 1-3 lines before the role
             for j in range(max(0, i-3), i):
                 prev_text = paragraphs[j]
-                name = extract_name_from_caption_line(prev_text)
-                if name and name not in name_mappings:
-                    name_mappings[name] = placeholder
-                    break
+                if is_caption_line(prev_text):
+                    name = extract_name_from_caption_line(prev_text)
+                    if name and name not in name_mappings:
+                        name_mappings[name] = placeholder
+                        break
 
             # Also check if name is on the same line (format: "JOHN SMITH, Plaintiff")
             # Extract the part before the role keyword
@@ -389,6 +436,21 @@ def analyze_document_structure(doc) -> Dict[str, str]:
                         if name and name not in name_mappings:
                             name_mappings[name] = placeholder
                     break
+
+    # Add case variants - if we found "RICHARD HORAK", also map "Richard Horak"
+    # Use the same placeholder for both variants
+    case_variants = {}
+    for name, placeholder in name_mappings.items():
+        # Add title case variant
+        title_case = name.title()
+        if title_case != name and title_case not in name_mappings:
+            case_variants[title_case] = placeholder
+        # Add upper case variant
+        upper_case = name.upper()
+        if upper_case != name and upper_case not in name_mappings:
+            case_variants[upper_case] = placeholder
+
+    name_mappings.update(case_variants)
 
     return name_mappings
 
