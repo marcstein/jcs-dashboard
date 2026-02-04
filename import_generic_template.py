@@ -59,15 +59,15 @@ def main():
         # Update existing
         cur.execute("""
             UPDATE templates
-            SET file_content = %s, updated_at = NOW()
+            SET file_content = %s
             WHERE id = %s
         """, (psycopg2.Binary(content), existing[0]))
         print(f"✓ Updated existing template (id={existing[0]})")
     else:
         # Insert new
         cur.execute("""
-            INSERT INTO templates (firm_id, name, category, jurisdiction, file_content, is_active, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+            INSERT INTO templates (firm_id, name, category, jurisdiction, file_content, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (firm_id, template_name, 'criminal', 'Missouri', psycopg2.Binary(content), True))
         new_id = cur.fetchone()[0]
