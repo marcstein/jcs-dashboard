@@ -1036,6 +1036,15 @@ Only include variables where you found a clear value. If unsure, don't include i
                 if ap.fax:
                     replacements['fax'] = ap.fax
 
+            # Auto-fill dates with today's date if not provided
+            from datetime import datetime
+            today = datetime.now()
+            today_formatted = today.strftime('%B %d, %Y')  # "February 4, 2026"
+            if 'service_date' not in replacements:
+                replacements['service_date'] = today_formatted
+            if 'date' not in replacements:
+                replacements['date'] = today_formatted
+
             def replace_placeholders(text: str) -> str:
                 """Replace all {{placeholder}} patterns with values."""
                 if not text:

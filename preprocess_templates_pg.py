@@ -81,6 +81,7 @@ PLACEHOLDERS = {
     'email': '{{email}}',
     'fax': '{{fax}}',
     'date': '{{date}}',
+    'service_date': '{{service_date}}',
 }
 
 # Known sample values to replace (firm-specific data)
@@ -124,12 +125,21 @@ KNOWN_SAMPLE_DEFENDANTS = [
 PATTERNS = {
     # Missouri case numbers: 24SL-CR00123, 22JE-CC00191-01
     'case_number': re.compile(r'\b\d{2}[A-Z]{2}-[A-Z]{2}\d{4,}(-\d+)?\b'),
-    
+
     # Dollar amounts: $1,500.00 or $500
     'dollar_amount': re.compile(r'\$[\d,]+\.?\d{0,2}'),
-    
+
     # Division numbers after "Division" or "Div"
     'division': re.compile(r'(Division\s*(?:No\.?)?:?\s*)(\d+)', re.IGNORECASE),
+
+    # Dates: "December 3, 2024", "January 15, 2025", etc.
+    'service_date': re.compile(
+        r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b',
+        re.IGNORECASE
+    ),
+
+    # Dates: "12/3/2024", "1/15/2025"
+    'service_date_numeric': re.compile(r'\b\d{1,2}/\d{1,2}/\d{4}\b'),
 }
 
 
@@ -244,7 +254,19 @@ def process_template(template_id: int, name: str, content: bytes) -> ProcessingR
                 )
                 variables_found.add('county')
                 count += 1
-        
+
+        # 7. Replace dates (December 3, 2024 -> {{service_date}})
+        if PATTERNS['service_date'].search(new_text) and '{{service_date}}' not in new_text:
+            new_text = PATTERNS['service_date'].sub('{{service_date}}', new_text)
+            variables_found.add('service_date')
+            count += 1
+
+        # 8. Replace numeric dates (12/3/2024 -> {{service_date}})
+        if PATTERNS['service_date_numeric'].search(new_text) and '{{service_date}}' not in new_text:
+            new_text = PATTERNS['service_date_numeric'].sub('{{service_date}}', new_text)
+            variables_found.add('service_date')
+            count += 1
+
         return new_text, count
     
     def process_paragraph(paragraph):
