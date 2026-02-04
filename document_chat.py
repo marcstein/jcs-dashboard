@@ -900,9 +900,20 @@ Focus on the most important 5-10 variables."""
 Variables needed:
 {var_descriptions}
 
+IMPORTANT - Variable name synonyms (use these mappings):
+- "defendant" or "client" → maps to: defendant_name, petitioner_name, client_name (they're the same person)
+- "plaintiff" → maps to: plaintiff_name
+- "case number" or "case #" or "cause number" → maps to: case_number
+- "county" or court location → maps to: county
+- Any person's name after "defendant" or "for" typically refers to the client/defendant/petitioner
+
 User message: "{message}"
 
-Extract any values that match these variables. Respond with JSON:
+Extract any values that match these variables. If user says "defendant James Smith",
+that value should be extracted for petitioner_name, defendant_name, OR client_name
+(whichever is in the variables needed list).
+
+Respond with JSON:
 {{
     "variable_name": "extracted value",
     ...
@@ -928,6 +939,22 @@ Only include variables where you found a clear value. If unsure, don't include i
                             var.value = str(value)
                             session.collected_values[var_name] = str(value)
                             break
+
+                # Apply variable aliases - if we extracted one name variant,
+                # fill in the others that might be needed
+                PARTY_NAME_VARS = ['defendant_name', 'petitioner_name', 'client_name', 'plaintiff_name']
+                extracted_party_name = None
+                for pv in PARTY_NAME_VARS:
+                    if pv in extracted:
+                        extracted_party_name = extracted[pv]
+                        break
+
+                if extracted_party_name:
+                    # Fill any missing party name variables with the extracted value
+                    for var in session.detected_variables:
+                        if var.name in PARTY_NAME_VARS and not var.value:
+                            var.value = extracted_party_name
+                            session.collected_values[var.name] = extracted_party_name
         except:
             pass
 
