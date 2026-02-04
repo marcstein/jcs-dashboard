@@ -935,10 +935,16 @@ Only include variables where you found a clear value. If unsure, don't include i
                 extracted = json.loads(json_match.group())
 
                 for var_name, value in extracted.items():
+                    value_str = str(value)
+
+                    # Sanitize county values - strip "County" suffix to avoid "Scott County COUNTY"
+                    if var_name == 'county':
+                        value_str = re.sub(r'\s+county\s*$', '', value_str, flags=re.IGNORECASE).strip()
+
                     for var in session.detected_variables:
                         if var.name == var_name:
-                            var.value = str(value)
-                            session.collected_values[var_name] = str(value)
+                            var.value = value_str
+                            session.collected_values[var_name] = value_str
                             break
 
                 # Apply variable aliases - if we extracted one name variant,
