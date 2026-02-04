@@ -1,0 +1,66 @@
+IN THE CIRCUIT COURT OF {{county}} COUNTY, MISSOURI
+
+{{plaintiff_name}},                    )
+                                       )
+            Plaintiff,                 )    Case No.: {{case_number}}
+                                       )
+     vs.                               )    Division: {{division}}
+                                       )
+{{defendant_name}},                    )
+                                       )
+            Defendant.                 )
+
+DEFENDANT'S MOTION TO DISMISS FOR FAILURE TO STATE A CLAIM
+
+COMES NOW Defendant, {{defendant_name}}, by and through counsel, and pursuant to Rule 55.27(a)(6), moves this Court to dismiss Plaintiff's Petition for failure to state a claim upon which relief can be granted, and in support thereof states as follows:
+
+STATEMENT OF FACTS
+
+1. Plaintiff filed the above-captioned action on {{filing_date}}.
+
+2. Plaintiff's Petition purports to assert a claim for {{cause_of_action}}.
+
+ARGUMENT
+
+I. STANDARD FOR MOTION TO DISMISS
+
+3. A motion to dismiss for failure to state a claim tests the adequacy of the plaintiff's petition. A petition must contain "a short and plain statement of the facts showing that the pleader is entitled to relief." Rule 55.05.
+
+4. When ruling on a motion to dismiss, the Court must accept all properly pleaded facts as true and determine whether the facts alleged and the reasonable inferences therefrom state a claim upon which relief can be granted. Nazeri v. Missouri Valley College, 860 S.W.2d 303, 306 (Mo. banc 1993).
+
+II. PLAINTIFF'S PETITION FAILS TO STATE A CLAIM
+
+5. {{deficiency_description}}
+
+{{#specific_elements_missing}}
+6. Specifically, the Petition fails to allege:
+   {{specific_elements_missing}}
+{{/specific_elements_missing}}
+
+7. Because Plaintiff's Petition fails to state facts sufficient to constitute a cause of action for {{cause_of_action}}, Defendant is entitled to dismissal.
+
+CONCLUSION
+
+WHEREFORE, Defendant respectfully requests this Court enter an Order dismissing Plaintiff's Petition for failure to state a claim upon which relief can be granted, and for such other and further relief as this Court deems just and proper.
+
+Respectfully submitted,
+
+{{firm_name}}
+
+By: _____________________________
+    {{attorney_name}}
+    {{attorney_bar_number}}
+    {{firm_address}}
+    {{firm_city_state_zip}}
+    {{firm_phone}}
+    {{firm_email}}
+
+    Attorney for Defendant
+
+
+CERTIFICATE OF SERVICE
+
+I hereby certify that on {{date}}, a true and correct copy of the foregoing was served upon all parties of record by [mail/email/ECF].
+
+_____________________________
+{{attorney_name}}

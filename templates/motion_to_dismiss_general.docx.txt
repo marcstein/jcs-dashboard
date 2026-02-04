@@ -1,0 +1,30 @@
+IN THE CIRCUIT COURT OF {{county}} COUNTY
+STATE OF MISSOURI
+
+
+{{petitioner_name}},				)
+							)
+		{{party_role}},				)
+							)	Cause No.: {{case_number}}
+v.							)
+							)
+{{respondent_name}},			)
+							)
+		Respondent.				)
+
+MOTION TO DISMISS
+
+	COMES NOW {{party_role}}, {{petitioner_name}}, by and through counsel, and moves this court to dismiss the above-mentioned cause {{dismissal_type}}.
+							Respectfully submitted,
+
+					{{firm_name}}
+
+
+
+					/s/{{attorney_name}}______________________
+{{attorney_name}}	           #{{attorney_bar_number}}		{{attorney_address_line1}}
+{{attorney_city}}, {{attorney_state}} {{attorney_zip}}
+						Telephone:	{{attorney_phone}}
+						Facsimile:	{{attorney_fax}}
+						Email:  {{attorney_email}}
+						Attorney for {{party_role}}

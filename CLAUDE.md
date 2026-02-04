@@ -353,3 +353,262 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 22. Added dashboard Dunning Preview page (`/dunning`) with stage breakdown and approval workflow
 23. Added `collections preview` CLI command to preview dunning notices before sending
 24. Added `collections test-email` CLI command to test email configuration
+
+---
+
+## LawMetrics.ai Document Generation System
+
+### Overview
+Multi-tenant, AI-powered document generation platform for law firms. Lawyers can request documents in natural language, and the system identifies templates, collects required variables, and generates professional legal documents.
+
+### Key Files
+
+#### Document Generation
+- `document_chat.py` - Conversational document generation engine
+- `document_engine.py` - Multi-tenant template database and generation
+- `attorney_profiles.py` - Attorney/firm signature block management
+- `courts_db.py` - Missouri courts and agencies registry
+
+#### Configuration
+- `docs/TEMPLATE_FOLDER_STRUCTURE.md` - Recommended folder structure for firms
+- `docs/API_COST_ANALYSIS.md` - Claude API cost projections
+
+### Document Types Supported
+
+The system has predefined document types in `DOCUMENT_TYPES` registry:
+
+#### Motions to Dismiss
+| Type | Key | Description |
+|------|-----|-------------|
+| General | `motion_to_dismiss_general` | Voluntary dismissal, no grounds |
+| DOR | `motion_to_dismiss_dor` | DOR case (Petitioner/Respondent) |
+| Criminal | `motion_to_dismiss_criminal` | Criminal case (Defendant) |
+| Failure to State Claim | `motion_to_dismiss_failure_to_state_claim` | Rule 55.27(a)(6) |
+| Lack of Jurisdiction | `motion_to_dismiss_lack_jurisdiction` | Rule 55.27(a)(1) |
+| Improper Venue | `motion_to_dismiss_improper_venue` | Rule 55.27(a)(3) |
+| Statute of Limitations | `motion_to_dismiss_sol` | Time-barred claims |
+| Failure to Prosecute | `motion_to_dismiss_failure_to_prosecute` | Rule 67.02 |
+
+#### Bond Documents
+| Type | Key | Variables Asked | Auto-Filled from Attorney Profile |
+|------|-----|-----------------|-----------------------------------|
+| Assignment of Cash Bond | `bond_assignment` | defendant_name, case_number, county, bond_amount, division | assignee_name, assignee_address |
+
+#### Other Documents
+- Waiver of Arraignment
+- Request for Jury Trial
+- Entry of Appearance
+- Motion to Continue
+- Preservation Letters
+- Disposition Letters
+
+### CLI Commands
+
+```bash
+# Attorney Profile Management
+python agent.py attorney setup --firm-id jcs_law    # Interactive setup
+python agent.py attorney add --firm-id jcs_law \
+  --name "John Doe" --bar "12345" --email "john@firm.com" \
+  --phone "(314) 555-1234" --firm-name "Doe Law, P.C." \
+  --address "123 Main St" --city "St. Louis" --state "Missouri" \
+  --zip "63101" --primary
+python agent.py attorney list --firm-id jcs_law     # List attorneys
+python agent.py attorney show 1                      # Show attorney details
+python agent.py attorney set-primary --firm-id jcs_law 1  # Set primary
+
+# Document Generation - Interactive Chat
+python agent.py engine chat --firm-id jcs_law
+python agent.py engine chat --firm-id jcs_law --attorney-id 1
+
+# Quick Document Generation
+python agent.py generate-doc motion to dismiss for Jefferson County --firm-id jcs_law
+
+# Template Management
+python agent.py engine import 'Templates/' --firm-id jcs_law  # Import templates
+python agent.py engine list --firm-id jcs_law                  # List templates
+python agent.py engine search --firm-id jcs_law "motion"       # Search templates
+python agent.py engine show 1                                  # Show template details
+python agent.py engine analyze document.docx                   # Analyze for variables
+```
+
+### Chat Interface Usage
+
+```
+You: I need a motion to dismiss for Jefferson County
+
+A: I found **Motion to Dismiss (General)** for Jefferson County.
+   I'll need the following information:
+   1. **Petitioner Name** - Full legal name of the petitioner
+   2. **Case Number** - Court case number
+   3. **County** - County where case is filed
+
+You: RICHARD HORAK, 24JE-CC00191, Jefferson
+
+A: Here's the draft **Motion to Dismiss (General)**:
+   [Document preview]
+   Does this look correct? Say **'yes'** to export, or tell me what to change.
+
+You: yes
+
+A: Document exported to: data/generated/Motion_to_Dismiss_24JE-CC00191.docx
+```
+
+### Special Responses
+- **"draft it"** - Generate document with placeholders for missing values
+- **"none"** / **"n/a"** - Skip current variable (not applicable)
+- **"yes"** - Approve and export document
+- **"change X to Y"** - Modify a value in the draft
+
+### Attorney Profile System
+
+Attorney profiles store signature block info for automatic population:
+
+```python
+# Profile includes:
+- attorney_name, bar_number, email, phone, fax
+- firm_name, firm_address, firm_city, firm_state, firm_zip
+- is_primary (default attorney for firm)
+```
+
+**Auto-fill uses:**
+- **Signature blocks** - All documents get attorney signature block filled automatically
+- **Bond Assignment** - Assignee name/address filled from firm_name, firm_address
+- **Letters** - Firm letterhead info filled automatically
+
+When generating documents, the signature block is automatically filled from the attorney's profile.
+
+### Template Folder Structure
+
+Recommended structure for law firm templates:
+
+```
+Templates/
+├── Criminal/
+│   ├── Motions/
+│   ├── Pleadings/
+│   ├── Letters/
+│   └── Discovery/
+├── Traffic/
+├── DWI/
+├── DOR/
+├── Civil/
+├── Family/
+├── Personal_Injury/
+├── _Common/
+└── _Jurisdiction_Specific/
+```
+
+See `docs/TEMPLATE_FOLDER_STRUCTURE.md` for complete structure.
+
+### Variable Syntax
+
+Templates use `{{variable_name}}` syntax:
+
+```
+IN THE CIRCUIT COURT OF {{county}} COUNTY, MISSOURI
+
+{{petitioner_name}},                   )
+                                       )
+            Petitioner,                )    Case No.: {{case_number}}
+                                       )
+v.                                     )
+                                       )
+{{respondent_name}},                   )
+                                       )
+            Respondent.                )
+```
+
+### Party Terminology
+
+Different case types use different party terms:
+
+| Case Type | Filing Party | Opposing Party |
+|-----------|--------------|----------------|
+| DOR | Petitioner | Respondent (Director of Revenue) |
+| Criminal | Defendant | State of Missouri |
+| Civil | Plaintiff/Defendant | Defendant/Plaintiff |
+| Family | Petitioner | Respondent |
+
+### API Cost Estimates
+
+| Metric | Value |
+|--------|-------|
+| Cost per document | ~$0.054 (5.4 cents) |
+| 100 docs/week | $23/month |
+| 100 docs/week | $281/year |
+| With optimization | ~$0.027/doc |
+
+See `docs/API_COST_ANALYSIS.md` for detailed projections.
+
+### Database Tables
+
+#### document_engine.db
+- `firms` - Registered law firms
+- `templates` - Imported document templates
+- `templates_fts` - Full-text search index
+- `generated_documents` - Document generation history
+
+#### attorney_profiles.db
+- `attorneys` - Attorney profiles with signature block info
+
+### Environment Variables
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...  # Required for AI document generation
+```
+
+The API key should be stored in `.env` file in the project root.
+
+### Recent Document System Fixes
+1. Fixed FTS5 syntax errors on special characters (commas, periods, parentheses)
+2. Fixed Motion to Dismiss General - no longer requires grounds
+3. Added DOR-specific motion type with Petitioner/Respondent terminology
+4. Added handling for "none" / "n/a" responses to skip variables
+5. Fixed document_type_key passthrough to use DOCUMENT_TYPES registry
+6. Added party_terminology field to distinguish case types
+7. **Fixed natural language search** - FTS now removes stop words and uses OR logic
+   - Before: "I need a bond assignment" → 0 results (FTS required ALL words)
+   - After: "I need a bond assignment" → finds "Bond Assignment" templates
+   - Stop words removed: i, me, my, need, want, looking, for, please, the, a, an, etc.
+8. **Fixed document generation to use actual templates** - System now:
+   - Extracts text from stored .docx template files
+   - Fills in variables using pattern matching ({{var}}, [var], and known placeholders)
+   - Preserves original template format (e.g., "ASSIGNMENT OF CASH BOND" title, first-person language)
+   - Only falls back to AI generation if no template content is available
+9. **Added Bond Assignment document type** - System now:
+   - Recognizes "bond assignment" and "cash bond" as bond_assignment type
+   - Only asks for case-specific variables: defendant_name, case_number, county, bond_amount, division
+   - Assignee name/address automatically filled from attorney profile (firm_name, firm_address)
+   - Template detection maps template names to DOCUMENT_TYPES keys for proper variable handling
+10. **Fixed Word document formatting preservation** - System now:
+    - Does in-place variable substitution directly in the .docx file
+    - Preserves all original formatting: alignment, tabs, underscores, tables, fonts
+    - Uses structural regex patterns to find values (e.g., case number after "Case No.:")
+    - Exports the filled .docx directly instead of regenerating from text
+    - Signature lines, Name:/Address: alignment, and notary sections preserved
+
+### Template Search Behavior
+The template search uses SQLite FTS5 with these enhancements:
+- **Synonym expansion**: Alternate legal terms mapped to database names
+- **Stop word removal**: Common words like "I", "need", "a", "the", "please" are filtered out
+- **OR logic**: Remaining words use OR matching (find ANY of the words)
+- **Fallback**: If FTS fails, falls back to LIKE search on name field
+
+**Synonym mappings** (alternate name → database name):
+| User Says | Searches For |
+|-----------|--------------|
+| cash bond, assignment of cash bond | bond assignment |
+| mtd | motion to dismiss |
+| mtc | motion to continue |
+| eoa | entry of appearance |
+| noh | notice of hearing |
+| rog, rogs | interrogatories |
+| rfp | request for production |
+| rfa | request for admission |
+| nol pros, nolle pros | nolle prosequi |
+| dor | director of revenue |
+
+**Example transformations**:
+- "I need a bond assignment" → "bond OR assignment"
+- "assignment of cash bond" → "bond OR assignment" (synonym expanded)
+- "mtd for Jefferson County" → "motion OR dismiss OR jefferson OR county"

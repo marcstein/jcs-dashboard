@@ -4,6 +4,18 @@ MyCase API Configuration
 import os
 from pathlib import Path
 
+# Load environment variables from .env file
+try:
+    from dotenv import dotenv_values
+    _env_path = Path(__file__).parent / ".env"
+    if _env_path.exists():
+        _env_values = dotenv_values(_env_path)
+        for key, value in _env_values.items():
+            if value and not os.environ.get(key):  # Set if value exists and env not already set
+                os.environ[key] = value
+except ImportError:
+    pass  # python-dotenv not installed, rely on system env vars
+
 # Base paths
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"

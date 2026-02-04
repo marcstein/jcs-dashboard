@@ -44,6 +44,9 @@ from case_phases import (
     DEFAULT_PHASES, DEFAULT_STAGE_MAPPINGS, DEFAULT_WORKFLOWS
 )
 
+# AI and Document Generation Commands
+from ai_commands import ai_cli, templates_cli, docs_cli, pleadings_cli, engine_cli, quick_generate_doc, attorney_cli
+
 
 console = Console()
 
@@ -3633,6 +3636,19 @@ def dashboard_cmd(host: str, port: int, reload: bool):
     console.print(f"Default login: admin / admin\n")
 
     run_server(host=host, port=port, reload=reload)
+
+
+# ============================================================================
+# Register AI Command Groups
+# ============================================================================
+
+cli.add_command(ai_cli, name="ai")
+cli.add_command(templates_cli, name="templates")
+cli.add_command(docs_cli, name="docs")
+cli.add_command(pleadings_cli, name="pleadings")
+cli.add_command(engine_cli, name="engine")
+cli.add_command(quick_generate_doc, name="generate-doc")
+cli.add_command(attorney_cli, name="attorney")
 
 
 # ============================================================================
