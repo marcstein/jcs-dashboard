@@ -465,7 +465,8 @@ class DocumentChatEngine:
 
         # Ask for missing variables conversationally
         response = f"I found **{session.template_name}**"
-        if session.jurisdiction:
+        # Only add jurisdiction if it's not already in the template name
+        if session.jurisdiction and session.jurisdiction.lower() not in session.template_name.lower():
             response += f" for {session.jurisdiction}"
         response += ".\n\n"
 
