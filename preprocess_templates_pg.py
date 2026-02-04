@@ -66,6 +66,8 @@ PG_CONFIG = {
 # Standard placeholders we want to use
 PLACEHOLDERS = {
     'defendant_name': '{{defendant_name}}',
+    'plaintiff_name': '{{plaintiff_name}}',
+    'petitioner_name': '{{petitioner_name}}',
     'case_number': '{{case_number}}',
     'county': '{{county}}',
     'division': '{{division}}',
@@ -119,6 +121,16 @@ KNOWN_SAMPLE_DEFENDANTS = [
     "DEMESHA HARRIS", "Demesha Harris",
     "DAVID SMITH", "David Smith",
     "MICHAEL JOHNSON", "Michael Johnson",
+]
+
+# Known sample plaintiff names (for civil cases)
+KNOWN_SAMPLE_PLAINTIFFS = [
+    "JOHN SMITH", "John Smith",
+    "JANE SMITH", "Jane Smith",
+    "SAMPLE PLAINTIFF", "Sample Plaintiff",
+    "ABC COMPANY", "ABC Company",
+    "XYZ CORPORATION", "XYZ Corporation",
+    "ACME INC", "Acme Inc",
 ]
 
 # Patterns for detecting values to replace
@@ -212,7 +224,16 @@ def process_template(template_id: int, name: str, content: bytes) -> ProcessingR
                         new_text = new_text.replace(sample_name, '{{defendant_name}}')
                     variables_found.add('defendant_name')
                     count += 1
-        
+
+        # 2b. Replace known sample plaintiff names
+        for sample_name in KNOWN_SAMPLE_PLAINTIFFS:
+            if sample_name in new_text:
+                # Only replace if it looks like a plaintiff context (not defendant/state)
+                if 'Defendant' not in new_text and 'STATE OF MISSOURI' not in new_text:
+                    new_text = new_text.replace(sample_name, '{{plaintiff_name}}')
+                    variables_found.add('plaintiff_name')
+                    count += 1
+
         # 3. Replace case numbers
         if PATTERNS['case_number'].search(new_text):
             # Don't replace if it looks like a template already
