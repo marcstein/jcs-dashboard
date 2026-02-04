@@ -106,7 +106,7 @@ KNOWN_FIRM_VALUES = {
     "JOHN C. SCHLEIFFARTH, P.C.": "{{firm_name}}",
 }
 
-# Known sample defendant names (from actual templates)
+# Known sample defendant/petitioner names (from actual templates)
 KNOWN_SAMPLE_DEFENDANTS = [
     "JAMES GADDY", "James Gaddy",
     "JOE FULSOM", "Joe Fulsom",
@@ -114,6 +114,10 @@ KNOWN_SAMPLE_DEFENDANTS = [
     "JANE DOE", "Jane Doe",
     "TYRONE JONES", "Tyrone Jones",
     "SAMPLE DEFENDANT", "Sample Defendant",
+    "RICHARD HORAK", "Richard Horak",
+    "DEMESHA HARRIS", "Demesha Harris",
+    "DAVID SMITH", "David Smith",
+    "MICHAEL JOHNSON", "Michael Johnson",
 ]
 
 # Patterns for detecting values to replace
