@@ -225,13 +225,46 @@ def process_template(template_id: int, name: str, content: bytes) -> ProcessingR
                     variables_found.add('defendant_name')
                     count += 1
 
-        # 2b. Replace known sample plaintiff names
+        # 2b. Replace known sample plaintiff names (from list)
         for sample_name in KNOWN_SAMPLE_PLAINTIFFS:
             if sample_name in new_text:
                 # Only replace if it looks like a plaintiff context (not defendant/state)
                 if 'Defendant' not in new_text and 'STATE OF MISSOURI' not in new_text:
                     new_text = new_text.replace(sample_name, '{{plaintiff_name}}')
                     variables_found.add('plaintiff_name')
+                    count += 1
+
+        # 2c. Detect plaintiff name by position (NAME, followed by Plaintiff)
+        # Pattern: "JOHN SMITH," or "John Smith," followed later by "Plaintiff"
+        if 'Plaintiff' in new_text and '{{plaintiff_name}}' not in new_text:
+            # Match: NAME (caps or title case), comma, then Plaintiff on same or next part
+            plaintiff_pattern = re.compile(
+                r'^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*),?\s*$'  # Name alone on line
+            )
+            # Also try: NAME, ) pattern (case caption style)
+            plaintiff_pattern2 = re.compile(
+                r'^([A-Z][A-Z\s\.]+),\s*\)?$'  # ALL CAPS NAME, )
+            )
+            match = plaintiff_pattern.match(new_text.strip()) or plaintiff_pattern2.match(new_text.strip())
+            if match:
+                name = match.group(1).strip()
+                # Make sure it's not a known entity
+                if name not in ['STATE OF MISSOURI', 'DIRECTOR OF REVENUE', 'STATE', 'CITY']:
+                    new_text = new_text.replace(name, '{{plaintiff_name}}')
+                    variables_found.add('plaintiff_name')
+                    count += 1
+
+        # 2d. Detect defendant name by position (NAME, followed by Defendant)
+        if 'Defendant' in new_text and '{{defendant_name}}' not in new_text:
+            defendant_pattern = re.compile(
+                r'^([A-Z][A-Z\s\.]+),\s*\)?$'  # ALL CAPS NAME, )
+            )
+            match = defendant_pattern.match(new_text.strip())
+            if match:
+                name = match.group(1).strip()
+                if name not in ['STATE OF MISSOURI', 'DIRECTOR OF REVENUE', 'STATE', 'CITY']:
+                    new_text = new_text.replace(name, '{{defendant_name}}')
+                    variables_found.add('defendant_name')
                     count += 1
 
         # 3. Replace case numbers
