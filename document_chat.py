@@ -192,7 +192,7 @@ DOCUMENT_TYPES = {
     "waiver_of_arraignment": {
         "name": "Waiver of Arraignment",
         "description": "Waiver of formal arraignment hearing with entry of not guilty plea",
-        "required_vars": ["defendant_name", "case_number", "court", "jurisdiction_city"],
+        "required_vars": ["defendant_name", "case_number", "court", "jurisdiction_city", "drafted_by"],
         "optional_vars": [],
         "defaults": {}
     },
@@ -241,13 +241,13 @@ DOCUMENT_TYPES = {
     "request_for_discovery_municipal": {
         "name": "Request for Discovery - Municipal",
         "description": "Discovery request in municipal court case",
-        "required_vars": ["defendant_name", "case_number", "city", "prosecuting_attorney", "prosecuting_attorney_address", "prosecuting_attorney_city_state_zip", "requested_evidence"],
+        "required_vars": ["defendant_name", "case_number", "city", "prosecuting_attorney", "prosecuting_attorney_address", "prosecuting_attorney_city_state_zip", "requested_evidence", "drafted_by"],
         "optional_vars": []
     },
     "request_for_discovery_circuit": {
         "name": "Request for Discovery - Circuit",
         "description": "Discovery request in circuit court case",
-        "required_vars": ["defendant_name", "case_number", "county"],
+        "required_vars": ["defendant_name", "case_number", "county", "drafted_by"],
         "optional_vars": []
     },
     "disposition_letter": {
@@ -1132,13 +1132,6 @@ Email: {ap.email}"""
                 replacements['attorney1'] = ap.attorney_name  # For Entry of Appearance
                 replacements['attorney2'] = ""  # Empty by default for single attorney
 
-                # Auto-fill drafter initials (for /s/ lines)
-                # Use drafted_by as canonical; drafter is aliased to it
-                if ap.attorney_name:
-                    # Extract initials from attorney name (e.g., "John C. Schleiffarth" -> "JCS")
-                    initials = ''.join(word[0].upper() for word in ap.attorney_name.split() if word)
-                    replacements['drafted_by'] = initials
-
             # Auto-fill dates with today's date if not provided
             from datetime import datetime
             today = datetime.now()
@@ -1251,12 +1244,6 @@ Email: {ap.email}"""
             replacements['email'] = ap.email
             if ap.fax:
                 replacements['fax'] = ap.fax
-
-            # Auto-fill drafter initials (drafted_by is canonical, drafter is legacy)
-            if ap.attorney_name:
-                initials = ''.join(word[0].upper() for word in ap.attorney_name.split() if word)
-                replacements['drafted_by'] = initials
-                replacements['drafter'] = initials  # Legacy alias
 
         # Auto-fill date with today's date if not provided
         from datetime import datetime
