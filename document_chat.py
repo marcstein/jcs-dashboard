@@ -1251,6 +1251,21 @@ Email: {ap.email}"""
             if ap.fax:
                 replacements['fax'] = ap.fax
 
+            # Auto-fill drafter initials
+            if ap.attorney_name:
+                initials = ''.join(word[0].upper() for word in ap.attorney_name.split() if word)
+                replacements['drafter'] = initials
+                replacements['drafted_by'] = initials
+
+        # Auto-fill date with today's date if not provided
+        from datetime import datetime
+        today = datetime.now()
+        today_formatted = today.strftime('%B %d, %Y')  # "February 5, 2026"
+        if 'date' not in replacements:
+            replacements['date'] = today_formatted
+        if 'service_date' not in replacements:
+            replacements['service_date'] = today_formatted
+
         # Replace all {{placeholder}} patterns
         pattern = r'\{\{([^}]+)\}\}'
 
