@@ -207,7 +207,7 @@ DOCUMENT_TYPES = {
     "entry_of_appearance": {
         "name": "Entry of Appearance",
         "description": "Notice that attorney is appearing for defendant",
-        "required_vars": ["defendant_name", "case_number", "county"],
+        "required_vars": ["defendant_name", "case_number", "county", "court", "prosecuting_attorney_address"],
         "optional_vars": []
     },
     "motion_to_continue": {
@@ -1039,6 +1039,7 @@ Only include variables where you found a clear value. If unsure, don't include i
                 'plaintiff_name': 'defendant_name',
                 'client_name': 'defendant_name',
                 'respondent_name': 'defendant_name',
+                'defendant': 'defendant_name',  # Template uses {{defendant}}, DOCUMENT_TYPES uses defendant_name
                 'current_date': 'original_date',  # Motion to continue: hearing date
                 'hearing_date': 'original_date',
                 'city': 'county',  # Municipal court uses city, circuit uses county
@@ -1085,6 +1086,8 @@ Email: {ap.email}"""
                 # Also add individual signature block parts
                 replacements['attorney1_signature_block'] = sig_block
                 replacements['attorney2_signature_block'] = ""  # Empty by default for single attorney
+                replacements['attorney1'] = ap.attorney_name  # For Entry of Appearance
+                replacements['attorney2'] = ""  # Empty by default for single attorney
 
                 # Auto-fill drafter initials (for /s/ lines)
                 if ap.attorney_name:
