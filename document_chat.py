@@ -972,7 +972,8 @@ Only include variables where you found a clear value. If unsure, don't include i
 
         try:
             text = response.content[0].text
-            json_match = re.search(r'\{[^}]*\}', text, re.DOTALL)
+            # More robust JSON extraction - find opening { and match to closing }
+            json_match = re.search(r'\{[\s\S]*\}', text)
             if json_match:
                 extracted = json.loads(json_match.group())
 
@@ -983,10 +984,15 @@ Only include variables where you found a clear value. If unsure, don't include i
                     if var_name == 'county':
                         value_str = re.sub(r'\s+county\s*$', '', value_str, flags=re.IGNORECASE).strip()
 
+                    # Normalize var_name for matching (case-insensitive, handle spaces/underscores)
+                    var_name_normalized = var_name.lower().replace(' ', '_').replace('-', '_')
+
                     for var in session.detected_variables:
-                        if var.name == var_name:
+                        # Normalize the variable name for comparison
+                        detected_name_normalized = var.name.lower().replace(' ', '_').replace('-', '_')
+                        if detected_name_normalized == var_name_normalized:
                             var.value = value_str
-                            session.collected_values[var_name] = value_str
+                            session.collected_values[var.name] = value_str
                             break
 
                 # Apply variable aliases - if we extracted one name variant,
