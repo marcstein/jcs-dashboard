@@ -868,7 +868,7 @@ Focus on the most important 5-10 variables."""
             "petitioner_name": "Full legal name of the petitioner (your client)",
             "party_name": "Full legal name of the party filing the motion",
             "plaintiff_name": "Full legal name of the plaintiff",
-            "case_number": "Court case number (e.g., 24JE-CC00191)",
+            "case_number": "Court case number (e.g., 24JE-CC00191 or 12345)",
             "county": "County where case is filed (e.g., Jefferson)",
             "party_role": "Role of the filing party (e.g., Defendant, Petitioner, Plaintiff)",
             "respondent_name": "Name of the responding party (e.g., Director of Revenue)",
@@ -901,6 +901,8 @@ Focus on the most important 5-10 variables."""
             "current_date": "Current date for the hearing/event being continued",
             "reason": "Reason for the motion",
             "proposed_date": "Proposed new date",
+            "drafted_by": "Initials of paralegal who drafted the document (e.g., ABC)",
+            "drafter": "Initials of paralegal who drafted the document (e.g., ABC)",
         }
 
         # Check document-specific grounds
@@ -946,8 +948,9 @@ Variables needed:
 IMPORTANT - Variable name synonyms (use these mappings):
 - "defendant" or "client" → maps to: defendant_name, petitioner_name, client_name (they're the same person)
 - "plaintiff" → maps to: plaintiff_name
-- "case number" or "case #" or "cause number" → maps to: case_number
+- "case number" or "case #" or "cause number" or any number/alphanumeric → maps to: case_number
 - "county" or court location → maps to: county
+- "drafted by" or "drafter" or "initials" or 2-4 letter abbreviations → maps to: drafted_by
 - Any person's name after "defendant" or "for" typically refers to the client/defendant/petitioner
 
 User message: "{message}"
