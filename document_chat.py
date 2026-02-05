@@ -1039,6 +1039,9 @@ Only include variables where you found a clear value. If unsure, don't include i
                 'plaintiff_name': 'defendant_name',
                 'client_name': 'defendant_name',
                 'respondent_name': 'defendant_name',
+                'current_date': 'original_date',  # Motion to continue: hearing date
+                'hearing_date': 'original_date',
+                'city': 'county',  # Municipal court uses city, circuit uses county
             }
             for alias, canonical in VARIABLE_ALIASES.items():
                 if alias in replacements and canonical not in replacements:
