@@ -1085,6 +1085,7 @@ Only include variables where you found a clear value. If unsure, don't include i
                 'current_date': 'original_date',  # Motion to continue: hearing date
                 'hearing_date': 'original_date',
                 'city': 'county',  # Municipal court uses city, circuit uses county
+                'drafter': 'drafted_by',  # Standardize on drafted_by
             }
             for alias, canonical in VARIABLE_ALIASES.items():
                 if alias in replacements and canonical not in replacements:
@@ -1132,10 +1133,10 @@ Email: {ap.email}"""
                 replacements['attorney2'] = ""  # Empty by default for single attorney
 
                 # Auto-fill drafter initials (for /s/ lines)
+                # Use drafted_by as canonical; drafter is aliased to it
                 if ap.attorney_name:
                     # Extract initials from attorney name (e.g., "John C. Schleiffarth" -> "JCS")
                     initials = ''.join(word[0].upper() for word in ap.attorney_name.split() if word)
-                    replacements['drafter'] = initials
                     replacements['drafted_by'] = initials
 
             # Auto-fill dates with today's date if not provided
@@ -1251,11 +1252,11 @@ Email: {ap.email}"""
             if ap.fax:
                 replacements['fax'] = ap.fax
 
-            # Auto-fill drafter initials
+            # Auto-fill drafter initials (drafted_by is canonical, drafter is legacy)
             if ap.attorney_name:
                 initials = ''.join(word[0].upper() for word in ap.attorney_name.split() if word)
-                replacements['drafter'] = initials
                 replacements['drafted_by'] = initials
+                replacements['drafter'] = initials  # Legacy alias
 
         # Auto-fill date with today's date if not provided
         from datetime import datetime
