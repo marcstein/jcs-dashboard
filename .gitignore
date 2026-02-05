@@ -72,6 +72,7 @@ data/reports/
 *.gif
 *.pdf
 *.docx
+!templates_processed/*.docx
 *.xlsx
 *.csv
 
