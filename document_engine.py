@@ -745,8 +745,9 @@ class DocumentEngine:
             try:
                 if self.is_postgres:
                     # PostgreSQL full-text search with tsvector
-                    # Convert OR-separated words to tsquery format (word1 | word2)
-                    pg_query = ' | '.join(words)
+                    # Use AND logic so all search terms must match
+                    # This prevents "PH Waiver" from matching "waiver of arraignment"
+                    pg_query = ' & '.join(words)
 
                     # Check if query contains a county name
                     county_words = ['county', 'jefferson', 'st louis', 'saint louis', 'jackson',

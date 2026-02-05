@@ -1070,6 +1070,26 @@ Only include variables where you found a clear value. If unsure, don't include i
                 if ap.fax:
                     replacements['fax'] = ap.fax
 
+                # Auto-fill attorney signature block
+                sig_block = f"""{ap.attorney_name}
+{ap.firm_name}
+{ap.firm_address}
+{ap.firm_city}, {ap.firm_state} {ap.firm_zip}
+Phone: {ap.phone}
+Email: {ap.email}"""
+                replacements['attorney_signature_block'] = sig_block
+
+                # Also add individual signature block parts
+                replacements['attorney1_signature_block'] = sig_block
+                replacements['attorney2_signature_block'] = ""  # Empty by default for single attorney
+
+                # Auto-fill drafter initials (for /s/ lines)
+                if ap.attorney_name:
+                    # Extract initials from attorney name (e.g., "John C. Schleiffarth" -> "JCS")
+                    initials = ''.join(word[0].upper() for word in ap.attorney_name.split() if word)
+                    replacements['drafter'] = initials
+                    replacements['drafted_by'] = initials
+
             # Auto-fill dates with today's date if not provided
             from datetime import datetime
             today = datetime.now()
