@@ -1162,6 +1162,10 @@ Email: {ap.email}"""
                 replacements['attorney1'] = ap.attorney_name  # For Entry of Appearance
                 replacements['attorney2'] = ""  # Empty by default for single attorney
 
+                # Bond Assignment: assignee is the attorney/firm
+                replacements['assignee_name'] = ap.firm_name or ap.attorney_name
+                replacements['assignee_address'] = f"{ap.firm_address}\n{ap.firm_city}, {ap.firm_state} {ap.firm_zip}"
+
             # Auto-fill dates with today's date if not provided
             from datetime import datetime
             today = datetime.now()

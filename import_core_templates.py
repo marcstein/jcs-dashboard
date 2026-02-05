@@ -32,6 +32,7 @@ TEMPLATES = [
     ('Motion_for_Continuance_Circuit.docx', 'Motion for Continuance - Circuit', 'motion'),
     ('Request_for_Discovery_Municipal.docx', 'Request for Discovery - Municipal', 'discovery'),
     ('Request_for_Discovery_Circuit.docx', 'Request for Discovery - Circuit', 'discovery'),
+    ('Bond_Assignment.docx', 'Bond Assignment', 'pleading'),
 ]
 
 FIRM_ID = 'jcs_law'
