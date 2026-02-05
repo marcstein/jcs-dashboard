@@ -192,11 +192,9 @@ DOCUMENT_TYPES = {
     "waiver_of_arraignment": {
         "name": "Waiver of Arraignment",
         "description": "Waiver of formal arraignment hearing with entry of not guilty plea",
-        "required_vars": ["defendant_name", "case_number", "county", "charges"],
-        "optional_vars": ["plea_type"],
-        "defaults": {
-            "plea_type": "Not Guilty"
-        }
+        "required_vars": ["defendant_name", "case_number", "court", "jurisdiction_city"],
+        "optional_vars": [],
+        "defaults": {}
     },
     "request_for_jury_trial": {
         "name": "Request for Jury Trial",
@@ -207,20 +205,50 @@ DOCUMENT_TYPES = {
     "entry_of_appearance": {
         "name": "Entry of Appearance",
         "description": "Notice that attorney is appearing for defendant",
-        "required_vars": ["defendant_name", "case_number", "county", "court", "prosecuting_attorney_address"],
+        "required_vars": ["defendant_name", "case_number", "county", "court", "prosecuting_attorney", "prosecuting_attorney_address"],
         "optional_vars": []
     },
     "motion_to_continue": {
         "name": "Motion to Continue",
         "description": "Request to postpone a hearing or trial date",
-        "required_vars": ["defendant_name", "case_number", "county", "current_date", "reason"],
-        "optional_vars": ["proposed_date"]
+        "required_vars": ["defendant_name", "case_number", "original_date"],
+        "optional_vars": ["city", "county", "conflict_details", "respondent"]
+    },
+    "motion_to_continue_municipal": {
+        "name": "Motion for Continuance - Municipal",
+        "description": "Request to postpone a municipal court hearing",
+        "required_vars": ["defendant_name", "case_number", "city", "original_date"],
+        "optional_vars": []
+    },
+    "motion_to_continue_circuit": {
+        "name": "Motion for Continuance - Circuit",
+        "description": "Request to postpone a circuit court hearing",
+        "required_vars": ["defendant_name", "case_number", "county", "original_date", "conflict_details", "respondent"],
+        "optional_vars": []
     },
     "preservation_letter": {
         "name": "Preservation Letter",
         "description": "Letter requesting preservation of evidence",
-        "required_vars": ["defendant_name", "case_number", "agency_name", "arrest_date"],
-        "optional_vars": ["defendant_dob", "arresting_officer", "ticket_number"]
+        "required_vars": ["defendant_name", "police_department", "address_police_department", "city_state_zip_police_department", "dob", "charges", "arrest_date", "ticket_number", "arresting_officer"],
+        "optional_vars": []
+    },
+    "potential_prosecution_letter": {
+        "name": "Potential Prosecution Letter",
+        "description": "Letter to prosecutor notifying of representation and requesting communication",
+        "required_vars": ["defendant_name", "prosecuting_attorney", "office_prosecuting_attorney", "address_prosecuting_attorney", "city_state_zip_prosecuting_attorney"],
+        "optional_vars": []
+    },
+    "request_for_discovery_municipal": {
+        "name": "Request for Discovery - Municipal",
+        "description": "Discovery request in municipal court case",
+        "required_vars": ["defendant_name", "case_number", "city", "prosecuting_attorney", "prosecuting_attorney_address", "prosecuting_attorney_city_state_zip", "requested_evidence"],
+        "optional_vars": []
+    },
+    "request_for_discovery_circuit": {
+        "name": "Request for Discovery - Circuit",
+        "description": "Discovery request in circuit court case",
+        "required_vars": ["defendant_name", "case_number", "county"],
+        "optional_vars": []
     },
     "disposition_letter": {
         "name": "Disposition Letter",
@@ -598,14 +626,28 @@ class DocumentChatEngine:
                     document_type_key = 'motion_to_dismiss_dor'
                 else:
                     document_type_key = 'motion_to_dismiss_general'
-            elif 'waiver of arraignment' in template_name_lower:
+            elif 'waiver of arraignment' in template_name_lower or 'entry' in template_name_lower and 'arraignment' in template_name_lower:
                 document_type_key = 'waiver_of_arraignment'
             elif 'entry of appearance' in template_name_lower:
                 document_type_key = 'entry_of_appearance'
-            elif 'motion to continue' in template_name_lower:
-                document_type_key = 'motion_to_continue'
+            elif 'motion' in template_name_lower and 'continu' in template_name_lower:
+                if 'municipal' in template_name_lower:
+                    document_type_key = 'motion_to_continue_municipal'
+                elif 'circuit' in template_name_lower:
+                    document_type_key = 'motion_to_continue_circuit'
+                else:
+                    document_type_key = 'motion_to_continue'
             elif 'preservation' in template_name_lower:
                 document_type_key = 'preservation_letter'
+            elif 'potential prosecution' in template_name_lower or 'prosecution letter' in template_name_lower:
+                document_type_key = 'potential_prosecution_letter'
+            elif 'request for discovery' in template_name_lower or 'discovery request' in template_name_lower:
+                if 'municipal' in template_name_lower:
+                    document_type_key = 'request_for_discovery_municipal'
+                elif 'circuit' in template_name_lower:
+                    document_type_key = 'request_for_discovery_circuit'
+                else:
+                    document_type_key = 'request_for_discovery_circuit'  # Default to circuit
 
             return {
                 "found": True,
