@@ -626,9 +626,11 @@ class DocumentChatEngine:
                     document_type_key = 'motion_to_dismiss_dor'
                 else:
                     document_type_key = 'motion_to_dismiss_general'
-            elif 'waiver of arraignment' in template_name_lower or 'entry' in template_name_lower and 'arraignment' in template_name_lower:
+            elif 'arraignment' in template_name_lower and 'waiver' in template_name_lower:
+                # Matches: "Waiver of Arraignment", "Entry of Appearance, Waiver of Arraignment..."
                 document_type_key = 'waiver_of_arraignment'
-            elif 'entry of appearance' in template_name_lower:
+            elif 'entry of appearance' in template_name_lower and 'arraignment' not in template_name_lower:
+                # Only match Entry of Appearance if NOT also an arraignment waiver
                 document_type_key = 'entry_of_appearance'
             elif 'motion' in template_name_lower and 'continu' in template_name_lower:
                 if 'municipal' in template_name_lower:
@@ -784,7 +786,26 @@ Respond with JSON:
             except:
                 pass
 
-        # Use AI to detect variables
+        # FIRST: Try to extract {{placeholder}} variables directly from template
+        if template_text:
+            placeholder_pattern = r'\{\{([^}]+)\}\}'
+            found_placeholders = set(re.findall(placeholder_pattern, template_text))
+            if found_placeholders:
+                variables = []
+                for placeholder in found_placeholders:
+                    var_name = placeholder.lower().strip()
+                    variables.append(DetectedVariable(
+                        name=var_name,
+                        display_name=var_name.replace("_", " ").title(),
+                        description=self._get_var_description(var_name, {}),
+                        sample_value="",
+                        var_type=self._get_var_type(var_name),
+                        required=True
+                    ))
+                if variables:
+                    return variables
+
+        # Use AI to detect variables (fallback if no {{placeholders}} found)
         prompt = f"""Analyze this legal document template and identify all the variable fields that would need to be filled in for each new document.
 
 Document Type: {document_type}
