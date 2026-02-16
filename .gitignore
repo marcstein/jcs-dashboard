@@ -107,7 +107,6 @@ data/notifications_log.json
 !templates/*.txt
 
 # Multi-tenant files (not needed for JCS deployment)
-*_mt.py
 MULTI_TENANT_GUIDE.md
 
 # Sample files
