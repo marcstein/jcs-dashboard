@@ -34,7 +34,7 @@ def get_upcoming_events(days: int = 7) -> List[Dict]:
     staff_lookup = {}
     with cache._get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name FROM cached_staff")
+        cursor.execute("SELECT id, name FROM cached_staff WHERE firm_id = %s", (cache.firm_id,))
         for row in cursor.fetchall():
             staff_lookup[row['id']] = row['name']
 
@@ -56,10 +56,11 @@ def get_upcoming_events(days: int = 7) -> List[Dict]:
                 id, name, event_type, start_at, end_at, all_day,
                 case_id, location, data_json
             FROM cached_events
-            WHERE date(start_at) >= date(?)
-            AND date(start_at) <= date(?)
+            WHERE firm_id = %s
+            AND start_at::text::date >= %s::date
+            AND start_at::text::date <= %s::date
             ORDER BY start_at ASC
-        """, (query_start, query_end))
+        """, (cache.firm_id, query_start, query_end))
 
         events = []
         for row in cursor.fetchall():
@@ -407,7 +408,7 @@ def get_staff_email_lookup() -> Dict[str, str]:
     lookup = {}
     with cache._get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT name, email FROM cached_staff WHERE email IS NOT NULL AND email != ''")
+        cursor.execute("SELECT name, email FROM cached_staff WHERE firm_id = %s AND email IS NOT NULL AND email != ''", (cache.firm_id,))
         for row in cursor.fetchall():
             lookup[row['name']] = row['email']
     return lookup
@@ -421,10 +422,11 @@ def get_active_staff() -> List[Dict]:
         cursor.execute("""
             SELECT id, name, email
             FROM cached_staff
-            WHERE active = 1
+            WHERE firm_id = %s
+            AND active = TRUE
             AND name != 'Firm Calendar'
             ORDER BY name
-        """)
+        """, (cache.firm_id,))
         return [dict(row) for row in cursor.fetchall()]
 
 
