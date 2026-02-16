@@ -95,7 +95,9 @@ echo "  Systemd services installed and enabled"
 # -------------------------------------------------------------------
 echo "[5/6] Running sync schema migration..."
 cd $APP_DIR
-sudo -u $APP_USER .venv/bin/python migrate_sync_tables.py
+# Source .env so DATABASE_URL and other vars are available
+set -a; source $APP_DIR/.env 2>/dev/null; set +a
+.venv/bin/python migrate_sync_tables.py
 echo "  Database migration complete"
 
 # -------------------------------------------------------------------
