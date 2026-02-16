@@ -268,8 +268,14 @@ def refresh_firm_tokens(self, firm_id: str):
 
 
 def _refresh_token(firm_id: str, db):
-    """Internal: refresh a firm's MyCase OAuth token."""
+    """Internal: refresh a firm's MyCase OAuth token.
+
+    Updates both the platform DB and data/tokens.json so the existing
+    dashboard app stays in sync during the migration period.
+    """
+    import json
     import httpx
+    from pathlib import Path
     from config import MYCASE_AUTH_URL, CLIENT_ID, CLIENT_SECRET
 
     creds = db.get_mycase_credentials(firm_id)
@@ -293,12 +299,35 @@ def _refresh_token(firm_id: str, db):
         )
 
     data = response.json()
+    new_access = data["access_token"]
+    new_refresh = data.get("refresh_token", creds.refresh_token)
+    expires_in = data.get("expires_in", 7200)
+
+    # Update platform DB
     db.update_mycase_tokens(
         firm_id=firm_id,
-        access_token=data["access_token"],
-        refresh_token=data.get("refresh_token", creds.refresh_token),
-        expires_in=data.get("expires_in", 7200),
+        access_token=new_access,
+        refresh_token=new_refresh,
+        expires_in=expires_in,
     )
+
+    # Also update tokens.json for the existing dashboard app
+    try:
+        now = datetime.utcnow()
+        tokens_file = Path(__file__).parent / "data" / "tokens.json"
+        token_data = {
+            "access_token": new_access,
+            "token_type": "Bearer",
+            "scope": data.get("scope", ""),
+            "refresh_token": new_refresh,
+            "expires_in": expires_in,
+            "saved_at": now.isoformat(),
+            "expires_at": (now + timedelta(seconds=expires_in)).isoformat(),
+        }
+        tokens_file.write_text(json.dumps(token_data, indent=2))
+        logger.info(f"Updated tokens.json for firm {firm_id}")
+    except Exception as e:
+        logger.warning(f"Failed to update tokens.json: {e}")
 
 
 # =============================================================================
