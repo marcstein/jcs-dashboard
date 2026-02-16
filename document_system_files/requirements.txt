@@ -44,9 +44,5 @@ itsdangerous>=2.1.0
 # Security utilities (password hashing)
 werkzeug>=3.0.0
 
-# Task Queue (Multi-Tenant Auto-Sync)
-celery[redis]>=5.3.0
-redis>=5.0.0
-
 # AI/LLM
 anthropic>=0.30.0

@@ -13,6 +13,7 @@ load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 import dashboard.config as config
 from dashboard.routes import router
+from sync_routes import router as sync_router
 
 # Create FastAPI app
 app = FastAPI(
@@ -36,6 +37,7 @@ app.mount("/static", StaticFiles(directory=DASHBOARD_DIR / "static"), name="stat
 
 # Include routes
 app.include_router(router)
+app.include_router(sync_router, prefix="/api/sync")
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):

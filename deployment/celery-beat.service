@@ -1,0 +1,31 @@
+[Unit]
+Description=LawMetrics Celery Beat Scheduler
+After=network.target redis.service
+Wants=redis.service celery-worker.service
+
+[Service]
+Type=simple
+User=mycase
+Group=mycase
+WorkingDirectory=/opt/jcs-mycase
+Environment="PATH=/opt/jcs-mycase/.venv/bin"
+EnvironmentFile=/opt/jcs-mycase/.env
+
+ExecStart=/opt/jcs-mycase/.venv/bin/celery \
+    -A celery_app beat \
+    --loglevel=info \
+    --logfile=/opt/jcs-mycase/logs/celery-beat.log \
+    --pidfile=/opt/jcs-mycase/data/celery-beat.pid \
+    --schedule=/opt/jcs-mycase/data/celerybeat-schedule
+
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/jcs-mycase/data /opt/jcs-mycase/logs
+
+[Install]
+WantedBy=multi-user.target

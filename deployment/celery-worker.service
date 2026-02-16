@@ -1,0 +1,42 @@
+[Unit]
+Description=LawMetrics Celery Worker
+After=network.target redis.service postgresql.service
+Wants=redis.service
+
+[Service]
+Type=simple
+User=mycase
+Group=mycase
+WorkingDirectory=/opt/jcs-mycase
+Environment="PATH=/opt/jcs-mycase/.venv/bin"
+EnvironmentFile=/opt/jcs-mycase/.env
+
+# Worker with 3 concurrent tasks across 3 queues
+ExecStart=/opt/jcs-mycase/.venv/bin/celery \
+    -A celery_app worker \
+    --loglevel=info \
+    --concurrency=3 \
+    --queues=default,sync,reports \
+    --hostname=worker@%%h \
+    --logfile=/opt/jcs-mycase/logs/celery-worker.log \
+    --pidfile=/opt/jcs-mycase/data/celery-worker.pid
+
+# Graceful shutdown (wait for running tasks to finish)
+ExecStop=/bin/kill -TERM $MAINPID
+TimeoutStopSec=300
+
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/jcs-mycase/data /opt/jcs-mycase/logs
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

@@ -687,6 +687,453 @@ class PlatformDB:
                     VALUES (?, ?, ?, ?, ?)
                 """, (firm_id, user_id, action, json.dumps(details) if details else None, ip_address))
 
+    # =========================================================================
+    # Sync Scheduling Methods
+    # =========================================================================
+
+    def get_firms_due_for_sync(self, limit: int = 10) -> List[Dict]:
+        """
+        Get firms that are due for their next sync.
+
+        A firm is due if:
+        - It has never synced (next_sync_at is NULL)
+        - Its next_sync_at has passed
+        - It's not currently syncing (status != 'running')
+        - It has active subscription and MyCase connection
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    SELECT id, name, sync_frequency_minutes, last_sync_at, next_sync_at
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = TRUE
+                    AND (last_sync_status IS NULL OR last_sync_status != 'running')
+                    AND (next_sync_at IS NULL OR next_sync_at <= NOW())
+                    ORDER BY
+                        next_sync_at ASC NULLS FIRST,
+                        last_sync_at ASC NULLS FIRST
+                    LIMIT %s
+                """, (limit,))
+            else:
+                cursor.execute("""
+                    SELECT id, name, sync_frequency_minutes, last_sync_at, next_sync_at
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = 1
+                    AND (last_sync_status IS NULL OR last_sync_status != 'running')
+                    AND (next_sync_at IS NULL OR next_sync_at <= datetime('now'))
+                    ORDER BY
+                        CASE WHEN next_sync_at IS NULL THEN 0 ELSE 1 END,
+                        next_sync_at ASC,
+                        last_sync_at ASC
+                    LIMIT ?
+                """, (limit,))
+
+            return [dict(row) for row in cursor.fetchall()]
+
+    def schedule_next_sync(self, firm_id: str, delay_minutes: int = None):
+        """
+        Schedule the next sync for a firm.
+        Uses the firm's sync_frequency_minutes unless delay_minutes is specified.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if delay_minutes:
+                if self.use_postgres:
+                    cursor.execute("""
+                        UPDATE firms
+                        SET next_sync_at = NOW() + (%s || ' minutes')::INTERVAL
+                        WHERE id = %s
+                    """, (str(delay_minutes), firm_id))
+                else:
+                    cursor.execute("""
+                        UPDATE firms
+                        SET next_sync_at = datetime('now', ? || ' minutes')
+                        WHERE id = ?
+                    """, (str(delay_minutes), firm_id))
+            else:
+                if self.use_postgres:
+                    cursor.execute("""
+                        UPDATE firms
+                        SET next_sync_at = NOW() + (COALESCE(sync_frequency_minutes, 240) || ' minutes')::INTERVAL
+                        WHERE id = %s
+                    """, (firm_id,))
+                else:
+                    cursor.execute("""
+                        UPDATE firms
+                        SET next_sync_at = datetime('now', '+' || COALESCE(sync_frequency_minutes, 240) || ' minutes')
+                        WHERE id = ?
+                    """, (firm_id,))
+
+    def get_active_firms_list(self) -> List[Dict]:
+        """Get all active firms (lightweight, for dispatching)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    SELECT id, name
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = TRUE
+                """)
+            else:
+                cursor.execute("""
+                    SELECT id, name
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = 1
+                """)
+
+            return [dict(row) for row in cursor.fetchall()]
+
+    # =========================================================================
+    # Token Expiration Queries
+    # =========================================================================
+
+    def get_firms_with_expiring_tokens(self, within_minutes: int = 60) -> List[Dict]:
+        """Get firms whose OAuth tokens expire within the given window."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    SELECT id, name, mycase_token_expires_at
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = TRUE
+                    AND mycase_token_expires_at IS NOT NULL
+                    AND mycase_token_expires_at <= NOW() + (%s || ' minutes')::INTERVAL
+                    AND mycase_token_expires_at > NOW()
+                """, (str(within_minutes),))
+            else:
+                cursor.execute("""
+                    SELECT id, name, mycase_token_expires_at
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = 1
+                    AND mycase_token_expires_at IS NOT NULL
+                    AND mycase_token_expires_at <= datetime('now', ? || ' minutes')
+                    AND mycase_token_expires_at > datetime('now')
+                """, (f"+{within_minutes}",))
+
+            return [dict(row) for row in cursor.fetchall()]
+
+    # =========================================================================
+    # Sync History
+    # =========================================================================
+
+    def record_sync_start(self, firm_id: str, triggered_by: str = "scheduler",
+                          celery_task_id: str = None) -> Optional[int]:
+        """Record the start of a sync in the history table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    INSERT INTO sync_history (firm_id, status, triggered_by, started_at, celery_task_id)
+                    VALUES (%s, 'started', %s, NOW(), %s)
+                    RETURNING id
+                """, (firm_id, triggered_by, celery_task_id))
+                row = cursor.fetchone()
+                return dict(row)["id"] if row else None
+            else:
+                cursor.execute("""
+                    INSERT INTO sync_history (firm_id, status, triggered_by, started_at, celery_task_id)
+                    VALUES (?, 'started', ?, datetime('now'), ?)
+                """, (firm_id, triggered_by, celery_task_id))
+                return cursor.lastrowid
+
+    def record_sync_complete(self, firm_id: str, records_synced: int = 0,
+                             duration_seconds: float = 0, entity_results: dict = None):
+        """Update the most recent sync_history record to 'completed'."""
+        entity_json = json.dumps(entity_results) if entity_results else None
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    UPDATE sync_history
+                    SET status = 'completed',
+                        completed_at = NOW(),
+                        duration_seconds = %s,
+                        records_synced = %s,
+                        entity_results = %s::jsonb
+                    WHERE id = (
+                        SELECT id FROM sync_history
+                        WHERE firm_id = %s AND status = 'started'
+                        ORDER BY started_at DESC LIMIT 1
+                    )
+                """, (duration_seconds, records_synced, entity_json, firm_id))
+
+                cursor.execute("""
+                    UPDATE firms
+                    SET last_sync_at = NOW(),
+                        last_sync_status = 'completed',
+                        last_sync_error = NULL,
+                        last_sync_records = %s,
+                        last_sync_duration_seconds = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                """, (records_synced, duration_seconds, firm_id))
+            else:
+                cursor.execute("""
+                    UPDATE sync_history
+                    SET status = 'completed',
+                        completed_at = datetime('now'),
+                        duration_seconds = ?,
+                        records_synced = ?,
+                        entity_results = ?
+                    WHERE id = (
+                        SELECT id FROM sync_history
+                        WHERE firm_id = ? AND status = 'started'
+                        ORDER BY started_at DESC LIMIT 1
+                    )
+                """, (duration_seconds, records_synced, entity_json, firm_id))
+
+                cursor.execute("""
+                    UPDATE firms
+                    SET last_sync_at = datetime('now'),
+                        last_sync_status = 'completed',
+                        last_sync_error = NULL,
+                        last_sync_records = ?,
+                        last_sync_duration_seconds = ?,
+                        updated_at = datetime('now')
+                    WHERE id = ?
+                """, (records_synced, duration_seconds, firm_id))
+
+    def record_sync_failure(self, firm_id: str, error: str = None):
+        """Update the most recent sync_history record to 'failed'."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    UPDATE sync_history
+                    SET status = 'failed',
+                        completed_at = NOW(),
+                        error_message = %s
+                    WHERE id = (
+                        SELECT id FROM sync_history
+                        WHERE firm_id = %s AND status = 'started'
+                        ORDER BY started_at DESC LIMIT 1
+                    )
+                """, (error, firm_id))
+
+                cursor.execute("""
+                    UPDATE firms
+                    SET last_sync_status = 'failed',
+                        last_sync_error = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                """, (error, firm_id))
+            else:
+                cursor.execute("""
+                    UPDATE sync_history
+                    SET status = 'failed',
+                        completed_at = datetime('now'),
+                        error_message = ?
+                    WHERE id = (
+                        SELECT id FROM sync_history
+                        WHERE firm_id = ? AND status = 'started'
+                        ORDER BY started_at DESC LIMIT 1
+                    )
+                """, (error, firm_id))
+
+                cursor.execute("""
+                    UPDATE firms
+                    SET last_sync_status = 'failed',
+                        last_sync_error = ?,
+                        updated_at = datetime('now')
+                    WHERE id = ?
+                """, (error, firm_id))
+
+    def get_sync_history(self, firm_id: str, limit: int = 20) -> List[Dict]:
+        """Get recent sync history for a firm."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    SELECT id, status, triggered_by, started_at, completed_at,
+                           duration_seconds, records_synced, entity_results, error_message
+                    FROM sync_history
+                    WHERE firm_id = %s
+                    ORDER BY started_at DESC
+                    LIMIT %s
+                """, (firm_id, limit))
+            else:
+                cursor.execute("""
+                    SELECT id, status, triggered_by, started_at, completed_at,
+                           duration_seconds, records_synced, entity_results, error_message
+                    FROM sync_history
+                    WHERE firm_id = ?
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                """, (firm_id, limit))
+
+            return [dict(row) for row in cursor.fetchall()]
+
+    # =========================================================================
+    # Stale Sync Detection & Cleanup
+    # =========================================================================
+
+    def detect_and_fail_stale_syncs(self, stale_minutes: int = 45) -> List[str]:
+        """
+        Find syncs stuck in 'running' and mark them as failed.
+        Returns list of firm_ids that were affected.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    SELECT id, name FROM firms
+                    WHERE last_sync_status = 'running'
+                    AND last_sync_at < NOW() - (%s || ' minutes')::INTERVAL
+                """, (str(stale_minutes),))
+                stale_firms = [dict(row) for row in cursor.fetchall()]
+
+                for firm in stale_firms:
+                    cursor.execute("""
+                        UPDATE firms
+                        SET last_sync_status = 'failed',
+                            last_sync_error = 'Sync timed out (stale detection)',
+                            updated_at = NOW()
+                        WHERE id = %s
+                    """, (firm["id"],))
+
+                    cursor.execute("""
+                        UPDATE sync_history
+                        SET status = 'timeout',
+                            completed_at = NOW(),
+                            error_message = 'Stale sync detected and marked as timed out'
+                        WHERE firm_id = %s AND status = 'started'
+                        AND started_at < NOW() - (%s || ' minutes')::INTERVAL
+                    """, (firm["id"], str(stale_minutes)))
+            else:
+                cursor.execute("""
+                    SELECT id, name FROM firms
+                    WHERE last_sync_status = 'running'
+                    AND last_sync_at < datetime('now', ? || ' minutes')
+                """, (f"-{stale_minutes}",))
+                stale_firms = [dict(row) for row in cursor.fetchall()]
+
+                for firm in stale_firms:
+                    cursor.execute("""
+                        UPDATE firms
+                        SET last_sync_status = 'failed',
+                            last_sync_error = 'Sync timed out (stale detection)',
+                            updated_at = datetime('now')
+                        WHERE id = ?
+                    """, (firm["id"],))
+
+            # Schedule retries for all stale firms
+            for firm in stale_firms:
+                self.schedule_next_sync(firm["id"], delay_minutes=15)
+
+            return [f["id"] for f in stale_firms]
+
+    def cleanup_old_sync_history(self, days: int = 90) -> int:
+        """Delete sync_history records older than N days. Returns count deleted."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    DELETE FROM sync_history
+                    WHERE created_at < NOW() - (%s || ' days')::INTERVAL
+                """, (str(days),))
+            else:
+                cursor.execute("""
+                    DELETE FROM sync_history
+                    WHERE created_at < datetime('now', ? || ' days')
+                """, (f"-{days}",))
+
+            return cursor.rowcount
+
+    # =========================================================================
+    # Sync Dashboard Queries
+    # =========================================================================
+
+    def get_sync_health_summary(self) -> Dict[str, Any]:
+        """Get sync health summary across all active firms (for admin dashboard)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE last_sync_status = 'completed') AS healthy,
+                        COUNT(*) FILTER (WHERE last_sync_status = 'failed') AS failed,
+                        COUNT(*) FILTER (WHERE last_sync_status = 'running') AS running,
+                        COUNT(*) FILTER (WHERE last_sync_at IS NULL) AS never_synced,
+                        COUNT(*) FILTER (WHERE next_sync_at < NOW()) AS overdue,
+                        COUNT(*) AS total
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = TRUE
+                """)
+            else:
+                cursor.execute("""
+                    SELECT
+                        SUM(CASE WHEN last_sync_status = 'completed' THEN 1 ELSE 0 END) AS healthy,
+                        SUM(CASE WHEN last_sync_status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                        SUM(CASE WHEN last_sync_status = 'running' THEN 1 ELSE 0 END) AS running,
+                        SUM(CASE WHEN last_sync_at IS NULL THEN 1 ELSE 0 END) AS never_synced,
+                        SUM(CASE WHEN next_sync_at < datetime('now') THEN 1 ELSE 0 END) AS overdue,
+                        COUNT(*) AS total
+                    FROM firms
+                    WHERE subscription_status IN ('trial', 'active')
+                    AND mycase_connected = 1
+                """)
+
+            row = cursor.fetchone()
+            return dict(row) if row else {}
+
+    def get_firm_sync_dashboard(self, firm_id: str) -> Optional[Dict]:
+        """Get complete sync info for a single firm (customer dashboard)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            if self.use_postgres:
+                cursor.execute("""
+                    SELECT
+                        last_sync_at,
+                        last_sync_status,
+                        last_sync_records,
+                        last_sync_duration_seconds,
+                        last_sync_error,
+                        next_sync_at,
+                        sync_frequency_minutes
+                    FROM firms WHERE id = %s
+                """, (firm_id,))
+            else:
+                cursor.execute("""
+                    SELECT
+                        last_sync_at,
+                        last_sync_status,
+                        last_sync_records,
+                        last_sync_duration_seconds,
+                        last_sync_error,
+                        next_sync_at,
+                        sync_frequency_minutes
+                    FROM firms WHERE id = ?
+                """, (firm_id,))
+
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            result = dict(row)
+            result["recent_history"] = self.get_sync_history(firm_id, limit=5)
+            return result
+
 
 # Singleton instance
 _platform_db: Optional[PlatformDB] = None

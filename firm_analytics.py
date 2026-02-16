@@ -16,6 +16,7 @@ Comprehensive analytics and reporting for JCS Law Firm:
 12. Revenue per zip code heat map (requires address data)
 13. New cases per month per attorney
 14. Positive reviews - primary staff analysis (requires review data)
+15. Case phase/stage report by attorney
 """
 import sqlite3
 import json
@@ -82,6 +83,16 @@ class NewCasesMonth:
     month: str
     attorney_name: str
     case_count: int
+
+
+@dataclass
+class PhaseByAttorney:
+    """Case phase/stage counts by attorney."""
+    attorney_name: str
+    stage: str
+    case_count: int
+    open_count: int
+    closed_count: int
 
 
 class FirmAnalytics:
@@ -847,6 +858,79 @@ class FirmAnalytics:
         }
 
     # =========================================================================
+    # 15. Case Phase/Stage Report by Attorney
+    # =========================================================================
+    def get_phase_report_by_attorney(self) -> Dict[str, List[PhaseByAttorney]]:
+        """
+        Get case counts by phase/stage for each attorney.
+
+        Returns:
+            Dict of attorney_name -> List of PhaseByAttorney objects,
+            sorted by attorney total case count descending,
+            stages sorted by case count descending within each attorney.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    COALESCE(lead_attorney_name, 'Unassigned') as attorney_name,
+                    COALESCE(stage, 'No Stage') as stage,
+                    COUNT(*) as case_count,
+                    SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+                    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_count
+                FROM cached_cases
+                GROUP BY COALESCE(lead_attorney_name, 'Unassigned'),
+                         COALESCE(stage, 'No Stage')
+                ORDER BY attorney_name, case_count DESC
+            """)
+
+            results = defaultdict(list)
+            for row in cursor.fetchall():
+                results[row['attorney_name']].append(PhaseByAttorney(
+                    attorney_name=row['attorney_name'],
+                    stage=row['stage'],
+                    case_count=row['case_count'],
+                    open_count=row['open_count'],
+                    closed_count=row['closed_count']
+                ))
+
+            # Sort attorneys by total case count descending
+            sorted_results = dict(sorted(
+                results.items(),
+                key=lambda x: sum(p.case_count for p in x[1]),
+                reverse=True
+            ))
+
+            return sorted_results
+
+    def get_phase_summary(self) -> List[Dict[str, Any]]:
+        """
+        Get a firm-wide summary of cases by phase/stage.
+
+        Returns:
+            List of dicts with stage, total cases, open, closed counts.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    COALESCE(stage, 'No Stage') as stage,
+                    COUNT(*) as case_count,
+                    SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+                    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_count
+                FROM cached_cases
+                GROUP BY COALESCE(stage, 'No Stage')
+                ORDER BY case_count DESC
+            """)
+
+            return [{
+                'stage': row['stage'],
+                'case_count': row['case_count'],
+                'open_count': row['open_count'],
+                'closed_count': row['closed_count']
+            } for row in cursor.fetchall()]
+
+    # =========================================================================
     # Full Report Generation
     # =========================================================================
     def generate_full_report(self) -> Dict[str, Any]:
@@ -875,7 +959,12 @@ class FirmAnalytics:
             'clients_by_zip_code': self.get_clients_by_zip_code(),
             'revenue_by_zip_code': self.get_revenue_by_zip_code(),
             'new_cases_per_month_per_attorney': [vars(r) for r in self.get_new_cases_per_month_per_attorney()],
-            'positive_reviews_staff': self.get_positive_reviews_staff()
+            'positive_reviews_staff': self.get_positive_reviews_staff(),
+            'phase_summary': self.get_phase_summary(),
+            'phase_report_by_attorney': {
+                atty: [vars(p) for p in phases]
+                for atty, phases in self.get_phase_report_by_attorney().items()
+            }
         }
 
 
@@ -1052,6 +1141,28 @@ def print_full_report(analytics: FirmAnalytics):
     print("-" * 50)
     reviews = analytics.get_positive_reviews_staff()
     print(f"  Note: {reviews['_note']}")
+
+    # 17. Phase/Stage Summary
+    print("\n17. CASE PHASE/STAGE SUMMARY")
+    print("-" * 60)
+    print(f"{'Stage':<30} {'Total':>8} {'Open':>8} {'Closed':>8}")
+    print("-" * 60)
+    phase_summary = analytics.get_phase_summary()
+    for s in phase_summary:
+        print(f"{s['stage']:<30} {s['case_count']:>8} {s['open_count']:>8} {s['closed_count']:>8}")
+
+    # 18. Phase/Stage Report by Attorney
+    print("\n18. CASE PHASE/STAGE BY ATTORNEY")
+    print("-" * 70)
+    phase_by_atty = analytics.get_phase_report_by_attorney()
+    for atty, phases in list(phase_by_atty.items())[:10]:
+        total = sum(p.case_count for p in phases)
+        open_total = sum(p.open_count for p in phases)
+        print(f"\n  {atty} ({total} total, {open_total} open):")
+        print(f"    {'Stage':<25} {'Total':>8} {'Open':>8} {'Closed':>8}")
+        print(f"    {'-' * 49}")
+        for p in phases:
+            print(f"    {p.stage:<25} {p.case_count:>8} {p.open_count:>8} {p.closed_count:>8}")
 
     print("\n" + "=" * 70)
     print("END OF REPORT")
