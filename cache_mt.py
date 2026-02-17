@@ -14,7 +14,7 @@ from typing import List, Dict, Optional, Any
 from contextlib import contextmanager
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 
 from tenant import current_tenant, get_current_firm_id
 
@@ -776,6 +776,326 @@ class MyCaseCache:
             query += " ORDER BY entry_date DESC"
             cursor.execute(query, params)
             return [json.loads(row['data_json']) for row in cursor.fetchall()]
+
+
+    # ========== Batch Upsert Methods ==========
+    # These use execute_values for 10-50x speedup on bulk inserts.
+
+    def batch_upsert_cases(self, cases: List[Dict]) -> int:
+        if not cases:
+            return 0
+        # Pre-load staff lookup for lead attorney resolution
+        staff_lookup = {}
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name FROM cached_staff WHERE firm_id = %s", (self.firm_id,))
+            for row in cursor.fetchall():
+                staff_lookup[row['id']] = row['name']
+
+        rows = []
+        for case in cases:
+            staff = case.get('staff', [])
+            lead_id, lead_name = None, None
+            for s in staff:
+                if s.get('lead_lawyer'):
+                    lead_id = s.get('id')
+                    lead_name = staff_lookup.get(lead_id)
+                    break
+            rows.append((
+                self.firm_id, case.get('id'), case.get('name'), case.get('case_number'),
+                case.get('status'),
+                case.get('case_type', {}).get('name') if isinstance(case.get('case_type'), dict) else case.get('case_type'),
+                case.get('practice_area', {}).get('name') if isinstance(case.get('practice_area'), dict) else case.get('practice_area'),
+                case.get('date_opened') or case.get('opened_date'),
+                case.get('date_closed') or case.get('closed_date'),
+                lead_id, lead_name,
+                case.get('case_stage', {}).get('name') if isinstance(case.get('case_stage'), dict) else None,
+                case.get('created_at'), case.get('updated_at'), json.dumps(case),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_cases
+                (firm_id, id, name, case_number, status, case_type, practice_area,
+                 date_opened, date_closed, lead_attorney_id, lead_attorney_name,
+                 stage, created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    name=EXCLUDED.name, case_number=EXCLUDED.case_number,
+                    status=EXCLUDED.status, case_type=EXCLUDED.case_type,
+                    practice_area=EXCLUDED.practice_area, date_opened=EXCLUDED.date_opened,
+                    date_closed=EXCLUDED.date_closed, lead_attorney_id=EXCLUDED.lead_attorney_id,
+                    lead_attorney_name=EXCLUDED.lead_attorney_name, stage=EXCLUDED.stage,
+                    created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at,
+                    data_json=EXCLUDED.data_json, cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_events(self, events: List[Dict]) -> int:
+        if not events:
+            return 0
+        rows = []
+        for event in events:
+            case = event.get('case', {}) or {}
+            start = event.get('start')
+            end = event.get('end')
+            if isinstance(start, dict):
+                start = start.get('date_time') or start.get('date')
+            if isinstance(end, dict):
+                end = end.get('date_time') or end.get('date')
+            location = event.get('location')
+            if isinstance(location, dict):
+                location = location.get('id') or location.get('name')
+            rows.append((
+                self.firm_id, event.get('id'), event.get('name'), event.get('description'),
+                event.get('event_type'), start, end, event.get('all_day', False),
+                case.get('id') if isinstance(case, dict) else case,
+                location, event.get('created_at'), event.get('updated_at'), json.dumps(event),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_events
+                (firm_id, id, name, description, event_type, start_at, end_at, all_day,
+                 case_id, location, created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    name=EXCLUDED.name, description=EXCLUDED.description,
+                    event_type=EXCLUDED.event_type, start_at=EXCLUDED.start_at,
+                    end_at=EXCLUDED.end_at, all_day=EXCLUDED.all_day,
+                    case_id=EXCLUDED.case_id, location=EXCLUDED.location,
+                    created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at,
+                    data_json=EXCLUDED.data_json, cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_invoices(self, invoices: List[Dict]) -> int:
+        if not invoices:
+            return 0
+        rows = []
+        for inv in invoices:
+            case = inv.get('case', {}) or {}
+            contact = inv.get('contact', {}) or {}
+            total = float(inv.get('total_amount', 0) or 0)
+            paid = float(inv.get('paid_amount', 0) or 0)
+            rows.append((
+                self.firm_id, inv.get('id'), inv.get('invoice_number'),
+                case.get('id'), contact.get('id'), inv.get('status'),
+                total, paid, total - paid,
+                inv.get('invoice_date'), inv.get('due_date'),
+                inv.get('created_at'), inv.get('updated_at'), json.dumps(inv),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_invoices
+                (firm_id, id, invoice_number, case_id, contact_id, status,
+                 total_amount, paid_amount, balance_due, invoice_date, due_date,
+                 created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    invoice_number=EXCLUDED.invoice_number, case_id=EXCLUDED.case_id,
+                    contact_id=EXCLUDED.contact_id, status=EXCLUDED.status,
+                    total_amount=EXCLUDED.total_amount, paid_amount=EXCLUDED.paid_amount,
+                    balance_due=EXCLUDED.balance_due, invoice_date=EXCLUDED.invoice_date,
+                    due_date=EXCLUDED.due_date, created_at=EXCLUDED.created_at,
+                    updated_at=EXCLUDED.updated_at, data_json=EXCLUDED.data_json,
+                    cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_contacts(self, contacts: List[Dict]) -> int:
+        if not contacts:
+            return 0
+        rows = []
+        for c in contacts:
+            rows.append((
+                self.firm_id, c.get('id'), c.get('first_name'), c.get('last_name'),
+                c.get('name') or f"{c.get('first_name', '')} {c.get('last_name', '')}".strip(),
+                c.get('email'), c.get('phone'), c.get('type'),
+                c.get('company', {}).get('name') if isinstance(c.get('company'), dict) else c.get('company'),
+                c.get('created_at'), c.get('updated_at'), json.dumps(c),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_contacts
+                (firm_id, id, first_name, last_name, name, email, phone, contact_type,
+                 company, created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    first_name=EXCLUDED.first_name, last_name=EXCLUDED.last_name,
+                    name=EXCLUDED.name, email=EXCLUDED.email, phone=EXCLUDED.phone,
+                    contact_type=EXCLUDED.contact_type, company=EXCLUDED.company,
+                    created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at,
+                    data_json=EXCLUDED.data_json, cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_clients(self, clients: List[Dict]) -> int:
+        if not clients:
+            return 0
+        rows = []
+        for cl in clients:
+            address = cl.get('address', {}) or {}
+            rows.append((
+                self.firm_id, cl.get('id'), cl.get('first_name'), cl.get('last_name'),
+                cl.get('email'), cl.get('cell_phone_number'),
+                cl.get('work_phone_number'), cl.get('home_phone_number'),
+                address.get('address1'), address.get('address2'),
+                address.get('city'), address.get('state'), address.get('zip_code'),
+                address.get('country'), cl.get('birthdate'), cl.get('archived', False),
+                cl.get('created_at'), cl.get('updated_at'), json.dumps(cl),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_clients
+                (firm_id, id, first_name, last_name, email, cell_phone, work_phone,
+                 home_phone, address1, address2, city, state, zip_code, country,
+                 birthdate, archived, created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    first_name=EXCLUDED.first_name, last_name=EXCLUDED.last_name,
+                    email=EXCLUDED.email, cell_phone=EXCLUDED.cell_phone,
+                    work_phone=EXCLUDED.work_phone, home_phone=EXCLUDED.home_phone,
+                    address1=EXCLUDED.address1, address2=EXCLUDED.address2,
+                    city=EXCLUDED.city, state=EXCLUDED.state, zip_code=EXCLUDED.zip_code,
+                    country=EXCLUDED.country, birthdate=EXCLUDED.birthdate,
+                    archived=EXCLUDED.archived, created_at=EXCLUDED.created_at,
+                    updated_at=EXCLUDED.updated_at, data_json=EXCLUDED.data_json,
+                    cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_staff(self, staff_list: List[Dict]) -> int:
+        if not staff_list:
+            return 0
+        rows = []
+        for s in staff_list:
+            rows.append((
+                self.firm_id, s.get('id'), s.get('first_name'), s.get('last_name'),
+                f"{s.get('first_name', '')} {s.get('last_name', '')}".strip(),
+                s.get('email'), s.get('title'), s.get('type'),
+                s.get('active', True),
+                float(s.get('default_hourly_rate') or 0) if s.get('default_hourly_rate') else None,
+                s.get('created_at'), s.get('updated_at'), json.dumps(s),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_staff
+                (firm_id, id, first_name, last_name, name, email, title, staff_type,
+                 active, hourly_rate, created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    first_name=EXCLUDED.first_name, last_name=EXCLUDED.last_name,
+                    name=EXCLUDED.name, email=EXCLUDED.email, title=EXCLUDED.title,
+                    staff_type=EXCLUDED.staff_type, active=EXCLUDED.active,
+                    hourly_rate=EXCLUDED.hourly_rate, created_at=EXCLUDED.created_at,
+                    updated_at=EXCLUDED.updated_at, data_json=EXCLUDED.data_json,
+                    cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_tasks(self, tasks: List[Dict]) -> int:
+        if not tasks:
+            return 0
+        rows = []
+        for t in tasks:
+            case = t.get('case', {}) or {}
+            staff_list = t.get('staff', []) or []
+            if isinstance(staff_list, dict):
+                staff_list = [staff_list]
+            first_staff = staff_list[0] if staff_list else {}
+            staff_ids = ','.join(str(s.get('id')) for s in staff_list if s.get('id'))
+            rows.append((
+                self.firm_id, t.get('id'), t.get('name'), t.get('description'),
+                t.get('due_date'), t.get('completed', False), t.get('completed_at'),
+                t.get('priority'),
+                case.get('id') if isinstance(case, dict) else case,
+                first_staff.get('id') if isinstance(first_staff, dict) else None,
+                staff_ids, t.get('created_at'), t.get('updated_at'), json.dumps(t),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_tasks
+                (firm_id, id, name, description, due_date, completed, completed_at,
+                 priority, case_id, assignee_id, assignee_name,
+                 created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    name=EXCLUDED.name, description=EXCLUDED.description,
+                    due_date=EXCLUDED.due_date, completed=EXCLUDED.completed,
+                    completed_at=EXCLUDED.completed_at, priority=EXCLUDED.priority,
+                    case_id=EXCLUDED.case_id, assignee_id=EXCLUDED.assignee_id,
+                    assignee_name=EXCLUDED.assignee_name, created_at=EXCLUDED.created_at,
+                    updated_at=EXCLUDED.updated_at, data_json=EXCLUDED.data_json,
+                    cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_payments(self, payments: List[Dict]) -> int:
+        if not payments:
+            return 0
+        rows = []
+        for p in payments:
+            invoice = p.get('invoice', {}) or {}
+            rows.append((
+                self.firm_id, p.get('id'), invoice.get('id'),
+                float(p.get('amount', 0) or 0), p.get('payment_date'),
+                p.get('payment_method'), p.get('created_at'),
+                p.get('updated_at'), json.dumps(p),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_payments
+                (firm_id, id, invoice_id, amount, payment_date, payment_method,
+                 created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    invoice_id=EXCLUDED.invoice_id, amount=EXCLUDED.amount,
+                    payment_date=EXCLUDED.payment_date, payment_method=EXCLUDED.payment_method,
+                    created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at,
+                    data_json=EXCLUDED.data_json, cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
+
+    def batch_upsert_time_entries(self, entries: List[Dict]) -> int:
+        if not entries:
+            return 0
+        rows = []
+        for e in entries:
+            case = e.get('case', {}) or {}
+            staff = e.get('staff', {}) or {}
+            rows.append((
+                self.firm_id, e.get('id'), e.get('description'),
+                e.get('entry_date'), float(e.get('hours', 0) or 0),
+                float(e.get('rate', 0) or 0), e.get('billable', False),
+                e.get('flat_fee', False), e.get('activity_name'),
+                case.get('id'), staff.get('id'), None,
+                e.get('created_at'), e.get('updated_at'), json.dumps(e),
+            ))
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            execute_values(cursor, """
+                INSERT INTO cached_time_entries
+                (firm_id, id, description, entry_date, hours, rate, billable, flat_fee,
+                 activity_name, case_id, staff_id, staff_name,
+                 created_at, updated_at, data_json)
+                VALUES %s
+                ON CONFLICT (firm_id, id) DO UPDATE SET
+                    description=EXCLUDED.description, entry_date=EXCLUDED.entry_date,
+                    hours=EXCLUDED.hours, rate=EXCLUDED.rate, billable=EXCLUDED.billable,
+                    flat_fee=EXCLUDED.flat_fee, activity_name=EXCLUDED.activity_name,
+                    case_id=EXCLUDED.case_id, staff_id=EXCLUDED.staff_id,
+                    staff_name=EXCLUDED.staff_name, created_at=EXCLUDED.created_at,
+                    updated_at=EXCLUDED.updated_at, data_json=EXCLUDED.data_json,
+                    cached_at=CURRENT_TIMESTAMP
+            """, rows, page_size=500)
+        return len(rows)
 
 
 # =========================================================================
