@@ -768,7 +768,7 @@ def send_individual_events_reports(
 
         subject = f"Your Upcoming Events ({date_str}) - {report_data['event_count']} events"
 
-        success = manager.send_email_smtp(
+        success = manager.send_email_mailtrap(
             to_email=email,
             subject=subject,
             body_text=report_data['text'],
@@ -818,8 +818,8 @@ def send_events_report(
     if dry_run:
         manager._dry_run = True
 
-    # Send via SMTP
-    return manager.send_email_smtp(
+    # Send via MailTrap (falls back to SMTP if not configured)
+    return manager.send_email_mailtrap(
         to_email=to_email,
         subject=subject,
         body_text=text_content,

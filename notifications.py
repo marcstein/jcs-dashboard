@@ -644,6 +644,115 @@ class NotificationManager:
             print(f"[SMTP ERROR] {e}")
             return False
 
+    # ========== MailTrap Email Integration ==========
+
+    def send_email_mailtrap(
+        self,
+        to_email: str,
+        subject: str,
+        body_text: str,
+        body_html: str = None,
+        cc_email: str = None,
+        priority: NotificationPriority = NotificationPriority.NORMAL,
+    ) -> bool:
+        """
+        Send an email via MailTrap API.
+
+        Uses MAILTRAP_API_TOKEN and MAILTRAP_SENDER_EMAIL env vars.
+        Falls back to SMTP if MailTrap is not configured.
+
+        Args:
+            to_email: Recipient email address
+            subject: Email subject
+            body_text: Plain text body
+            body_html: Optional HTML body
+            cc_email: Optional CC email address
+            priority: Email priority
+
+        Returns:
+            True if sent successfully
+        """
+        api_token = os.getenv("MAILTRAP_API_TOKEN", "")
+        sender_email = os.getenv("MAILTRAP_SENDER_EMAIL", "reports@lawmetrics.ai")
+        sender_name = os.getenv("MAILTRAP_SENDER_NAME", "LawMetrics.ai")
+
+        if not api_token:
+            print("[MAILTRAP] No API token configured, falling back to SMTP")
+            return self.send_email_smtp(
+                to_email=to_email, subject=subject,
+                body_text=body_text, body_html=body_html,
+                cc_email=cc_email, priority=priority,
+            )
+
+        recipient_str = to_email + (f", CC: {cc_email}" if cc_email else "")
+        notification = Notification(
+            title=subject,
+            message=body_text,
+            channel=NotificationChannel.EMAIL,
+            priority=priority,
+            recipient=recipient_str,
+        )
+
+        if self._dry_run:
+            print(f"[MAILTRAP DRY-RUN] Would send to {to_email}:")
+            if cc_email:
+                print(f"  CC: {cc_email}")
+            print(f"  Subject: {subject}")
+            print(f"  Body: {body_text[:200]}...")
+            self._log_notification(notification, True)
+            return True
+
+        try:
+            import httpx
+
+            payload = {
+                "from": {"email": sender_email, "name": sender_name},
+                "to": [{"email": to_email}],
+                "subject": subject,
+                "text": body_text,
+            }
+
+            if body_html:
+                payload["html"] = body_html
+
+            if cc_email:
+                payload["cc"] = [{"email": cc_email}]
+
+            headers = {
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/json",
+            }
+
+            response = httpx.post(
+                "https://send.api.mailtrap.io/api/send",
+                json=payload,
+                headers=headers,
+                timeout=15,
+            )
+
+            success = response.status_code in (200, 201, 202)
+
+            if success:
+                result = response.json()
+                notification.delivery_id = str(result.get("message_ids", [""])[0])
+
+            notification.sent_at = datetime.now()
+            self._log_notification(notification, success,
+                                   None if success else f"HTTP {response.status_code}: {response.text[:200]}")
+
+            cc_msg = f" (CC: {cc_email})" if cc_email else ""
+            if success:
+                print(f"[MAILTRAP] Email sent to {to_email}{cc_msg}")
+            else:
+                print(f"[MAILTRAP ERROR] HTTP {response.status_code}: {response.text[:200]}")
+
+            return success
+
+        except Exception as e:
+            self._log_notification(notification, False, str(e))
+            print(f"[MAILTRAP ERROR] {e}")
+            return False
+
     # ========== SMS Integration (Twilio) ==========
 
     def send_sms(
