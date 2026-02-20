@@ -305,11 +305,18 @@ class DashboardData:
         current_year = datetime.now().year
         if year is None:
             year = current_year
+
+        # For closed years, freeze aging at Dec 31 of that year
+        if year < current_year:
+            reference_date = f"DATE('{year}-12-31')"
+        else:
+            reference_date = "CURRENT_DATE"
+
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                # Count unique attorneys
+                # Count unique attorneys with active cases
                 cursor.execute("""
                     SELECT COUNT(DISTINCT lead_attorney_name)
                     FROM cached_cases
@@ -319,22 +326,78 @@ class DashboardData:
                 """, (self.firm_id,))
                 attorney_count = cursor.fetchone()[0] or 0
 
-                # Total billed and collected for the year
+                # Total active cases
                 cursor.execute("""
-                    SELECT COALESCE(SUM(total_amount), 0), COALESCE(SUM(paid_amount), 0)
-                    FROM cached_invoices
-                    WHERE firm_id = %s AND EXTRACT(YEAR FROM invoice_date) = %s
+                    SELECT COUNT(*) FROM cached_cases
+                    WHERE firm_id = %s AND status = 'open'
+                """, (self.firm_id,))
+                total_active_cases = cursor.fetchone()[0] or 0
+
+                # Invoice aging buckets (DPD = days past due)
+                cursor.execute(f"""
+                    SELECT
+                        COUNT(CASE WHEN i.balance_due = 0 OR i.paid_amount >= i.total_amount THEN 1 END) as paid_full,
+                        COUNT(CASE WHEN i.balance_due > 0 AND ({reference_date} - i.due_date) BETWEEN 1 AND 30 THEN 1 END) as dpd_1_30,
+                        COUNT(CASE WHEN i.balance_due > 0 AND ({reference_date} - i.due_date) BETWEEN 31 AND 60 THEN 1 END) as dpd_31_60,
+                        COUNT(CASE WHEN i.balance_due > 0 AND ({reference_date} - i.due_date) BETWEEN 61 AND 90 THEN 1 END) as dpd_61_90,
+                        COUNT(CASE WHEN i.balance_due > 0 AND ({reference_date} - i.due_date) BETWEEN 91 AND 120 THEN 1 END) as dpd_91_120,
+                        COUNT(CASE WHEN i.balance_due > 0 AND ({reference_date} - i.due_date) > 180 THEN 1 END) as dpd_180_plus,
+                        COALESCE(SUM(i.total_amount), 0) as total_billed,
+                        COALESCE(SUM(i.paid_amount), 0) as total_collected
+                    FROM cached_invoices i
+                    WHERE i.firm_id = %s
+                      AND EXTRACT(YEAR FROM i.invoice_date) = %s
                 """, (self.firm_id, year))
                 row = cursor.fetchone()
-                total_billed = row[0] or 0
-                total_collected = row[1] or 0
+
+                paid_full = row[0] or 0
+                dpd_1_30 = row[1] or 0
+                dpd_31_60 = row[2] or 0
+                dpd_61_90 = row[3] or 0
+                dpd_91_120 = row[4] or 0
+                dpd_180_plus = row[5] or 0
+                total_billed = row[6] or 0
+                total_collected = row[7] or 0
+
+                # Top attorneys by billing
+                cursor.execute("""
+                    SELECT c.lead_attorney_name,
+                           COUNT(DISTINCT c.id) as case_count,
+                           COALESCE(SUM(i.total_amount), 0) as billed,
+                           COALESCE(SUM(i.paid_amount), 0) as collected
+                    FROM cached_cases c
+                    LEFT JOIN cached_invoices i ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        AND EXTRACT(YEAR FROM i.invoice_date) = %s
+                    WHERE c.firm_id = %s
+                      AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                      AND c.status = 'open'
+                    GROUP BY c.lead_attorney_name
+                    ORDER BY billed DESC
+                    LIMIT 5
+                """, (year, self.firm_id))
+                top_attorneys = [{'name': r[0], 'cases': r[1], 'billed': r[2], 'collected': r[3]}
+                                 for r in cursor.fetchall()]
 
                 return {
                     'attorney_count': attorney_count,
+                    'total_active_cases': total_active_cases,
                     'total_billed': total_billed,
                     'total_collected': total_collected,
                     'collection_rate': (total_collected / total_billed * 100) if total_billed > 0 else 0,
+                    'paid_full': paid_full,
+                    'dpd_1_30': dpd_1_30,
+                    'dpd_31_60': dpd_31_60,
+                    'dpd_61_90': dpd_61_90,
+                    'dpd_91_120': dpd_91_120,
+                    'dpd_180_plus': dpd_180_plus,
+                    'top_attorneys': top_attorneys,
                 }
         except Exception as e:
             print(f"get_attorney_summary error: {e}")
-            return {'attorney_count': 0, 'total_billed': 0, 'total_collected': 0, 'collection_rate': 0}
+            return {
+                'attorney_count': 0, 'total_active_cases': 0,
+                'total_billed': 0, 'total_collected': 0, 'collection_rate': 0,
+                'paid_full': 0, 'dpd_1_30': 0, 'dpd_31_60': 0,
+                'dpd_61_90': 0, 'dpd_91_120': 0, 'dpd_180_plus': 0,
+                'top_attorneys': [],
+            }
