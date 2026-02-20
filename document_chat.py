@@ -393,8 +393,11 @@ class DocumentChatEngine:
             else:
                 # Use primary attorney for firm
                 self.attorney_profile = get_primary_attorney(firm_id)
-        except Exception:
-            pass  # No attorney profile available
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Could not load attorney profile (firm={firm_id}, attorney={attorney_id}): {e}"
+            )
 
         if not ANTHROPIC_AVAILABLE:
             raise RuntimeError("anthropic package is required")
@@ -602,7 +605,12 @@ class DocumentChatEngine:
         engine = get_engine()
 
         # Search for matching templates
-        templates = engine.search_templates(self.firm_id, request, limit=5)
+        try:
+            templates = engine.search_templates(self.firm_id, request, limit=5)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Template search failed: {e}")
+            templates = []
 
         if templates:
             # Use the best match
@@ -1176,11 +1184,11 @@ Email: {ap.email}"""
                 replacements['date'] = today_formatted
 
             def replace_placeholders(text: str) -> str:
-                """Replace all {{placeholder}} patterns with values."""
+                """Replace all {{placeholder}} and [Bracket Placeholder] patterns with values."""
                 if not text:
                     return text
 
-                # Find all placeholders like {{variable_name}}
+                # First: replace {{variable_name}} patterns
                 pattern = r'\{\{([^}]+)\}\}'
 
                 def replacer(match):
@@ -1197,7 +1205,26 @@ Email: {ap.email}"""
                     # Leave unmatched placeholders as-is for visibility
                     return match.group(0)
 
-                return re.sub(pattern, replacer, text)
+                text = re.sub(pattern, replacer, text)
+
+                # Second: replace [Bracket Placeholder] patterns from signature blocks
+                # These are produced by _get_signature_block_template() when the attorney
+                # profile wasn't loaded at generation time, or by AI-generated documents
+                BRACKET_REPLACEMENTS = {
+                    '[Firm Name]': 'firm_name',
+                    '[Attorney Name]': 'attorney_name',
+                    '[Bar Number]': 'bar_number',
+                    '[Firm Address]': 'firm_address',
+                    '[City, State ZIP]': 'firm_city_state_zip',
+                    '[Phone]': 'phone',
+                    '[Email]': 'email',
+                    '[Fax]': 'fax',
+                }
+                for bracket, key in BRACKET_REPLACEMENTS.items():
+                    if bracket in text and key in replacements:
+                        text = text.replace(bracket, replacements[key])
+
+                return text
 
             def replace_in_paragraph(paragraph):
                 """Replace placeholders in a paragraph while preserving formatting."""
@@ -1303,7 +1330,45 @@ Email: {ap.email}"""
                 return value
             return match.group(0)
 
-        return re.sub(pattern, replacer, template_text)
+        result = re.sub(pattern, replacer, template_text)
+
+        # Also replace [Bracket Placeholder] patterns from signature blocks
+        # These are produced by _get_signature_block_template() or AI-generated text
+        BRACKET_REPLACEMENTS = {
+            '[Firm Name]': 'firm_name',
+            '[Attorney Name]': 'attorney_name',
+            '[Bar Number]': 'bar_number',
+            '[Firm Address]': 'firm_address',
+            '[City, State ZIP]': 'firm_city_state_zip',
+            '[Phone]': 'phone',
+            '[Email]': 'email',
+            '[Fax]': 'fax',
+        }
+        for bracket, key in BRACKET_REPLACEMENTS.items():
+            if bracket in result and key in replacements:
+                result = result.replace(bracket, replacements[key])
+
+        return result
+
+    def _ensure_attorney_profile(self):
+        """Retry loading attorney profile if it wasn't available at init time.
+
+        This handles the case where the DB connection wasn't ready when the
+        DocumentChat was created, but is available now at generation time.
+        """
+        if self.attorney_profile:
+            return  # Already loaded
+        try:
+            from attorney_profiles import get_attorney, get_primary_attorney
+            if self.attorney_id:
+                self.attorney_profile = get_attorney(self.attorney_id)
+            elif self.firm_id:
+                self.attorney_profile = get_primary_attorney(self.firm_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Retry: could not load attorney profile: {e}"
+            )
 
     def _generate_draft(self, session: DocumentSession, use_placeholders: bool = False) -> str:
         """Generate document draft - using template if available, AI if not.
@@ -1312,6 +1377,8 @@ Email: {ap.email}"""
             session: The document session
             use_placeholders: If True, use [bracketed placeholders] for missing values
         """
+        # Retry loading attorney profile if it wasn't available at init
+        self._ensure_attorney_profile()
 
         # FIRST: Try to use the actual template content if available
         if session.template_content:

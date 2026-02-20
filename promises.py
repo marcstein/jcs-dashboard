@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-from database import Database, get_db
+from db import promises as db_promises
 
 
 class PromiseStatus(Enum):
@@ -56,48 +56,13 @@ class PromiseTracker:
     - Track promise-keeping rate by client
     """
 
-    def __init__(self, db: Database = None):
-        self.db = db or get_db()
+    def __init__(self, firm_id: str):
+        self.firm_id = firm_id
         self._ensure_tables()
 
     def _ensure_tables(self):
         """Ensure required tables exist."""
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS payment_promises (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    contact_id INTEGER NOT NULL,
-                    contact_name TEXT,
-                    case_id INTEGER,
-                    case_name TEXT,
-                    invoice_id INTEGER,
-                    promised_amount REAL NOT NULL,
-                    promised_date DATE NOT NULL,
-                    actual_amount REAL,
-                    actual_date DATE,
-                    status TEXT DEFAULT 'pending',
-                    notes TEXT,
-                    recorded_by TEXT NOT NULL,
-                    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(contact_id, invoice_id, promised_date)
-                )
-            """)
-
-            # Index for quick lookups
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_promises_status
-                ON payment_promises(status, promised_date)
-            """)
-
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_promises_contact
-                ON payment_promises(contact_id)
-            """)
-
-            conn.commit()
+        db_promises.ensure_promises_tables()
 
     # ========== Promise Recording ==========
 
@@ -130,22 +95,21 @@ class PromiseTracker:
         Returns:
             Promise ID
         """
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
+        promise_id = db_promises.add_promise(
+            firm_id=self.firm_id,
+            contact_id=contact_id,
+            promised_amount=promised_amount,
+            promised_date=promised_date,
+            recorded_by=recorded_by,
+            contact_name=contact_name,
+            case_id=case_id,
+            case_name=case_name,
+            invoice_id=invoice_id,
+            notes=notes,
+        )
 
-            cursor.execute("""
-                INSERT INTO payment_promises
-                (contact_id, contact_name, case_id, case_name, invoice_id,
-                 promised_amount, promised_date, status, notes, recorded_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-            """, (contact_id, contact_name, case_id, case_name, invoice_id,
-                  promised_amount, promised_date, notes, recorded_by))
-
-            promise_id = cursor.lastrowid
-            conn.commit()
-
-            print(f"Recorded promise #{promise_id}: ${promised_amount:,.2f} by {promised_date}")
-            return promise_id
+        print(f"Recorded promise #{promise_id}: ${promised_amount:,.2f} by {promised_date}")
+        return promise_id
 
     def update_promise(
         self,
@@ -156,37 +120,37 @@ class PromiseTracker:
         notes: str = None,
     ):
         """Update a promise status."""
-        with self.db._get_connection() as conn:
+        from db.connection import get_connection
+
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             updates = ["updated_at = CURRENT_TIMESTAMP"]
             params = []
 
             if status:
-                updates.append("status = ?")
+                updates.append("status = %s")
                 params.append(status.value)
 
             if actual_amount is not None:
-                updates.append("actual_amount = ?")
+                updates.append("actual_amount = %s")
                 params.append(actual_amount)
 
             if actual_date:
-                updates.append("actual_date = ?")
-                params.append(actual_date.isoformat())
+                updates.append("actual_date = %s")
+                params.append(actual_date)
 
             if notes:
-                updates.append("notes = notes || ' | ' || ?")
+                updates.append("notes = COALESCE(notes, '') || ' | ' || %s")
                 params.append(notes)
 
-            params.append(promise_id)
+            params.extend([self.firm_id, promise_id])
 
             cursor.execute(f"""
                 UPDATE payment_promises
                 SET {', '.join(updates)}
-                WHERE id = ?
+                WHERE firm_id = %s AND id = %s
             """, params)
-
-            conn.commit()
 
     def mark_kept(self, promise_id: int, actual_amount: float, actual_date: date = None):
         """Mark a promise as kept."""
@@ -226,111 +190,101 @@ class PromiseTracker:
 
     def get_promise(self, promise_id: int) -> Optional[PaymentPromise]:
         """Get a specific promise by ID."""
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM payment_promises WHERE id = ?", (promise_id,))
-            row = cursor.fetchone()
-
-            if not row:
-                return None
-
-            return self._row_to_promise(dict(row))
+        rows = db_promises.list_promises(self.firm_id)
+        for row in rows:
+            if row["id"] == promise_id:
+                return self._row_to_promise(row)
+        return None
 
     def get_pending_promises(self) -> List[PaymentPromise]:
         """Get all pending promises."""
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM payment_promises
-                WHERE status = 'pending'
-                ORDER BY promised_date ASC
-            """)
-
-            return [self._row_to_promise(dict(row)) for row in cursor.fetchall()]
+        rows = db_promises.list_promises(self.firm_id, status="pending")
+        return [self._row_to_promise(row) for row in rows]
 
     def get_due_today(self) -> List[PaymentPromise]:
         """Get promises due today."""
-        today = date.today()
-
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM payment_promises
-                WHERE status = 'pending'
-                AND promised_date = ?
-                ORDER BY promised_amount DESC
-            """, (today.isoformat(),))
-
-            return [self._row_to_promise(dict(row)) for row in cursor.fetchall()]
+        rows = db_promises.get_due_today(self.firm_id)
+        return [self._row_to_promise(row) for row in rows]
 
     def get_overdue(self) -> List[PaymentPromise]:
         """Get promises that are past their date without payment."""
-        today = date.today()
-
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM payment_promises
-                WHERE status = 'pending'
-                AND promised_date < ?
-                ORDER BY promised_date ASC
-            """, (today.isoformat(),))
-
-            return [self._row_to_promise(dict(row)) for row in cursor.fetchall()]
+        rows = db_promises.get_overdue(self.firm_id)
+        return [self._row_to_promise(row) for row in rows]
 
     def get_upcoming(self, days: int = 7) -> List[PaymentPromise]:
         """Get promises coming due in the next N days."""
+        from db.connection import get_connection
+
         today = date.today()
         end_date = today + timedelta(days=days)
 
-        with self.db._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM payment_promises
-                WHERE status = 'pending'
-                AND promised_date BETWEEN ? AND ?
+                WHERE firm_id = %s AND status = 'pending'
+                AND promised_date BETWEEN %s AND %s
                 ORDER BY promised_date ASC
-            """, (today.isoformat(), end_date.isoformat()))
+            """, (self.firm_id, today, end_date))
 
-            return [self._row_to_promise(dict(row)) for row in cursor.fetchall()]
+            rows = [dict(r) for r in cursor.fetchall()]
+            return [self._row_to_promise(row) for row in rows]
 
     def get_by_contact(self, contact_id: int) -> List[PaymentPromise]:
         """Get all promises for a contact."""
-        with self.db._get_connection() as conn:
+        from db.connection import get_connection
+
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM payment_promises
-                WHERE contact_id = ?
+                WHERE firm_id = %s AND contact_id = %s
                 ORDER BY promised_date DESC
-            """, (contact_id,))
+            """, (self.firm_id, contact_id))
 
-            return [self._row_to_promise(dict(row)) for row in cursor.fetchall()]
+            rows = [dict(r) for r in cursor.fetchall()]
+            return [self._row_to_promise(row) for row in rows]
 
     def get_by_case(self, case_id: int) -> List[PaymentPromise]:
         """Get all promises for a case."""
-        with self.db._get_connection() as conn:
+        from db.connection import get_connection
+
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM payment_promises
-                WHERE case_id = ?
+                WHERE firm_id = %s AND case_id = %s
                 ORDER BY promised_date DESC
-            """, (case_id,))
+            """, (self.firm_id, case_id))
 
-            return [self._row_to_promise(dict(row)) for row in cursor.fetchall()]
+            rows = [dict(r) for r in cursor.fetchall()]
+            return [self._row_to_promise(row) for row in rows]
 
     def _row_to_promise(self, row: Dict) -> PaymentPromise:
         """Convert a database row to a PaymentPromise object."""
         today = date.today()
-        promised_date = datetime.strptime(row["promised_date"], "%Y-%m-%d").date()
+
+        # Handle both date and datetime objects
+        promised_date_val = row["promised_date"]
+        if isinstance(promised_date_val, date) and not isinstance(promised_date_val, datetime):
+            promised_date = promised_date_val
+        else:
+            promised_date = datetime.fromisoformat(str(promised_date_val)).date()
 
         days_until = (promised_date - today).days
         days_overdue = max(0, -days_until)
 
         actual_date = None
         if row["actual_date"]:
-            actual_date = datetime.strptime(row["actual_date"], "%Y-%m-%d").date()
+            actual_date_val = row["actual_date"]
+            if isinstance(actual_date_val, date) and not isinstance(actual_date_val, datetime):
+                actual_date = actual_date_val
+            else:
+                actual_date = datetime.fromisoformat(str(actual_date_val)).date()
 
-        recorded_at = datetime.fromisoformat(row["recorded_at"])
+        recorded_at = row["recorded_at"]
+        if isinstance(recorded_at, str):
+            recorded_at = datetime.fromisoformat(recorded_at)
 
         return PaymentPromise(
             id=row["id"],
@@ -415,33 +369,36 @@ class PromiseTracker:
 
     def get_promise_stats(self, days_back: int = 30) -> Dict:
         """Get promise-keeping statistics."""
-        cutoff = (date.today() - timedelta(days=days_back)).isoformat()
+        from db.connection import get_connection
 
-        with self.db._get_connection() as conn:
+        cutoff = date.today() - timedelta(days=days_back)
+
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             # Overall stats
             cursor.execute("""
                 SELECT
                     COUNT(*) as total,
-                    SUM(CASE WHEN status = 'kept' THEN 1 ELSE 0 END) as kept,
-                    SUM(CASE WHEN status = 'broken' THEN 1 ELSE 0 END) as broken,
-                    SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) as partial,
-                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-                    SUM(promised_amount) as total_promised,
-                    SUM(CASE WHEN status = 'kept' THEN actual_amount ELSE 0 END) as total_collected
+                    COUNT(*) FILTER (WHERE status = 'kept') as kept,
+                    COUNT(*) FILTER (WHERE status = 'broken') as broken,
+                    COUNT(*) FILTER (WHERE status = 'partial') as partial,
+                    COUNT(*) FILTER (WHERE status = 'pending') as pending,
+                    COALESCE(SUM(promised_amount), 0) as total_promised,
+                    COALESCE(SUM(actual_amount) FILTER (WHERE status = 'kept'), 0) as total_collected
                 FROM payment_promises
-                WHERE recorded_at >= ?
-            """, (cutoff,))
+                WHERE firm_id = %s AND recorded_at >= %s
+            """, (self.firm_id, cutoff))
 
-            row = cursor.fetchone()
+            row = dict(cursor.fetchone())
 
-            total = row["total"] or 0
-            kept = row["kept"] or 0
-            broken = row["broken"] or 0
+            total = row.get("total", 0) or 0
+            kept = row.get("kept", 0) or 0
+            broken = row.get("broken", 0) or 0
+            partial = row.get("partial", 0) or 0
 
             # Calculate keep rate (excluding pending)
-            resolved = kept + broken + (row["partial"] or 0)
+            resolved = kept + broken + partial
             keep_rate = (kept / resolved * 100) if resolved > 0 else 0
 
             return {
@@ -449,32 +406,34 @@ class PromiseTracker:
                 "total_promises": total,
                 "kept": kept,
                 "broken": broken,
-                "partial": row["partial"] or 0,
-                "pending": row["pending"] or 0,
+                "partial": partial,
+                "pending": row.get("pending", 0) or 0,
                 "keep_rate": keep_rate,
-                "total_promised": row["total_promised"] or 0,
-                "total_collected": row["total_collected"] or 0,
+                "total_promised": row.get("total_promised", 0) or 0,
+                "total_collected": row.get("total_collected", 0) or 0,
             }
 
     def get_contact_reliability(self, contact_id: int) -> Dict:
         """Get promise reliability for a specific contact."""
-        with self.db._get_connection() as conn:
+        from db.connection import get_connection
+
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
                 SELECT
                     COUNT(*) as total,
-                    SUM(CASE WHEN status = 'kept' THEN 1 ELSE 0 END) as kept,
-                    SUM(CASE WHEN status = 'broken' THEN 1 ELSE 0 END) as broken
+                    COUNT(*) FILTER (WHERE status = 'kept') as kept,
+                    COUNT(*) FILTER (WHERE status = 'broken') as broken
                 FROM payment_promises
-                WHERE contact_id = ?
-            """, (contact_id,))
+                WHERE firm_id = %s AND contact_id = %s
+            """, (self.firm_id, contact_id))
 
-            row = cursor.fetchone()
+            row = dict(cursor.fetchone())
 
-            total = row["total"] or 0
-            kept = row["kept"] or 0
-            broken = row["broken"] or 0
+            total = row.get("total", 0) or 0
+            kept = row.get("kept", 0) or 0
+            broken = row.get("broken", 0) or 0
 
             resolved = kept + broken
             reliability = (kept / resolved * 100) if resolved > 0 else None
@@ -545,7 +504,7 @@ SUMMARY (Last 30 Days)
 
 
 if __name__ == "__main__":
-    tracker = PromiseTracker()
+    tracker = PromiseTracker(firm_id="default")
 
     print("Testing Promise Tracker...")
 

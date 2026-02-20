@@ -18,7 +18,6 @@ Comprehensive analytics and reporting for JCS Law Firm:
 14. Positive reviews - primary staff analysis (requires review data)
 15. Case phase/stage report by attorney
 """
-import sqlite3
 import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -26,7 +25,7 @@ from typing import List, Dict, Optional, Any, Tuple
 from collections import defaultdict
 from dataclasses import dataclass
 
-from config import DATA_DIR
+from db.connection import get_connection
 
 
 @dataclass
@@ -99,17 +98,18 @@ class FirmAnalytics:
     """
     Analytics engine for JCS Law Firm.
 
-    Uses cached MyCase data to generate comprehensive reports.
+    Uses cached MyCase data from PostgreSQL to generate comprehensive reports.
+    All queries are scoped to firm_id for multi-tenant isolation.
     """
 
-    def __init__(self, cache_path: Path = None):
-        self.cache_path = cache_path or DATA_DIR / "mycase_cache.db"
+    def __init__(self, firm_id: str = "default"):
+        """
+        Initialize analytics engine.
 
-    def _get_connection(self):
-        """Get database connection."""
-        conn = sqlite3.connect(self.cache_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        Args:
+            firm_id: Firm ID for multi-tenant isolation (default: 'default')
+        """
+        self.firm_id = firm_id
 
     # =========================================================================
     # 1. Revenue per Case Type
@@ -121,7 +121,7 @@ class FirmAnalytics:
         Returns:
             List of RevenueByType objects sorted by total billed descending
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -130,10 +130,11 @@ class FirmAnalytics:
                     SUM(i.total_amount) as total_billed,
                     SUM(i.paid_amount) as total_collected
                 FROM cached_cases c
-                LEFT JOIN cached_invoices i ON i.case_id = c.id
+                LEFT JOIN cached_invoices i ON i.firm_id = c.firm_id AND i.case_id = c.id
+                WHERE c.firm_id = %s
                 GROUP BY COALESCE(c.practice_area, 'Unknown')
                 ORDER BY total_billed DESC
-            """)
+            """, (self.firm_id,))
 
             results = []
             for row in cursor.fetchall():
@@ -161,7 +162,7 @@ class FirmAnalytics:
         Returns:
             List of RevenueByAttorney objects sorted by total billed descending
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -170,10 +171,11 @@ class FirmAnalytics:
                     SUM(i.total_amount) as total_billed,
                     SUM(i.paid_amount) as total_collected
                 FROM cached_cases c
-                LEFT JOIN cached_invoices i ON i.case_id = c.id
+                LEFT JOIN cached_invoices i ON i.firm_id = c.firm_id AND i.case_id = c.id
+                WHERE c.firm_id = %s
                 GROUP BY COALESCE(c.lead_attorney_name, 'Unassigned')
                 ORDER BY total_billed DESC
-            """)
+            """, (self.firm_id,))
 
             results = []
             for row in cursor.fetchall():
@@ -206,20 +208,20 @@ class FirmAnalytics:
         """
         cutoff_date = (datetime.now() - timedelta(days=months * 30)).strftime('%Y-%m-%d')
 
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
                     COALESCE(c.lead_attorney_name, 'Unassigned') as attorney_name,
-                    strftime('%Y-%m', i.invoice_date) as month,
+                    TO_CHAR(i.invoice_date, 'YYYY-MM') as month,
                     SUM(i.total_amount) as billed,
                     SUM(i.paid_amount) as collected
                 FROM cached_invoices i
-                JOIN cached_cases c ON c.id = i.case_id
-                WHERE i.invoice_date >= ?
-                GROUP BY c.lead_attorney_name, strftime('%Y-%m', i.invoice_date)
+                JOIN cached_cases c ON c.firm_id = i.firm_id AND c.id = i.case_id
+                WHERE c.firm_id = %s AND i.invoice_date >= %s
+                GROUP BY c.lead_attorney_name, TO_CHAR(i.invoice_date, 'YYYY-MM')
                 ORDER BY month DESC, attorney_name
-            """, (cutoff_date,))
+            """, (self.firm_id, cutoff_date))
 
             results = []
             for row in cursor.fetchall():
@@ -243,23 +245,24 @@ class FirmAnalytics:
         Returns:
             List of CaseLengthStats objects
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
                     COALESCE(practice_area, 'Unknown') as case_type,
-                    AVG(julianday(date_closed) - julianday(date_opened)) as avg_days,
-                    MIN(julianday(date_closed) - julianday(date_opened)) as min_days,
-                    MAX(julianday(date_closed) - julianday(date_opened)) as max_days,
+                    AVG(EXTRACT(DAY FROM (date_closed - date_opened))) as avg_days,
+                    MIN(EXTRACT(DAY FROM (date_closed - date_opened))) as min_days,
+                    MAX(EXTRACT(DAY FROM (date_closed - date_opened))) as max_days,
                     COUNT(*) as case_count
                 FROM cached_cases
-                WHERE status = 'closed'
+                WHERE firm_id = %s
+                AND status = 'closed'
                 AND date_opened IS NOT NULL
                 AND date_closed IS NOT NULL
                 AND date_closed > date_opened
                 GROUP BY COALESCE(practice_area, 'Unknown')
                 ORDER BY avg_days DESC
-            """)
+            """, (self.firm_id,))
 
             results = []
             for row in cursor.fetchall():
@@ -283,24 +286,25 @@ class FirmAnalytics:
         Returns:
             Dict of attorney name -> List of CaseLengthStats
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
                     COALESCE(lead_attorney_name, 'Unassigned') as attorney_name,
                     COALESCE(practice_area, 'Unknown') as case_type,
-                    AVG(julianday(date_closed) - julianday(date_opened)) as avg_days,
-                    MIN(julianday(date_closed) - julianday(date_opened)) as min_days,
-                    MAX(julianday(date_closed) - julianday(date_opened)) as max_days,
+                    AVG(EXTRACT(DAY FROM (date_closed - date_opened))) as avg_days,
+                    MIN(EXTRACT(DAY FROM (date_closed - date_opened))) as min_days,
+                    MAX(EXTRACT(DAY FROM (date_closed - date_opened))) as max_days,
                     COUNT(*) as case_count
                 FROM cached_cases
-                WHERE status = 'closed'
+                WHERE firm_id = %s
+                AND status = 'closed'
                 AND date_opened IS NOT NULL
                 AND date_closed IS NOT NULL
                 AND date_closed > date_opened
                 GROUP BY lead_attorney_name, COALESCE(practice_area, 'Unknown')
                 ORDER BY attorney_name, avg_days DESC
-            """)
+            """, (self.firm_id,))
 
             results = defaultdict(list)
             for row in cursor.fetchall():
@@ -324,7 +328,7 @@ class FirmAnalytics:
         Returns:
             List of FeeStats objects
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -335,15 +339,18 @@ class FirmAnalytics:
                 FROM cached_cases c
                 JOIN (
                     SELECT
+                        firm_id,
                         case_id,
                         SUM(total_amount) as total_billed,
                         SUM(paid_amount) as total_collected
                     FROM cached_invoices
-                    GROUP BY case_id
-                ) case_total ON case_total.case_id = c.id
+                    WHERE firm_id = %s
+                    GROUP BY firm_id, case_id
+                ) case_total ON case_total.firm_id = c.firm_id AND case_total.case_id = c.id
+                WHERE c.firm_id = %s
                 GROUP BY COALESCE(c.practice_area, 'Unknown')
                 ORDER BY avg_fee_charged DESC
-            """)
+            """, (self.firm_id, self.firm_id))
 
             results = []
             for row in cursor.fetchall():
@@ -369,7 +376,7 @@ class FirmAnalytics:
     # =========================================================================
     # 8. New Cases in Past 12 Months
     # =========================================================================
-    def get_new_cases_past_12_months(self) -> Dict[str, int]:
+    def get_new_cases_past_12_months(self) -> Dict[str, Any]:
         """
         Get count of new cases opened in the past 12 months.
 
@@ -378,29 +385,33 @@ class FirmAnalytics:
         """
         cutoff_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
 
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             # Total count
             cursor.execute("""
                 SELECT COUNT(*) as total
                 FROM cached_cases
-                WHERE date_opened >= ? OR
-                      (date_opened IS NULL AND created_at >= ?)
-            """, (cutoff_date, cutoff_date))
+                WHERE firm_id = %s AND (
+                    date_opened >= %s OR
+                    (date_opened IS NULL AND created_at >= %s)
+                )
+            """, (self.firm_id, cutoff_date, cutoff_date))
             total = cursor.fetchone()['total']
 
             # Monthly breakdown
             cursor.execute("""
                 SELECT
-                    strftime('%Y-%m', COALESCE(date_opened, created_at)) as month,
+                    TO_CHAR(COALESCE(date_opened, created_at), 'YYYY-MM') as month,
                     COUNT(*) as count
                 FROM cached_cases
-                WHERE date_opened >= ? OR
-                      (date_opened IS NULL AND created_at >= ?)
-                GROUP BY strftime('%Y-%m', COALESCE(date_opened, created_at))
+                WHERE firm_id = %s AND (
+                    date_opened >= %s OR
+                    (date_opened IS NULL AND created_at >= %s)
+                )
+                GROUP BY TO_CHAR(COALESCE(date_opened, created_at), 'YYYY-MM')
                 ORDER BY month
-            """, (cutoff_date, cutoff_date))
+            """, (self.firm_id, cutoff_date, cutoff_date))
 
             monthly = {row['month']: row['count'] for row in cursor.fetchall()}
 
@@ -421,16 +432,18 @@ class FirmAnalytics:
         """
         start_date = f"{year}-08-01"
 
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             # Total count
             cursor.execute("""
                 SELECT COUNT(*) as total
                 FROM cached_cases
-                WHERE date_opened >= ? OR
-                      (date_opened IS NULL AND created_at >= ?)
-            """, (start_date, start_date))
+                WHERE firm_id = %s AND (
+                    date_opened >= %s OR
+                    (date_opened IS NULL AND created_at >= %s)
+                )
+            """, (self.firm_id, start_date, start_date))
             total = cursor.fetchone()['total']
 
             # By case type
@@ -439,11 +452,13 @@ class FirmAnalytics:
                     COALESCE(practice_area, 'Unknown') as case_type,
                     COUNT(*) as count
                 FROM cached_cases
-                WHERE date_opened >= ? OR
-                      (date_opened IS NULL AND created_at >= ?)
+                WHERE firm_id = %s AND (
+                    date_opened >= %s OR
+                    (date_opened IS NULL AND created_at >= %s)
+                )
                 GROUP BY COALESCE(practice_area, 'Unknown')
                 ORDER BY count DESC
-            """, (start_date, start_date))
+            """, (self.firm_id, start_date, start_date))
 
             by_type = {row['case_type']: row['count'] for row in cursor.fetchall()}
 
@@ -466,7 +481,7 @@ class FirmAnalytics:
         prior_start = f"{year - 1}-08-01"
         prior_end = f"{year}-07-31"
 
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             # Since August
@@ -477,14 +492,17 @@ class FirmAnalytics:
                     COUNT(*) as case_count
                 FROM cached_cases c
                 JOIN (
-                    SELECT case_id, SUM(total_amount) as total_billed
+                    SELECT firm_id, case_id, SUM(total_amount) as total_billed
                     FROM cached_invoices
-                    GROUP BY case_id
-                ) case_total ON case_total.case_id = c.id
-                WHERE c.date_opened >= ? OR
-                      (c.date_opened IS NULL AND c.created_at >= ?)
+                    WHERE firm_id = %s
+                    GROUP BY firm_id, case_id
+                ) case_total ON case_total.firm_id = c.firm_id AND case_total.case_id = c.id
+                WHERE c.firm_id = %s AND (
+                    c.date_opened >= %s OR
+                    (c.date_opened IS NULL AND c.created_at >= %s)
+                )
                 GROUP BY COALESCE(c.practice_area, 'Unknown')
-            """, (august_start, august_start))
+            """, (self.firm_id, self.firm_id, august_start, august_start))
 
             since_august = {row['case_type']: {
                 'avg_fee': row['avg_fee'] or 0,
@@ -499,14 +517,17 @@ class FirmAnalytics:
                     COUNT(*) as case_count
                 FROM cached_cases c
                 JOIN (
-                    SELECT case_id, SUM(total_amount) as total_billed
+                    SELECT firm_id, case_id, SUM(total_amount) as total_billed
                     FROM cached_invoices
-                    GROUP BY case_id
-                ) case_total ON case_total.case_id = c.id
-                WHERE (c.date_opened >= ? AND c.date_opened <= ?) OR
-                      (c.date_opened IS NULL AND c.created_at >= ? AND c.created_at <= ?)
+                    WHERE firm_id = %s
+                    GROUP BY firm_id, case_id
+                ) case_total ON case_total.firm_id = c.firm_id AND case_total.case_id = c.id
+                WHERE c.firm_id = %s AND (
+                    (c.date_opened >= %s AND c.date_opened <= %s) OR
+                    (c.date_opened IS NULL AND c.created_at >= %s AND c.created_at <= %s)
+                )
                 GROUP BY COALESCE(c.practice_area, 'Unknown')
-            """, (prior_start, prior_end, prior_start, prior_end))
+            """, (self.firm_id, self.firm_id, prior_start, prior_end, prior_start, prior_end))
 
             prior_period = {row['case_type']: {
                 'avg_fee': row['avg_fee'] or 0,
@@ -616,9 +637,9 @@ class FirmAnalytics:
         Returns:
             Dict of jurisdiction -> case_count
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM cached_cases")
+            cursor.execute("SELECT name FROM cached_cases WHERE firm_id = %s", (self.firm_id,))
 
             jurisdiction_counts = defaultdict(int)
             for row in cursor.fetchall():
@@ -642,7 +663,7 @@ class FirmAnalytics:
         Returns:
             Dict of jurisdiction -> {cases, billed, collected, collection_rate}
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -650,9 +671,10 @@ class FirmAnalytics:
                     COALESCE(SUM(i.total_amount), 0) as billed,
                     COALESCE(SUM(i.paid_amount), 0) as collected
                 FROM cached_cases c
-                LEFT JOIN cached_invoices i ON i.case_id = c.id
+                LEFT JOIN cached_invoices i ON i.firm_id = c.firm_id AND i.case_id = c.id
+                WHERE c.firm_id = %s
                 GROUP BY c.id, c.name
-            """)
+            """, (self.firm_id,))
 
             jurisdiction_revenue = defaultdict(lambda: {'cases': 0, 'billed': 0, 'collected': 0})
 
@@ -689,17 +711,17 @@ class FirmAnalytics:
         Returns:
             Dict of zip_code -> client_count, sorted by count descending
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
-                    SUBSTR(zip_code, 1, 5) as zip,
+                    SUBSTRING(zip_code, 1, 5) as zip,
                     COUNT(*) as client_count
                 FROM cached_clients
-                WHERE zip_code IS NOT NULL AND zip_code != ''
-                GROUP BY SUBSTR(zip_code, 1, 5)
+                WHERE firm_id = %s AND zip_code IS NOT NULL AND zip_code != ''
+                GROUP BY SUBSTRING(zip_code, 1, 5)
                 ORDER BY client_count DESC
-            """)
+            """, (self.firm_id,))
 
             return {row['zip']: row['client_count'] for row in cursor.fetchall()}
 
@@ -716,15 +738,15 @@ class FirmAnalytics:
         Returns:
             Dict of zip_code -> {clients, cases, billed, collected, collection_rate}
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             # First, build a mapping of client_id -> zip_code
             cursor.execute("""
-                SELECT id, SUBSTR(zip_code, 1, 5) as zip
+                SELECT id, SUBSTRING(zip_code, 1, 5) as zip
                 FROM cached_clients
-                WHERE zip_code IS NOT NULL AND zip_code != ''
-            """)
+                WHERE firm_id = %s AND zip_code IS NOT NULL AND zip_code != ''
+            """, (self.firm_id,))
             client_zips = {row['id']: row['zip'] for row in cursor.fetchall()}
 
             # Get case-client relationships and revenue
@@ -735,9 +757,10 @@ class FirmAnalytics:
                     COALESCE(SUM(i.total_amount), 0) as billed,
                     COALESCE(SUM(i.paid_amount), 0) as collected
                 FROM cached_cases c
-                LEFT JOIN cached_invoices i ON i.case_id = c.id
+                LEFT JOIN cached_invoices i ON i.firm_id = c.firm_id AND i.case_id = c.id
+                WHERE c.firm_id = %s
                 GROUP BY c.id
-            """)
+            """, (self.firm_id,))
 
             zip_revenue = defaultdict(lambda: {'clients': set(), 'cases': 0, 'billed': 0, 'collected': 0})
 
@@ -812,19 +835,21 @@ class FirmAnalytics:
         """
         cutoff_date = (datetime.now() - timedelta(days=months * 30)).strftime('%Y-%m-%d')
 
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
-                    strftime('%Y-%m', COALESCE(date_opened, created_at)) as month,
+                    TO_CHAR(COALESCE(date_opened, created_at), 'YYYY-MM') as month,
                     COALESCE(lead_attorney_name, 'Unassigned') as attorney_name,
                     COUNT(*) as case_count
                 FROM cached_cases
-                WHERE date_opened >= ? OR
-                      (date_opened IS NULL AND created_at >= ?)
-                GROUP BY strftime('%Y-%m', COALESCE(date_opened, created_at)), lead_attorney_name
+                WHERE firm_id = %s AND (
+                    date_opened >= %s OR
+                    (date_opened IS NULL AND created_at >= %s)
+                )
+                GROUP BY TO_CHAR(COALESCE(date_opened, created_at), 'YYYY-MM'), lead_attorney_name
                 ORDER BY month DESC, case_count DESC
-            """, (cutoff_date, cutoff_date))
+            """, (self.firm_id, cutoff_date, cutoff_date))
 
             results = []
             for row in cursor.fetchall():
@@ -869,7 +894,7 @@ class FirmAnalytics:
             sorted by attorney total case count descending,
             stages sorted by case count descending within each attorney.
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -879,10 +904,11 @@ class FirmAnalytics:
                     SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
                     SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_count
                 FROM cached_cases
+                WHERE firm_id = %s
                 GROUP BY COALESCE(lead_attorney_name, 'Unassigned'),
                          COALESCE(stage, 'No Stage')
                 ORDER BY attorney_name, case_count DESC
-            """)
+            """, (self.firm_id,))
 
             results = defaultdict(list)
             for row in cursor.fetchall():
@@ -910,7 +936,7 @@ class FirmAnalytics:
         Returns:
             List of dicts with stage, total cases, open, closed counts.
         """
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -919,9 +945,10 @@ class FirmAnalytics:
                     SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
                     SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_count
                 FROM cached_cases
+                WHERE firm_id = %s
                 GROUP BY COALESCE(stage, 'No Stage')
                 ORDER BY case_count DESC
-            """)
+            """, (self.firm_id,))
 
             return [{
                 'stage': row['stage'],

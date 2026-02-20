@@ -5,12 +5,12 @@ Parses docket text from Missouri CaseNet and stores entries in the database.
 Provides notification system for upcoming attorney actions.
 """
 import re
-import sqlite3
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
-from config import DATA_DIR
+
+from db.connection import get_connection
 
 
 @dataclass
@@ -226,34 +226,77 @@ class DocketParser:
 
 
 class DocketManager:
-    """Manages docket entries in the database."""
+    """Manages docket entries in the database (PostgreSQL multi-tenant)."""
 
-    def __init__(self, db_path: Path = None):
-        self.db_path = db_path or DATA_DIR / "mycase_cache.db"
+    def __init__(self, firm_id: Optional[str] = None):
+        self.firm_id = firm_id
         self.parser = DocketParser()
         self._init_table()
 
-    def _get_connection(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
     def _init_table(self):
         """Ensure the docket entries table exists."""
-        from cache import get_cache
-        get_cache()  # This will create the table if it doesn't exist
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS cached_docket_entries (
+                        id SERIAL PRIMARY KEY,
+                        firm_id TEXT NOT NULL,
+                        case_number TEXT NOT NULL,
+                        case_name TEXT,
+                        case_id INTEGER,
+                        entry_date DATE NOT NULL,
+                        entry_type TEXT NOT NULL,
+                        entry_text TEXT,
+                        scheduled_date DATE,
+                        scheduled_time TEXT,
+                        judge TEXT,
+                        location TEXT,
+                        filed_by TEXT,
+                        on_behalf_of TEXT,
+                        document_id TEXT,
+                        associated_entries TEXT,
+                        raw_text TEXT,
+                        requires_action BOOLEAN DEFAULT FALSE,
+                        action_due_date DATE,
+                        notification_sent BOOLEAN DEFAULT FALSE,
+                        notification_sent_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(firm_id, case_number, entry_date, entry_type, entry_text)
+                    )
+                """)
 
-    def import_docket(self, docket_text: str, case_id: int = None) -> Dict:
+                # Create indexes for performance
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_docket_firm_id
+                    ON cached_docket_entries(firm_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_docket_case_id
+                    ON cached_docket_entries(firm_id, case_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_docket_action_due
+                    ON cached_docket_entries(firm_id, action_due_date)
+                    WHERE requires_action = TRUE
+                """)
+
+            conn.commit()
+
+    def import_docket(self, docket_text: str, case_id: int = None, firm_id: Optional[str] = None) -> Dict:
         """
         Import docket text and store entries in database.
 
         Args:
             docket_text: Raw docket text from CaseNet
             case_id: Optional MyCase case ID to link entries to
+            firm_id: Firm ID for multi-tenant isolation (uses self.firm_id if not provided)
 
         Returns:
             Dict with import statistics
         """
+        firm_id = firm_id or self.firm_id
+
         case_number, case_name, entries = self.parser.parse(docket_text)
 
         if not case_number:
@@ -261,61 +304,60 @@ class DocketManager:
 
         # Try to find case_id from case_number if not provided
         if not case_id:
-            case_id = self._find_case_id(case_number)
+            case_id = self._find_case_id(case_number, firm_id)
 
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-        inserted = 0
-        updated = 0
+                inserted = 0
+                updated = 0
 
-        for entry in entries:
-            try:
-                cursor.execute("""
-                    INSERT INTO cached_docket_entries (
-                        case_number, case_name, case_id, entry_date, entry_type,
-                        entry_text, scheduled_date, scheduled_time, judge, location,
-                        filed_by, on_behalf_of, document_id, associated_entries,
-                        requires_action, action_due_date, raw_text
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(case_number, entry_date, entry_type, entry_text) DO UPDATE SET
-                        scheduled_date = excluded.scheduled_date,
-                        scheduled_time = excluded.scheduled_time,
-                        judge = excluded.judge,
-                        location = excluded.location,
-                        requires_action = excluded.requires_action,
-                        action_due_date = excluded.action_due_date,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (
-                    case_number,
-                    case_name,
-                    case_id,
-                    entry.entry_date.isoformat(),
-                    entry.entry_type,
-                    entry.entry_text,
-                    entry.scheduled_date.isoformat() if entry.scheduled_date else None,
-                    entry.scheduled_time,
-                    entry.judge,
-                    entry.location,
-                    entry.filed_by,
-                    entry.on_behalf_of,
-                    entry.document_id,
-                    entry.associated_entries,
-                    entry.requires_action,
-                    entry.action_due_date.isoformat() if entry.action_due_date else None,
-                    entry.raw_text,
-                ))
+                for entry in entries:
+                    try:
+                        cursor.execute("""
+                            INSERT INTO cached_docket_entries (
+                                firm_id, case_number, case_name, case_id, entry_date, entry_type,
+                                entry_text, scheduled_date, scheduled_time, judge, location,
+                                filed_by, on_behalf_of, document_id, associated_entries,
+                                requires_action, action_due_date, raw_text
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT(firm_id, case_number, entry_date, entry_type, entry_text)
+                            DO UPDATE SET
+                                scheduled_date = EXCLUDED.scheduled_date,
+                                scheduled_time = EXCLUDED.scheduled_time,
+                                judge = EXCLUDED.judge,
+                                location = EXCLUDED.location,
+                                requires_action = EXCLUDED.requires_action,
+                                action_due_date = EXCLUDED.action_due_date,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, (
+                            firm_id,
+                            case_number,
+                            case_name,
+                            case_id,
+                            entry.entry_date.isoformat(),
+                            entry.entry_type,
+                            entry.entry_text,
+                            entry.scheduled_date.isoformat() if entry.scheduled_date else None,
+                            entry.scheduled_time,
+                            entry.judge,
+                            entry.location,
+                            entry.filed_by,
+                            entry.on_behalf_of,
+                            entry.document_id,
+                            entry.associated_entries,
+                            entry.requires_action,
+                            entry.action_due_date.isoformat() if entry.action_due_date else None,
+                            entry.raw_text,
+                        ))
 
-                if cursor.rowcount > 0:
-                    inserted += 1
-                else:
-                    updated += 1
+                        inserted += 1
 
-            except sqlite3.IntegrityError:
-                updated += 1
+                    except Exception as e:
+                        # On conflict, treat as update
+                        updated += 1
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
         return {
             'case_number': case_number,
@@ -326,101 +368,108 @@ class DocketManager:
             'updated': updated,
         }
 
-    def _find_case_id(self, case_number: str) -> Optional[int]:
+    def _find_case_id(self, case_number: str, firm_id: Optional[str] = None) -> Optional[int]:
         """Try to find MyCase case_id from case number."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        firm_id = firm_id or self.firm_id
 
-        # Search in cached_cases for matching case_number
-        cursor.execute("""
-            SELECT id FROM cached_cases
-            WHERE case_number LIKE ?
-            ORDER BY created_at DESC LIMIT 1
-        """, (f'%{case_number}%',))
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-        row = cursor.fetchone()
-        conn.close()
+                # Search in cached_cases for matching case_number
+                cursor.execute("""
+                    SELECT id FROM cached_cases
+                    WHERE firm_id = %s AND case_number LIKE %s
+                    ORDER BY created_at DESC LIMIT 1
+                """, (firm_id, f'%{case_number}%'))
 
-        return row['id'] if row else None
+                row = cursor.fetchone()
 
-    def get_upcoming_actions(self, days_ahead: int = 14) -> List[Dict]:
+        return row[0] if row else None
+
+    def get_upcoming_actions(self, days_ahead: int = 14, firm_id: Optional[str] = None) -> List[Dict]:
         """Get docket entries requiring action in the next N days."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        firm_id = firm_id or self.firm_id
 
-        today = date.today()
-        future_date = today + timedelta(days=days_ahead)
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-        cursor.execute("""
-            SELECT d.*, c.lead_attorney_name, c.name as mycase_name
-            FROM cached_docket_entries d
-            LEFT JOIN cached_cases c ON d.case_id = c.id
-            WHERE d.requires_action = 1
-              AND d.scheduled_date BETWEEN ? AND ?
-              AND (d.notification_sent = 0 OR d.notification_sent IS NULL)
-            ORDER BY d.scheduled_date ASC
-        """, (today.isoformat(), future_date.isoformat()))
+                today = date.today()
+                future_date = today + timedelta(days=days_ahead)
 
-        results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+                cursor.execute("""
+                    SELECT d.*, c.lead_attorney_name, c.name as mycase_name
+                    FROM cached_docket_entries d
+                    LEFT JOIN cached_cases c ON d.firm_id = c.firm_id AND d.case_id = c.id
+                    WHERE d.firm_id = %s
+                      AND d.requires_action = TRUE
+                      AND d.scheduled_date BETWEEN %s AND %s
+                      AND (d.notification_sent = FALSE OR d.notification_sent IS NULL)
+                    ORDER BY d.scheduled_date ASC
+                """, (firm_id, today.isoformat(), future_date.isoformat()))
 
-        return results
+                rows = cursor.fetchall()
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in rows]
 
-    def get_case_docket(self, case_number: str = None, case_id: int = None) -> List[Dict]:
+    def get_case_docket(self, case_number: str = None, case_id: int = None, firm_id: Optional[str] = None) -> List[Dict]:
         """Get all docket entries for a case."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        firm_id = firm_id or self.firm_id
 
-        if case_id:
-            cursor.execute("""
-                SELECT * FROM cached_docket_entries
-                WHERE case_id = ?
-                ORDER BY entry_date DESC, id DESC
-            """, (case_id,))
-        elif case_number:
-            cursor.execute("""
-                SELECT * FROM cached_docket_entries
-                WHERE case_number = ?
-                ORDER BY entry_date DESC, id DESC
-            """, (case_number,))
-        else:
-            return []
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-        results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+                if case_id:
+                    cursor.execute("""
+                        SELECT * FROM cached_docket_entries
+                        WHERE firm_id = %s AND case_id = %s
+                        ORDER BY entry_date DESC, id DESC
+                    """, (firm_id, case_id))
+                elif case_number:
+                    cursor.execute("""
+                        SELECT * FROM cached_docket_entries
+                        WHERE firm_id = %s AND case_number = %s
+                        ORDER BY entry_date DESC, id DESC
+                    """, (firm_id, case_number))
+                else:
+                    return []
 
-        return results
+                rows = cursor.fetchall()
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in rows]
 
-    def mark_notification_sent(self, entry_ids: List[int]):
+    def mark_notification_sent(self, entry_ids: List[int], firm_id: Optional[str] = None):
         """Mark entries as having notifications sent."""
         if not entry_ids:
             return
 
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        firm_id = firm_id or self.firm_id
 
-        placeholders = ','.join('?' * len(entry_ids))
-        cursor.execute(f"""
-            UPDATE cached_docket_entries
-            SET notification_sent = 1, notification_sent_at = CURRENT_TIMESTAMP
-            WHERE id IN ({placeholders})
-        """, entry_ids)
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-        conn.commit()
-        conn.close()
+                placeholders = ','.join(['%s'] * len(entry_ids))
+                cursor.execute(f"""
+                    UPDATE cached_docket_entries
+                    SET notification_sent = TRUE, notification_sent_at = CURRENT_TIMESTAMP
+                    WHERE firm_id = %s AND id IN ({placeholders})
+                """, [firm_id] + entry_ids)
 
-    def send_upcoming_notifications(self, email_to: str = "marc.stein@gmail.com", days_ahead: int = 14) -> Dict:
+            conn.commit()
+
+    def send_upcoming_notifications(self, email_to: str = "marc.stein@gmail.com", days_ahead: int = 14, firm_id: Optional[str] = None) -> Dict:
         """
         Send email notifications for upcoming actions.
 
         Args:
             email_to: Email address to send notifications to
             days_ahead: Number of days to look ahead
+            firm_id: Firm ID for multi-tenant isolation
 
         Returns:
             Dict with notification results
         """
-        upcoming = self.get_upcoming_actions(days_ahead)
+        firm_id = firm_id or self.firm_id
+        upcoming = self.get_upcoming_actions(days_ahead, firm_id)
 
         if not upcoming:
             return {'sent': 0, 'message': 'No upcoming actions requiring notification'}
@@ -476,7 +525,7 @@ class DocketManager:
             if success:
                 # Mark as sent
                 entry_ids = [e['id'] for e in upcoming]
-                self.mark_notification_sent(entry_ids)
+                self.mark_notification_sent(entry_ids, firm_id)
                 return {'sent': len(upcoming), 'email': email_to}
             else:
                 return {'sent': 0, 'error': 'Email send failed'}
@@ -492,7 +541,7 @@ class DocketManager:
 
             # Mark as sent anyway for testing
             entry_ids = [e['id'] for e in upcoming]
-            self.mark_notification_sent(entry_ids)
+            self.mark_notification_sent(entry_ids, firm_id)
 
             return {'sent': len(upcoming), 'email': email_to, 'note': 'Printed to console (email not configured)'}
 

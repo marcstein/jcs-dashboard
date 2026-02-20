@@ -13,7 +13,6 @@ Database Schema:
 - generated_documents: History of generated documents
 """
 
-import sqlite3
 import hashlib
 import json
 from datetime import datetime
@@ -23,11 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 
-from config import DATA_DIR
-
-
-# Database location
-TEMPLATES_DB = DATA_DIR / "templates.db"
+from db.connection import get_connection
 
 
 class TemplateCategory(Enum):
@@ -57,6 +52,7 @@ class TemplateStatus(Enum):
 class Template:
     """Represents a document template."""
     id: Optional[int] = None
+    firm_id: Optional[str] = None
     name: str = ""
     category: TemplateCategory = TemplateCategory.OTHER
     description: str = ""
@@ -77,6 +73,7 @@ class Template:
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "firm_id": self.firm_id,
             "name": self.name,
             "category": self.category.value,
             "description": self.description,
@@ -96,6 +93,7 @@ class Template:
 class GeneratedDocument:
     """Represents a generated document from a template."""
     id: Optional[int] = None
+    firm_id: Optional[str] = None
     template_id: int = 0
     template_name: str = ""
     case_id: Optional[int] = None
@@ -111,142 +109,127 @@ class GeneratedDocument:
 
 
 class TemplatesDatabase:
-    """SQLite database for template management."""
+    """PostgreSQL database for template management (multi-tenant via firm_id)."""
 
-    def __init__(self, db_path: Path = TEMPLATES_DB):
-        self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, firm_id: Optional[str] = None):
+        self.firm_id = firm_id
         self._init_tables()
-
-    @contextmanager
-    def _get_connection(self):
-        """Context manager for database connections."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
 
     def _init_tables(self):
         """Initialize database tables."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-            # Master template records
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    description TEXT,
-                    court_type TEXT,
-                    case_types TEXT,  -- JSON array
-                    jurisdiction TEXT,
-                    status TEXT DEFAULT 'active',
-                    file_path TEXT,
-                    content_hash TEXT,
-                    variables TEXT,  -- JSON array of variable names
-                    tags TEXT,  -- JSON array
-                    created_by TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    version INTEGER DEFAULT 1,
-                    usage_count INTEGER DEFAULT 0,
-                    UNIQUE(name, category, jurisdiction)
-                )
-            """)
+                # Master template records
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS templates (
+                        id SERIAL PRIMARY KEY,
+                        firm_id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        description TEXT,
+                        court_type TEXT,
+                        case_types JSONB,
+                        jurisdiction TEXT,
+                        status TEXT DEFAULT 'active',
+                        file_path TEXT,
+                        content_hash TEXT,
+                        variables JSONB,
+                        tags JSONB,
+                        created_by TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        version INTEGER DEFAULT 1,
+                        usage_count INTEGER DEFAULT 0,
+                        UNIQUE(firm_id, name, category, jurisdiction)
+                    )
+                """)
 
-            # Template version history
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS template_versions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    template_id INTEGER NOT NULL,
-                    version INTEGER NOT NULL,
-                    file_path TEXT,
-                    content_hash TEXT,
-                    variables TEXT,
-                    change_notes TEXT,
-                    created_by TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (template_id) REFERENCES templates(id),
-                    UNIQUE(template_id, version)
-                )
-            """)
+                # Template version history
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS template_versions (
+                        id SERIAL PRIMARY KEY,
+                        firm_id TEXT NOT NULL,
+                        template_id INTEGER NOT NULL,
+                        version INTEGER NOT NULL,
+                        file_path TEXT,
+                        content_hash TEXT,
+                        variables JSONB,
+                        change_notes TEXT,
+                        created_by TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (template_id) REFERENCES templates(id),
+                        UNIQUE(template_id, version)
+                    )
+                """)
 
-            # Template variable definitions
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS template_variables (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    template_id INTEGER NOT NULL,
-                    variable_name TEXT NOT NULL,
-                    variable_type TEXT DEFAULT 'text',  -- text, date, number, choice, case_field
-                    description TEXT,
-                    default_value TEXT,
-                    required BOOLEAN DEFAULT TRUE,
-                    choices TEXT,  -- JSON array for choice type
-                    case_field_mapping TEXT,  -- Maps to MyCase field if case_field type
-                    FOREIGN KEY (template_id) REFERENCES templates(id),
-                    UNIQUE(template_id, variable_name)
-                )
-            """)
+                # Template variable definitions
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS template_variables (
+                        id SERIAL PRIMARY KEY,
+                        firm_id TEXT NOT NULL,
+                        template_id INTEGER NOT NULL,
+                        variable_name TEXT NOT NULL,
+                        variable_type TEXT DEFAULT 'text',
+                        description TEXT,
+                        default_value TEXT,
+                        required BOOLEAN DEFAULT TRUE,
+                        choices JSONB,
+                        case_field_mapping TEXT,
+                        FOREIGN KEY (template_id) REFERENCES templates(id),
+                        UNIQUE(template_id, variable_name)
+                    )
+                """)
 
-            # Generated document history
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS generated_documents (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    template_id INTEGER NOT NULL,
-                    template_name TEXT,
-                    case_id INTEGER,
-                    case_name TEXT,
-                    client_id INTEGER,
-                    client_name TEXT,
-                    court TEXT,
-                    purpose TEXT,
-                    variables_used TEXT,  -- JSON object
-                    output_path TEXT,
-                    generated_by TEXT,
-                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (template_id) REFERENCES templates(id)
-                )
-            """)
+                # Generated document history
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS generated_documents (
+                        id SERIAL PRIMARY KEY,
+                        firm_id TEXT NOT NULL,
+                        template_id INTEGER NOT NULL,
+                        template_name TEXT,
+                        case_id INTEGER,
+                        case_name TEXT,
+                        client_id INTEGER,
+                        client_name TEXT,
+                        court TEXT,
+                        purpose TEXT,
+                        variables_used JSONB,
+                        output_path TEXT,
+                        generated_by TEXT,
+                        generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (template_id) REFERENCES templates(id)
+                    )
+                """)
 
-            # Full-text search index for templates
-            cursor.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS templates_fts USING fts5(
-                    name, description, tags, court_type, jurisdiction,
-                    content='templates',
-                    content_rowid='id'
-                )
-            """)
+                # Full-text search vector for templates
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS templates_fts (
+                        id SERIAL PRIMARY KEY,
+                        template_id INTEGER UNIQUE NOT NULL,
+                        firm_id TEXT NOT NULL,
+                        search_vector tsvector,
+                        FOREIGN KEY (template_id) REFERENCES templates(id)
+                    )
+                """)
 
-            # Triggers to keep FTS in sync
-            cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS templates_ai AFTER INSERT ON templates BEGIN
-                    INSERT INTO templates_fts(rowid, name, description, tags, court_type, jurisdiction)
-                    VALUES (new.id, new.name, new.description, new.tags, new.court_type, new.jurisdiction);
-                END
-            """)
-
-            cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS templates_ad AFTER DELETE ON templates BEGIN
-                    INSERT INTO templates_fts(templates_fts, rowid, name, description, tags, court_type, jurisdiction)
-                    VALUES ('delete', old.id, old.name, old.description, old.tags, old.court_type, old.jurisdiction);
-                END
-            """)
-
-            cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS templates_au AFTER UPDATE ON templates BEGIN
-                    INSERT INTO templates_fts(templates_fts, rowid, name, description, tags, court_type, jurisdiction)
-                    VALUES ('delete', old.id, old.name, old.description, old.tags, old.court_type, old.jurisdiction);
-                    INSERT INTO templates_fts(rowid, name, description, tags, court_type, jurisdiction)
-                    VALUES (new.id, new.name, new.description, new.tags, new.court_type, new.jurisdiction);
-                END
-            """)
+                # Create indexes for performance
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_templates_firm_id
+                    ON templates(firm_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_templates_status
+                    ON templates(firm_id, status)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_templates_fts_search
+                    ON templates_fts USING GIN(search_vector)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_generated_docs_firm
+                    ON generated_documents(firm_id)
+                """)
 
             conn.commit()
 
@@ -259,82 +242,89 @@ class TemplatesDatabase:
         if file_content:
             template.content_hash = hashlib.sha256(file_content).hexdigest()
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-            cursor.execute("""
-                INSERT INTO templates (
-                    name, category, description, court_type, case_types,
-                    jurisdiction, status, file_path, content_hash, variables,
-                    tags, created_by, version, usage_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                template.name,
-                template.category.value,
-                template.description,
-                template.court_type,
-                json.dumps(template.case_types),
-                template.jurisdiction,
-                template.status.value,
-                template.file_path,
-                template.content_hash,
-                json.dumps(template.variables),
-                json.dumps(template.tags),
-                template.created_by,
-                template.version,
-                template.usage_count,
-            ))
+                cursor.execute("""
+                    INSERT INTO templates (
+                        firm_id, name, category, description, court_type, case_types,
+                        jurisdiction, status, file_path, content_hash, variables,
+                        tags, created_by, version, usage_count
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    template.firm_id,
+                    template.name,
+                    template.category.value,
+                    template.description,
+                    template.court_type,
+                    json.dumps(template.case_types),
+                    template.jurisdiction,
+                    template.status.value,
+                    template.file_path,
+                    template.content_hash,
+                    json.dumps(template.variables),
+                    json.dumps(template.tags),
+                    template.created_by,
+                    template.version,
+                    template.usage_count,
+                ))
 
-            template_id = cursor.lastrowid
+                template_id = cursor.fetchone()[0]
 
-            # Add initial version
-            cursor.execute("""
-                INSERT INTO template_versions (
-                    template_id, version, file_path, content_hash, variables,
-                    change_notes, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                template_id,
-                1,
-                template.file_path,
-                template.content_hash,
-                json.dumps(template.variables),
-                "Initial version",
-                template.created_by,
-            ))
+                # Add initial version
+                cursor.execute("""
+                    INSERT INTO template_versions (
+                        firm_id, template_id, version, file_path, content_hash, variables,
+                        change_notes, created_by
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    template.firm_id,
+                    template_id,
+                    1,
+                    template.file_path,
+                    template.content_hash,
+                    json.dumps(template.variables),
+                    "Initial version",
+                    template.created_by,
+                ))
 
+            conn.commit()
             return template_id
 
     def get_template(self, template_id: int) -> Optional[Template]:
         """Get a template by ID."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM templates WHERE id = ?", (template_id,))
-            row = cursor.fetchone()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM templates WHERE id = %s AND firm_id = %s",
+                    (template_id, self.firm_id)
+                )
+                row = cursor.fetchone()
 
-            if not row:
-                return None
+                if not row:
+                    return None
 
-            return self._row_to_template(row)
+                return self._row_to_template(row)
 
     def get_template_by_name(self, name: str, category: Optional[str] = None) -> Optional[Template]:
         """Get a template by name and optionally category."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-            if category:
-                cursor.execute(
-                    "SELECT * FROM templates WHERE name = ? AND category = ? AND status = 'active'",
-                    (name, category)
-                )
-            else:
-                cursor.execute(
-                    "SELECT * FROM templates WHERE name = ? AND status = 'active'",
-                    (name,)
-                )
+                if category:
+                    cursor.execute(
+                        "SELECT * FROM templates WHERE name = %s AND category = %s AND status = 'active' AND firm_id = %s",
+                        (name, category, self.firm_id)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT * FROM templates WHERE name = %s AND status = 'active' AND firm_id = %s",
+                        (name, self.firm_id)
+                    )
 
-            row = cursor.fetchone()
-            return self._row_to_template(row) if row else None
+                row = cursor.fetchone()
+                return self._row_to_template(row) if row else None
 
     def list_templates(
         self,
@@ -346,113 +336,121 @@ class TemplatesDatabase:
         limit: int = 100
     ) -> List[Template]:
         """List templates with optional filters."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-            query = "SELECT * FROM templates WHERE status = ?"
-            params = [status]
+                query = "SELECT * FROM templates WHERE status = %s AND firm_id = %s"
+                params = [status, self.firm_id]
 
-            if category:
-                query += " AND category = ?"
-                params.append(category)
+                if category:
+                    query += " AND category = %s"
+                    params.append(category)
 
-            if court_type:
-                query += " AND court_type = ?"
-                params.append(court_type)
+                if court_type:
+                    query += " AND court_type = %s"
+                    params.append(court_type)
 
-            if jurisdiction:
-                query += " AND jurisdiction = ?"
-                params.append(jurisdiction)
+                if jurisdiction:
+                    query += " AND jurisdiction = %s"
+                    params.append(jurisdiction)
 
-            if case_type:
-                query += " AND case_types LIKE ?"
-                params.append(f'%"{case_type}"%')
+                if case_type:
+                    query += " AND case_types @> %s"
+                    params.append(json.dumps([case_type]))
 
-            query += " ORDER BY usage_count DESC, name ASC LIMIT ?"
-            params.append(limit)
+                query += " ORDER BY usage_count DESC, name ASC LIMIT %s"
+                params.append(limit)
 
-            cursor.execute(query, params)
-            return [self._row_to_template(row) for row in cursor.fetchall()]
+                cursor.execute(query, params)
+                return [self._row_to_template(row) for row in cursor.fetchall()]
 
     def search_templates(self, query: str, limit: int = 20) -> List[Template]:
         """Full-text search for templates."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-            cursor.execute("""
-                SELECT t.* FROM templates t
-                JOIN templates_fts fts ON t.id = fts.rowid
-                WHERE templates_fts MATCH ?
-                AND t.status = 'active'
-                ORDER BY rank
-                LIMIT ?
-            """, (query, limit))
+                cursor.execute("""
+                    SELECT t.* FROM templates t
+                    JOIN templates_fts fts ON t.id = fts.template_id
+                    WHERE fts.search_vector @@ websearch_to_tsquery(%s)
+                    AND t.status = 'active'
+                    AND t.firm_id = %s
+                    ORDER BY ts_rank(fts.search_vector, websearch_to_tsquery(%s)) DESC
+                    LIMIT %s
+                """, (query, self.firm_id, query, limit))
 
-            return [self._row_to_template(row) for row in cursor.fetchall()]
+                return [self._row_to_template(row) for row in cursor.fetchall()]
 
     def update_template(self, template_id: int, updates: dict, file_content: Optional[bytes] = None) -> bool:
         """Update a template and create a new version."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-            # Get current version
-            cursor.execute("SELECT version FROM templates WHERE id = ?", (template_id,))
-            row = cursor.fetchone()
-            if not row:
-                return False
+                # Get current version
+                cursor.execute(
+                    "SELECT version FROM templates WHERE id = %s AND firm_id = %s",
+                    (template_id, self.firm_id)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
 
-            new_version = row["version"] + 1
+                new_version = row[0] + 1
 
-            # Update hash if new content
-            if file_content:
-                updates["content_hash"] = hashlib.sha256(file_content).hexdigest()
+                # Update hash if new content
+                if file_content:
+                    updates["content_hash"] = hashlib.sha256(file_content).hexdigest()
 
-            # Build update query
-            set_clauses = []
-            params = []
-            for key, value in updates.items():
-                if key in ("case_types", "variables", "tags"):
-                    value = json.dumps(value)
-                set_clauses.append(f"{key} = ?")
-                params.append(value)
+                # Build update query
+                set_clauses = []
+                params = []
+                for key, value in updates.items():
+                    if key in ("case_types", "variables", "tags"):
+                        value = json.dumps(value)
+                    set_clauses.append(f"{key} = %s")
+                    params.append(value)
 
-            set_clauses.append("version = ?")
-            params.append(new_version)
-            set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+                set_clauses.append("version = %s")
+                params.append(new_version)
+                set_clauses.append("updated_at = CURRENT_TIMESTAMP")
 
-            params.append(template_id)
+                params.append(template_id)
+                params.append(self.firm_id)
 
-            cursor.execute(
-                f"UPDATE templates SET {', '.join(set_clauses)} WHERE id = ?",
-                params
-            )
+                cursor.execute(
+                    f"UPDATE templates SET {', '.join(set_clauses)} WHERE id = %s AND firm_id = %s",
+                    params
+                )
 
-            # Add version record
-            cursor.execute("""
-                INSERT INTO template_versions (
-                    template_id, version, file_path, content_hash, variables,
-                    change_notes, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                template_id,
-                new_version,
-                updates.get("file_path"),
-                updates.get("content_hash"),
-                json.dumps(updates.get("variables", [])),
-                updates.get("change_notes", "Updated"),
-                updates.get("updated_by"),
-            ))
+                # Add version record
+                cursor.execute("""
+                    INSERT INTO template_versions (
+                        firm_id, template_id, version, file_path, content_hash, variables,
+                        change_notes, created_by
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    self.firm_id,
+                    template_id,
+                    new_version,
+                    updates.get("file_path"),
+                    updates.get("content_hash"),
+                    json.dumps(updates.get("variables", [])),
+                    updates.get("change_notes", "Updated"),
+                    updates.get("updated_by"),
+                ))
 
+            conn.commit()
             return True
 
     def increment_usage(self, template_id: int) -> None:
         """Increment the usage count for a template."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE templates SET usage_count = usage_count + 1 WHERE id = ?",
-                (template_id,)
-            )
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE templates SET usage_count = usage_count + 1 WHERE id = %s AND firm_id = %s",
+                    (template_id, self.firm_id)
+                )
+            conn.commit()
 
     # =========================================================================
     # Variable Management
@@ -470,34 +468,41 @@ class TemplatesDatabase:
         case_field_mapping: Optional[str] = None
     ) -> int:
         """Add a variable definition to a template."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO template_variables (
-                    template_id, variable_name, variable_type, description,
-                    default_value, required, choices, case_field_mapping
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                template_id,
-                variable_name,
-                variable_type,
-                description,
-                default_value,
-                required,
-                json.dumps(choices) if choices else None,
-                case_field_mapping,
-            ))
-            return cursor.lastrowid
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO template_variables (
+                        firm_id, template_id, variable_name, variable_type, description,
+                        default_value, required, choices, case_field_mapping
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    self.firm_id,
+                    template_id,
+                    variable_name,
+                    variable_type,
+                    description,
+                    default_value,
+                    required,
+                    json.dumps(choices) if choices else None,
+                    case_field_mapping,
+                ))
+                var_id = cursor.fetchone()[0]
+            conn.commit()
+            return var_id
 
     def get_variables(self, template_id: int) -> List[dict]:
         """Get all variable definitions for a template."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM template_variables WHERE template_id = ?",
-                (template_id,)
-            )
-            return [dict(row) for row in cursor.fetchall()]
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM template_variables WHERE template_id = %s AND firm_id = %s",
+                    (template_id, self.firm_id)
+                )
+                rows = cursor.fetchall()
+                # Convert psycopg2 rows to dicts
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in rows]
 
     # =========================================================================
     # Generated Document Tracking
@@ -505,32 +510,37 @@ class TemplatesDatabase:
 
     def log_generation(self, doc: GeneratedDocument) -> int:
         """Log a document generation event."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO generated_documents (
-                    template_id, template_name, case_id, case_name,
-                    client_id, client_name, court, purpose,
-                    variables_used, output_path, generated_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                doc.template_id,
-                doc.template_name,
-                doc.case_id,
-                doc.case_name,
-                doc.client_id,
-                doc.client_name,
-                doc.court,
-                doc.purpose,
-                json.dumps(doc.variables_used),
-                doc.output_path,
-                doc.generated_by,
-            ))
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO generated_documents (
+                        firm_id, template_id, template_name, case_id, case_name,
+                        client_id, client_name, court, purpose,
+                        variables_used, output_path, generated_by
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    doc.firm_id,
+                    doc.template_id,
+                    doc.template_name,
+                    doc.case_id,
+                    doc.case_name,
+                    doc.client_id,
+                    doc.client_name,
+                    doc.court,
+                    doc.purpose,
+                    json.dumps(doc.variables_used),
+                    doc.output_path,
+                    doc.generated_by,
+                ))
 
-            # Increment template usage
-            self.increment_usage(doc.template_id)
+                doc_id = cursor.fetchone()[0]
 
-            return cursor.lastrowid
+                # Increment template usage
+                self.increment_usage(doc.template_id)
+
+            conn.commit()
+            return doc_id
 
     def get_generation_history(
         self,
@@ -539,53 +549,63 @@ class TemplatesDatabase:
         limit: int = 50
     ) -> List[dict]:
         """Get document generation history."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
 
-            query = "SELECT * FROM generated_documents WHERE 1=1"
-            params = []
+                query = "SELECT * FROM generated_documents WHERE firm_id = %s"
+                params = [self.firm_id]
 
-            if template_id:
-                query += " AND template_id = ?"
-                params.append(template_id)
+                if template_id:
+                    query += " AND template_id = %s"
+                    params.append(template_id)
 
-            if case_id:
-                query += " AND case_id = ?"
-                params.append(case_id)
+                if case_id:
+                    query += " AND case_id = %s"
+                    params.append(case_id)
 
-            query += " ORDER BY generated_at DESC LIMIT ?"
-            params.append(limit)
+                query += " ORDER BY generated_at DESC LIMIT %s"
+                params.append(limit)
 
-            cursor.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in rows]
 
     # =========================================================================
     # Helpers
     # =========================================================================
 
-    def _row_to_template(self, row: sqlite3.Row) -> Template:
+    def _row_to_template(self, row) -> Template:
         """Convert a database row to a Template object."""
+        columns = [desc[0] for desc in row.cursor.description] if hasattr(row, 'cursor') else None
+        if columns:
+            row_dict = dict(zip(columns, row))
+        else:
+            # Assume row is already a dict-like object from cursor
+            row_dict = dict(row) if hasattr(row, '__iter__') else row
+
         return Template(
-            id=row["id"],
-            name=row["name"],
-            category=TemplateCategory(row["category"]),
-            description=row["description"] or "",
-            court_type=row["court_type"],
-            case_types=json.loads(row["case_types"] or "[]"),
-            jurisdiction=row["jurisdiction"],
-            status=TemplateStatus(row["status"]),
-            file_path=row["file_path"],
-            content_hash=row["content_hash"],
-            variables=json.loads(row["variables"] or "[]"),
-            tags=json.loads(row["tags"] or "[]"),
-            created_by=row["created_by"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            version=row["version"],
-            usage_count=row["usage_count"],
+            id=row_dict.get("id"),
+            firm_id=row_dict.get("firm_id"),
+            name=row_dict.get("name", ""),
+            category=TemplateCategory(row_dict.get("category", "other")),
+            description=row_dict.get("description") or "",
+            court_type=row_dict.get("court_type"),
+            case_types=json.loads(row_dict.get("case_types") or "[]"),
+            jurisdiction=row_dict.get("jurisdiction"),
+            status=TemplateStatus(row_dict.get("status", "active")),
+            file_path=row_dict.get("file_path"),
+            content_hash=row_dict.get("content_hash"),
+            variables=json.loads(row_dict.get("variables") or "[]"),
+            tags=json.loads(row_dict.get("tags") or "[]"),
+            created_by=row_dict.get("created_by"),
+            created_at=row_dict.get("created_at"),
+            updated_at=row_dict.get("updated_at"),
+            version=row_dict.get("version", 1),
+            usage_count=row_dict.get("usage_count", 0),
         )
 
 
-def get_templates_db() -> TemplatesDatabase:
+def get_templates_db(firm_id: Optional[str] = None) -> TemplatesDatabase:
     """Get a TemplatesDatabase instance."""
-    return TemplatesDatabase()
+    return TemplatesDatabase(firm_id=firm_id)

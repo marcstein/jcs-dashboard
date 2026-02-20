@@ -1,7 +1,86 @@
 # JCS Law Firm - MyCase Automation Project
 
 ## Project Overview
-Automated SOP compliance monitoring system for JCS Law Firm using MyCase API integration.
+Automated SOP compliance monitoring system for JCS Law Firm using MyCase API integration. Multi-tenant architecture powered by PostgreSQL.
+
+## Architecture
+
+### Database: PostgreSQL Only (No SQLite)
+All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. There is NO SQLite anywhere in the codebase. Every module connects through the shared `db/connection.py` pool.
+
+**Connection:** Set `DATABASE_URL` env var (e.g., `postgresql://user:pass@host:5432/mycase`)
+
+**Key tables** (all include `firm_id` column):
+- `cached_cases`, `cached_contacts`, `cached_invoices`, `cached_tasks`, `cached_events`, `cached_staff`, `cached_payments` — MyCase API cache
+- `dunning_notices`, `payments`, `case_deadlines`, `attorney_notifications`, `invoice_snapshots`, `case_stage_history` — Tracking/analytics
+- `case_phases`, `phase_history` — Case phase management
+- `payment_promises` — Promise tracking
+- `kpi_snapshots` — Trend analysis
+- `payment_plan_payments`, `outreach_log`, `collections_holds`, `noiw_tracking` — Collections
+- `firms`, `templates`, `generated_documents` — Document engine
+- `attorneys` — Attorney profiles
+
+### Project Structure
+```
+├── commands/              # CLI command groups (Click)
+│   ├── __init__.py
+│   ├── collections.py     # Dunning, aging reports, preview
+│   ├── documents.py       # Document generation, templates, attorneys
+│   ├── notifications.py   # Slack/Email/SMS alerts
+│   ├── phases.py          # Case phase tracking
+│   ├── plans.py           # Payment plans, NOIW pipeline
+│   ├── promises.py        # Payment promise tracking
+│   ├── quality.py         # Case quality audits
+│   ├── scheduler.py       # Automated task scheduling
+│   ├── sop.py             # Staff SOP reports
+│   ├── sync.py            # Data sync from MyCase
+│   ├── tasks.py           # Task SLA, overdue tracking
+│   └── trends.py          # KPI trend analysis
+├── db/                    # Database layer (PostgreSQL only)
+│   ├── __init__.py
+│   ├── connection.py      # Connection pool, get_connection()
+│   ├── cache.py           # MyCase API cache (multi-tenant)
+│   ├── tracking.py        # Dunning, payments, deadlines, notifications
+│   ├── phases.py          # Case phase schema and queries
+│   ├── promises.py        # Payment promise schema and queries
+│   ├── trends.py          # KPI snapshot schema and queries
+│   ├── documents.py       # Template storage, FTS
+│   └── attorneys.py       # Attorney profile schema and queries
+├── dashboard/             # FastAPI web dashboard
+│   ├── app.py
+│   ├── routes/            # Route handlers split by domain
+│   │   ├── main.py        # Home, staff pages
+│   │   ├── ar.py          # A/R and collections
+│   │   ├── attorneys.py   # Attorney productivity
+│   │   ├── documents.py   # Document generation UI
+│   │   ├── noiw.py        # NOIW pipeline
+│   │   ├── phases.py      # Case phases
+│   │   ├── trends.py      # KPI trends
+│   │   └── ...
+│   ├── models/            # Data access split by domain
+│   │   ├── ar.py
+│   │   ├── attorneys.py
+│   │   ├── tasks.py
+│   │   └── ...
+│   ├── templates/
+│   └── static/
+├── tests/                 # Test suite
+│   ├── conftest.py        # Shared fixtures, test DB setup
+│   ├── test_collections.py
+│   ├── test_phases.py
+│   ├── test_promises.py
+│   ├── test_noiw.py
+│   ├── test_dunning.py
+│   ├── test_cache.py
+│   ├── test_documents.py
+│   └── test_dashboard.py
+├── templates/             # Email/notification templates
+├── reports/               # Generated SOP compliance reports
+├── agent.py               # CLI entry point (thin — registers command groups)
+├── api_client.py          # MyCase API client with OAuth, rate limiting
+├── config.py              # Configuration (DATABASE_URL, env vars)
+└── ...                    # Business logic modules
+```
 
 ## Staff & Roles
 - **Melissa Scarlett** - AR Specialist (collections, payment plans, aging reports)
@@ -10,31 +89,33 @@ Automated SOP compliance monitoring system for JCS Law Firm using MyCase API int
 - **Alison Ehrhard** - Legal Assistant (case tasks, discovery, license filings)
 - **Cole Chadderdon** - Legal Assistant (case tasks, discovery, license filings)
 
-## Key Files
+### Key Staff IDs
+| Staff Member | ID | Role |
+|-------------|-----|------|
+| Tiffany Willis | 31928330 | Senior Paralegal |
+| Alison Ehrhard | 41594387 | Legal Assistant |
+| Cole Chadderdon | 56011402 | Legal Assistant |
 
-### Core Modules
+## Key Modules
+
+### Business Logic
 - `api_client.py` - MyCase API client with OAuth, rate limiting, pagination
-- `agent.py` - CLI entry point using Click framework
 - `kpi_tracker.py` - KPI tracking and reporting
 - `intake_automation.py` - Intake metrics, leads/case tracking
 - `task_sla.py` - Task SLA monitoring, overdue tracking
 - `payment_plans.py` - Payment plan compliance, NOIW pipeline
 - `case_quality.py` - Case quality audits, data integrity checks
-- `scheduler.py` - Automated task scheduling and cron management
 - `promises.py` - Payment promise tracking and monitoring
 - `notifications.py` - Multi-channel notifications (Slack, Email, SMS)
 - `trends.py` - Historical KPI trend analysis
 - `case_phases.py` - Universal 7-phase case management framework
+- `scheduler.py` - Automated task scheduling and cron management
 
-### Database
-- `data/mycase_agent.db` - SQLite database for local tracking
-- `data/case_phases.db` - Case phase tracking and history
-
-### Templates
-- `templates/` - Email/notification templates for SOPs
-
-### Reports
-- `reports/` - Generated SOP compliance reports
+### Document Generation
+- `document_chat.py` - Conversational document generation engine
+- `document_engine.py` - Multi-tenant template database and generation
+- `attorney_profiles.py` - Attorney/firm signature block management
+- `courts_db.py` - Missouri courts and agencies registry
 
 ## API Notes
 
@@ -57,11 +138,13 @@ Automated SOP compliance monitoring system for JCS Law Firm using MyCase API int
 ## Cache & Sync Behavior
 
 ### How Sync Works
-The sync uses **upsert logic** (`INSERT ... ON CONFLICT DO UPDATE`) - records are NEVER deleted:
+The sync uses **upsert logic** (`INSERT ... ON CONFLICT DO UPDATE`) in PostgreSQL — records are NEVER deleted:
 - Records in API but not cache → inserted
 - Records in both and changed → updated
 - Records in both but unchanged → left alone
 - Records in cache but not API → **preserved forever**
+- All cache tables include `firm_id` for multi-tenant isolation
+- Batch operations use `psycopg2.extras.execute_values()` for 10-50x performance
 
 ### Task Data Accumulation
 Because the MyCase API only returns tasks for open cases:
@@ -69,17 +152,6 @@ Because the MyCase API only returns tasks for open cases:
 2. The longer the cache runs, the more complete historical task data becomes
 3. Tasks that were never synced (case closed before cache existed) will never appear
 4. Paralegal metrics show tasks from their active cases at time of sync
-
-### Key Staff IDs
-| Staff Member | ID | Role |
-|-------------|-----|------|
-| Tiffany Willis | 31928330 | Senior Paralegal |
-| Alison Ehrhard | 41594387 | Legal Assistant |
-| Cole Chadderdon | 56011402 | Legal Assistant |
-
-### Cache Files
-- `data/mycase_cache.db` - Main cache database
-- `dashboard/mycase_cache.db` - Dashboard copy (symlinked or copied)
 
 ## Current Metrics (Jan 2026)
 
@@ -285,14 +357,7 @@ Universal 7-phase framework mapping MyCase stages to standardized phases:
 
 ## Configuration
 
-### Slack Notifications
-Set `SLACK_WEBHOOK_URL` environment variable or configure in `data/notifications_config.json`
-
-### Email (SendGrid)
-Set `SENDGRID_API_KEY` environment variable
-
-### SMS (Twilio)
-Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` environment variables
+All configuration via environment variables (see Environment Variables section under Document System). No file-based config — notification preferences stored in PostgreSQL `notification_config` table per firm.
 
 ## Dashboard
 
@@ -328,7 +393,18 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 - **Staff Widgets**: Active cases, tasks done (ratio format), overdue tasks
 - **Firm Tasks Overview**: Open tasks, done this week, overdue count
 
-## Recent Fixes
+## Change Log
+
+### v2.0 — PostgreSQL Migration (In Progress)
+- Removing all SQLite — unified PostgreSQL multi-tenant database layer
+- Split `agent.py` (3,665 lines) into `commands/` package
+- Split `dashboard/models.py` (2,543 lines) into `dashboard/models/` package
+- Split `dashboard/routes.py` (1,154 lines) into `dashboard/routes/` package
+- Added pytest test suite for business logic
+- Migrated FTS5 full-text search to PostgreSQL `tsvector`/`tsquery`
+- Removed legacy `.db` files and duplicate modules
+
+### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
 2. Added `/leads` endpoint support to API client
 3. Added case creation proxy for intake metrics when no leads data
@@ -540,24 +616,31 @@ Different case types use different party terms:
 
 See `docs/API_COST_ANALYSIS.md` for detailed projections.
 
-### Database Tables
+### Database Tables (PostgreSQL)
 
-#### document_engine.db
+#### Document Engine Tables
 - `firms` - Registered law firms
-- `templates` - Imported document templates
-- `templates_fts` - Full-text search index
+- `templates` - Imported document templates (with full-text search via `tsvector`)
 - `generated_documents` - Document generation history
 
-#### attorney_profiles.db
+#### Attorney Tables
 - `attorneys` - Attorney profiles with signature block info
 
 ### Environment Variables
 
 ```bash
+DATABASE_URL=postgresql://user:pass@host:5432/mycase  # Required - PostgreSQL connection
 ANTHROPIC_API_KEY=sk-ant-...  # Required for AI document generation
+MYCASE_CLIENT_ID=...          # MyCase OAuth
+MYCASE_CLIENT_SECRET=...      # MyCase OAuth
+SLACK_WEBHOOK_URL=...         # Slack notifications
+SENDGRID_API_KEY=...          # Email notifications
+TWILIO_ACCOUNT_SID=...        # SMS notifications
+TWILIO_AUTH_TOKEN=...         # SMS notifications
+TWILIO_FROM_NUMBER=...        # SMS notifications
 ```
 
-The API key should be stored in `.env` file in the project root.
+All env vars stored in `.env` file in the project root.
 
 ### Recent Document System Fixes
 1. Fixed FTS5 syntax errors on special characters (commas, periods, parentheses)
@@ -588,11 +671,11 @@ The API key should be stored in `.env` file in the project root.
     - Signature lines, Name:/Address: alignment, and notary sections preserved
 
 ### Template Search Behavior
-The template search uses SQLite FTS5 with these enhancements:
+The template search uses PostgreSQL full-text search (`tsvector`/`tsquery`) with these enhancements:
 - **Synonym expansion**: Alternate legal terms mapped to database names
 - **Stop word removal**: Common words like "I", "need", "a", "the", "please" are filtered out
 - **OR logic**: Remaining words use OR matching (find ANY of the words)
-- **Fallback**: If FTS fails, falls back to LIKE search on name field
+- **Fallback**: If full-text search fails, falls back to ILIKE search on name field
 
 **Synonym mappings** (alternate name → database name):
 | User Says | Searches For |
@@ -612,3 +695,64 @@ The template search uses SQLite FTS5 with these enhancements:
 - "I need a bond assignment" → "bond OR assignment"
 - "assignment of cash bond" → "bond OR assignment" (synonym expanded)
 - "mtd for Jefferson County" → "motion OR dismiss OR jefferson OR county"
+
+---
+
+## Architecture Migration: SQLite → PostgreSQL
+
+### Status: IN PROGRESS
+
+This project is migrating from a mixed SQLite/PostgreSQL codebase to **PostgreSQL only** with full multi-tenant support. The goals are:
+
+1. **Remove all SQLite** — no `import sqlite3` anywhere, no `.db` files, no file-based databases
+2. **Single database layer** — one `db/` package replaces `cache.py`, `cache_mt.py`, `database.py`, `pg_database.py`
+3. **Multi-tenant everywhere** — all tables use `firm_id`, all queries scoped by tenant
+4. **Break up monoliths** — `agent.py` (3,665 lines) → thin entry point + `commands/` package; `dashboard/models.py` (2,543 lines) → `dashboard/models/` package
+5. **Add test coverage** — pytest suite covering business logic, especially financial calculations, state machines, and NOIW pipeline
+6. **Clean up artifacts** — remove legacy `.db` files, duplicate modules, debug scripts
+
+### Files to Remove After Migration
+- `cache.py` — replaced by `db/cache.py` (PostgreSQL)
+- `database.py` — replaced by `db/tracking.py` (PostgreSQL)
+- `pg_database.py` — absorbed into `db/` package
+- `cache_mt.py` — absorbed into `db/cache.py`
+- `migrate_to_postgres.py` — one-time migration script, archive after use
+- `data/*.db` — all SQLite database files
+- `dashboard/mycase_cache.db` — symlinked SQLite copy
+- Root-level empty `.db` files: `mycase.db`, `mycase_cache.db`, `mycase_data.db`
+- Legacy profiles: `data/attorney_profiles_new.db`, `data/attorney_profiles_v2.db`
+
+### Migration Order
+1. **`db/` package** — Create unified PostgreSQL database layer with connection pool
+2. **`commands/` package** — Split `agent.py` into command groups
+3. **Business logic modules** — Update each to use `db/` instead of `sqlite3`
+4. **Dashboard** — Split `models.py` and `routes.py`, connect to PostgreSQL
+5. **Document engine** — Migrate FTS5 → PostgreSQL `tsvector`/`tsquery`
+6. **Tests** — Add pytest coverage for each migrated module
+7. **Cleanup** — Remove SQLite files, legacy modules, debug scripts
+
+### Development Standards
+
+#### Database Access
+- All database access goes through `db/connection.py` which manages a `psycopg2` connection pool
+- Use `get_connection()` context manager — never create connections directly
+- All queries MUST include `firm_id` in WHERE clauses (multi-tenant isolation)
+- Use `%s` parameter placeholders (PostgreSQL), never f-strings or string formatting
+- Bulk operations use `psycopg2.extras.execute_values()` for performance
+
+#### CLI Structure
+- `agent.py` is a thin entry point that registers Click command groups from `commands/`
+- Each file in `commands/` defines one `@click.group()` with related subcommands
+- Command functions should be thin — call into business logic modules, format output with Rich
+
+#### Testing
+- Tests in `tests/` using pytest
+- `conftest.py` provides test database fixtures (isolated PostgreSQL schema or test database)
+- Every module with financial calculations, state transitions, or SLA logic MUST have tests
+- Run: `uv run pytest tests/ -v`
+
+#### Code Organization Rules
+- No module should exceed ~500 lines — split into submodules if growing beyond that
+- No `import sqlite3` anywhere — if you see it, it's a bug
+- Dashboard routes grouped by domain in `dashboard/routes/`
+- Dashboard data access grouped by domain in `dashboard/models/`

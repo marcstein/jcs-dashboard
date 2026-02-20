@@ -9,18 +9,16 @@ A scalable system for law firms to:
 This replaces hard-coded generators with a template-driven approach
 that works for ANY firm's documents.
 
-Supports both PostgreSQL (production) and SQLite (local dev).
+PostgreSQL-based multi-tenant architecture.
 """
 
-import sqlite3
 import hashlib
 import json
 import re
 import io
 from datetime import datetime, date
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple, Union
-from contextlib import contextmanager
+from typing import List, Dict, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 from copy import deepcopy
@@ -34,21 +32,8 @@ except ImportError:
     Document = None
 
 from config import DATA_DIR
-
-# Import PostgreSQL manager (falls back to SQLite if not configured)
-try:
-    from pg_database import get_pg_db, PostgresManager
-    import psycopg2.extras
-    PG_AVAILABLE = True
-except ImportError:
-    PG_AVAILABLE = False
-    get_pg_db = None
-    PostgresManager = None
-    psycopg2 = None
-
-
-# Database location (SQLite fallback)
-ENGINE_DB = DATA_DIR / "document_engine.db"
+from db import documents as db_docs
+from db import attorneys as db_attorneys
 
 
 class DocumentCategory(Enum):
@@ -160,147 +145,11 @@ class DocumentEngine:
         'current_date': {'source': 'computed', 'field': 'today'},
     }
 
-    def __init__(self, db_path: Path = ENGINE_DB):
-        self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Use PostgreSQL if available and configured
-        self._pg_db = None
-        if PG_AVAILABLE:
-            try:
-                self._pg_db = get_pg_db()
-                if self._pg_db.is_postgres:
-                    # PostgreSQL is active - no need to init SQLite
-                    return
-            except Exception:
-                self._pg_db = None
-
-        # Fall back to SQLite
-        self._init_database()
-
-    @property
-    def is_postgres(self) -> bool:
-        """Check if using PostgreSQL."""
-        return self._pg_db is not None and self._pg_db.is_postgres
-
-    @contextmanager
-    def _get_connection(self):
-        """Context manager for database connections (PostgreSQL or SQLite)."""
-        if self.is_postgres:
-            with self._pg_db.get_connection() as conn:
-                yield conn
-        else:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            try:
-                yield conn
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
-
-    def _placeholder(self) -> str:
-        """Get the appropriate SQL placeholder for current database."""
-        return '%s' if self.is_postgres else '?'
-
-    def _convert_query(self, query: str) -> str:
-        """Convert SQLite ? placeholders to PostgreSQL %s if needed."""
-        if self.is_postgres:
-            return query.replace('?', '%s')
-        return query
-
-    def _get_cursor(self, conn):
-        """Get a cursor that returns dict-like results for both PostgreSQL and SQLite."""
-        if self.is_postgres:
-            # Use RealDictCursor for PostgreSQL so rows are dicts
-            return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        else:
-            # SQLite already uses Row factory from _get_connection
-            return conn.cursor()
-
-    def _init_database(self):
-        """Initialize database tables."""
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-
-            # Firms table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS firms (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    settings TEXT,  -- JSON
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            # Templates table - stores the actual .docx files
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    firm_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    original_filename TEXT,
-                    category TEXT NOT NULL,
-                    subcategory TEXT,
-                    court_type TEXT,
-                    jurisdiction TEXT,
-                    case_types TEXT,        -- JSON array
-                    variables TEXT,         -- JSON array of variable names
-                    variable_mappings TEXT, -- JSON object of variable -> source mappings
-                    tags TEXT,              -- JSON array
-                    file_content BLOB,      -- The actual .docx file
-                    file_hash TEXT,
-                    file_size INTEGER,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_used TIMESTAMP,
-                    usage_count INTEGER DEFAULT 0,
-                    FOREIGN KEY (firm_id) REFERENCES firms(id),
-                    UNIQUE(firm_id, name)
-                )
-            """)
-
-            # Generated documents audit log
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS generated_documents (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    firm_id TEXT NOT NULL,
-                    template_id INTEGER NOT NULL,
-                    template_name TEXT,
-                    case_id TEXT,
-                    client_name TEXT,
-                    variables_used TEXT,    -- JSON
-                    generated_by TEXT,
-                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    output_filename TEXT,
-                    FOREIGN KEY (firm_id) REFERENCES firms(id),
-                    FOREIGN KEY (template_id) REFERENCES templates(id)
-                )
-            """)
-
-            # Full-text search for templates
-            cursor.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS templates_fts USING fts5(
-                    name, original_filename, category, subcategory,
-                    court_type, jurisdiction, tags,
-                    content='templates',
-                    content_rowid='id'
-                )
-            """)
-
-            # FTS triggers
-            cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS templates_ai AFTER INSERT ON templates BEGIN
-                    INSERT INTO templates_fts(rowid, name, original_filename, category,
-                        subcategory, court_type, jurisdiction, tags)
-                    VALUES (new.id, new.name, new.original_filename, new.category,
-                        new.subcategory, new.court_type, new.jurisdiction, new.tags);
-                END
-            """)
-
-            conn.commit()
+    def __init__(self):
+        """Initialize the document engine with PostgreSQL database."""
+        # Ensure tables exist
+        db_docs.ensure_documents_tables()
+        db_attorneys.ensure_attorneys_tables()
 
     # =========================================================================
     # Firm Management
@@ -308,31 +157,12 @@ class DocumentEngine:
 
     def register_firm(self, firm_id: str, name: str, settings: Dict = None) -> bool:
         """Register a new firm."""
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            try:
-                cursor.execute(
-                    "INSERT INTO firms (id, name, settings) VALUES (?, ?, ?)",
-                    (firm_id, name, json.dumps(settings or {}))
-                )
-                return True
-            except sqlite3.IntegrityError:
-                return False  # Firm already exists
+        db_docs.upsert_firm(firm_id, name, settings or {})
+        return True
 
     def get_firm(self, firm_id: str) -> Optional[Dict]:
         """Get firm information."""
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            cursor.execute("SELECT * FROM firms WHERE id = ?", (firm_id,))
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'id': row['id'],
-                    'name': row['name'],
-                    'settings': json.loads(row['settings'] or '{}'),
-                    'created_at': row['created_at'],
-                }
-            return None
+        return db_docs.get_firm(firm_id)
 
     # =========================================================================
     # Template Import & Analysis
@@ -547,31 +377,22 @@ class DocumentEngine:
         file_hash = hashlib.sha256(file_content).hexdigest()
 
         # Store in database
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            cursor.execute("""
-                INSERT OR REPLACE INTO templates (
-                    firm_id, name, original_filename, category, subcategory,
-                    court_type, jurisdiction, case_types, variables,
-                    variable_mappings, tags, file_content, file_hash, file_size
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                firm_id,
-                name,
-                filename,
-                category.value,
-                subcategory,
-                court_type,
-                jurisdiction,
-                json.dumps([]),  # case_types - can be set later
-                json.dumps(variable_names),
-                json.dumps(variable_mappings),
-                json.dumps(tags or []),
-                file_content,
-                file_hash,
-                len(file_content),
-            ))
-            template_id = cursor.lastrowid
+        template_id = db_docs.insert_template(
+            firm_id=firm_id,
+            name=name,
+            original_filename=filename,
+            category=category.value,
+            subcategory=subcategory,
+            court_type=court_type,
+            jurisdiction=jurisdiction,
+            case_types=None,  # can be set later
+            variables=variable_names,
+            variable_mappings=variable_mappings,
+            tags=json.dumps(tags or []),
+            file_content=file_content,
+            file_hash=file_hash,
+            file_size=len(file_content),
+        )
 
         return template_id, detected_vars
 
@@ -633,14 +454,8 @@ class DocumentEngine:
 
     def get_template(self, template_id: int) -> Optional[FirmTemplate]:
         """Get a template by ID."""
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            cursor.execute(
-                "SELECT * FROM templates WHERE id = ?",
-                (template_id,)
-            )
-            row = cursor.fetchone()
-            return self._row_to_template(row) if row else None
+        row = db_docs.get_template(template_id)
+        return self._row_to_template(row) if row else None
 
     def find_template(
         self,
@@ -655,31 +470,38 @@ class DocumentEngine:
 
         Prioritizes more specific matches (with jurisdiction) over general ones.
         """
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
+        # Get all active templates for the firm
+        templates = db_docs.get_templates(firm_id, category=category, active_only=True)
 
-            # Build query with specificity scoring
-            query = """
-                SELECT *,
-                    (CASE WHEN jurisdiction = ? THEN 10 ELSE 0 END) +
-                    (CASE WHEN court_type = ? THEN 5 ELSE 0 END) +
-                    (CASE WHEN category = ? THEN 3 ELSE 0 END)
-                    AS specificity
-                FROM templates
-                WHERE firm_id = ?
-                  AND is_active = TRUE
-            """
-            params = [jurisdiction, court_type, category, firm_id]
+        if not templates:
+            return None
 
+        # Score templates by specificity
+        best_template = None
+        best_score = -1
+
+        for row in templates:
+            score = 0
+            if jurisdiction and row.get('jurisdiction') == jurisdiction:
+                score += 10
+            if court_type and row.get('court_type') == court_type:
+                score += 5
+            if category and row.get('category') == category:
+                score += 3
+
+            # If name filter, check it matches
             if name:
-                query += " AND (name LIKE ? OR original_filename LIKE ?)"
-                params.extend([f"%{name}%", f"%{name}%"])
+                if name.lower() not in row.get('name', '').lower() and \
+                   name.lower() not in row.get('original_filename', '').lower():
+                    continue
 
-            query += " ORDER BY specificity DESC, usage_count DESC LIMIT 1"
+            # Use score and usage count for ranking
+            combined_score = (score * 1000) + row.get('usage_count', 0)
+            if combined_score > best_score:
+                best_score = combined_score
+                best_template = row
 
-            cursor.execute(query, params)
-            row = cursor.fetchone()
-            return self._row_to_template(row) if row else None
+        return self._row_to_template(best_template) if best_template else None
 
     def search_templates(
         self,
@@ -687,125 +509,14 @@ class DocumentEngine:
         query: str,
         limit: int = 20
     ) -> List[FirmTemplate]:
-        """Full-text search for templates."""
-        # Synonym mappings: alternate names -> database template keywords
-        # Maps common legal terminology to how templates are named in the database
-        synonyms = {
-            'cash bond': 'bond assignment',
-            'assignment of cash bond': 'bond assignment',
-            'cash bond assignment': 'bond assignment',
-            'nol pros': 'nolle prosequi',
-            'nolle pros': 'nolle prosequi',
-            'mtd': 'motion to dismiss',
-            'mtc': 'motion to continue',
-            'eoa': 'entry of appearance',
-            'noh': 'notice of hearing',
-            'rog': 'interrogatories',
-            'rogs': 'interrogatories',
-            'rfp': 'request for production',
-            'rfa': 'request for admission',
-            'subp': 'subpoena',
-            'dor': 'director of revenue',
-        }
-
-        # Common stop words to remove from search queries
-        stop_words = {
-            'i', 'me', 'my', 'we', 'our', 'you', 'your', 'a', 'an', 'the',
-            'need', 'want', 'looking', 'for', 'please', 'can', 'could',
-            'would', 'like', 'get', 'make', 'create', 'generate', 'draft',
-            'prepare', 'write', 'give', 'find', 'help', 'with', 'some',
-            'document', 'documents', 'template', 'templates', 'form', 'forms'
-        }
-
-        # Apply synonym expansions first
-        search_query = query.lower()
-        for alt_name, db_name in synonyms.items():
-            if alt_name in search_query:
-                search_query = search_query.replace(alt_name, db_name)
-
-        # Escape special FTS5 characters to prevent syntax errors
-        # FTS5 special chars: AND OR NOT ( ) " * ^
-        # Also handle common punctuation that causes issues
-        fts_query = search_query
-        # Remove or escape problematic characters
-        for char in ['(', ')', ',', '.', ':', ';', '"', "'", '*', '^']:
-            fts_query = fts_query.replace(char, ' ')
-
-        # Remove stop words and clean up
-        words = [w for w in fts_query.split() if w not in stop_words and len(w) > 1]
-
-        # Use OR logic for better matching (find any of the words)
-        fts_query = ' OR '.join(words) if words else ''
-
-        if not fts_query.strip():
-            return []
-
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            try:
-                if self.is_postgres:
-                    # PostgreSQL full-text search with tsvector
-                    # Use AND logic so all search terms must match
-                    # This prevents "PH Waiver" from matching "waiver of arraignment"
-                    pg_query = ' & '.join(words)
-
-                    # Check if query contains a county name
-                    county_words = ['county', 'jefferson', 'st louis', 'saint louis', 'jackson',
-                                    'clay', 'platte', 'cass', 'cole', 'greene', 'boone',
-                                    'buchanan', 'jasper', 'franklin', 'lincoln', 'warren',
-                                    'ste genevieve', 'cape girardeau', 'scott', 'perry']
-                    has_county = any(cw in search_query for cw in county_words)
-
-                    if has_county:
-                        # If county specified, search normally
-                        cursor.execute("""
-                            SELECT * FROM templates
-                            WHERE firm_id = %s
-                              AND is_active = TRUE
-                              AND to_tsvector('english', name || ' ' || COALESCE(category, '') || ' ' || COALESCE(tags, ''))
-                                  @@ to_tsquery('english', %s)
-                            ORDER BY ts_rank(to_tsvector('english', name), to_tsquery('english', %s)) DESC
-                            LIMIT %s
-                        """, (firm_id, pg_query, pg_query, limit))
-                    else:
-                        # If no county specified, prefer shorter (more generic) template names
-                        cursor.execute("""
-                            SELECT * FROM templates
-                            WHERE firm_id = %s
-                              AND is_active = TRUE
-                              AND to_tsvector('english', name || ' ' || COALESCE(category, '') || ' ' || COALESCE(tags, ''))
-                                  @@ to_tsquery('english', %s)
-                            ORDER BY LENGTH(name) ASC,
-                                     ts_rank(to_tsvector('english', name), to_tsquery('english', %s)) DESC
-                            LIMIT %s
-                        """, (firm_id, pg_query, pg_query, limit))
-                else:
-                    # SQLite FTS5 search
-                    cursor.execute("""
-                        SELECT t.* FROM templates t
-                        JOIN templates_fts fts ON t.id = fts.rowid
-                        WHERE t.firm_id = ?
-                          AND t.is_active = TRUE
-                          AND templates_fts MATCH ?
-                        ORDER BY rank
-                        LIMIT ?
-                    """, (firm_id, fts_query, limit))
-                return [self._row_to_template(row) for row in cursor.fetchall()]
-            except Exception as e:
-                # If FTS fails, fall back to LIKE search
-                like_query = self._convert_query("""
-                    SELECT * FROM templates
-                    WHERE firm_id = ?
-                      AND is_active = TRUE
-                      AND (name ILIKE ? OR category ILIKE ?)
-                    ORDER BY usage_count DESC
-                    LIMIT ?
-                """)
-                # PostgreSQL uses ILIKE for case-insensitive, SQLite LIKE is case-insensitive by default
-                if not self.is_postgres:
-                    like_query = like_query.replace('ILIKE', 'LIKE')
-                cursor.execute(like_query, (firm_id, f"%{query}%", f"%{query}%", limit))
-                return [self._row_to_template(row) for row in cursor.fetchall()]
+        """Full-text search for templates using PostgreSQL tsvector."""
+        # Use the db_docs.search_templates function which handles:
+        # - Synonym expansion (cash bond -> bond assignment, etc.)
+        # - Stop word removal
+        # - PostgreSQL full-text search with tsvector
+        # - Fallback to ILIKE search if FTS fails
+        results = db_docs.search_templates(firm_id, query, limit=limit)
+        return [self._row_to_template(row) for row in results]
 
     def list_templates(
         self,
@@ -814,21 +525,13 @@ class DocumentEngine:
         limit: int = 100
     ) -> List[FirmTemplate]:
         """List templates for a firm."""
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-
-            query = "SELECT * FROM templates WHERE firm_id = ? AND is_active = TRUE"
-            params = [firm_id]
-
-            if category:
-                query += " AND category = ?"
-                params.append(category)
-
-            query += " ORDER BY usage_count DESC, name ASC LIMIT ?"
-            params.append(limit)
-
-            cursor.execute(query, params)
-            return [self._row_to_template(row) for row in cursor.fetchall()]
+        results = db_docs.get_templates(firm_id, category=category, active_only=True)
+        # Sort by usage count DESC, then name ASC, then apply limit
+        results = sorted(
+            results,
+            key=lambda x: (-x.get('usage_count', 0), x.get('name', ''))
+        )[:limit]
+        return [self._row_to_template(row) for row in results]
 
     # =========================================================================
     # Document Generation
@@ -857,19 +560,17 @@ class DocumentEngine:
             raise RuntimeError("python-docx is required for document generation")
 
         # Get template
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            cursor.execute(
-                "SELECT * FROM templates WHERE id = ?",
-                (template_id,)
-            )
-            row = cursor.fetchone()
-            if not row:
-                raise ValueError(f"Template {template_id} not found")
+        row = db_docs.get_template(template_id)
+        if not row:
+            raise ValueError(f"Template {template_id} not found")
 
-            template_content = row['file_content']
-            template_name = row['name']
-            firm_id = row['firm_id']
+        template_content = row['file_content']
+        template_name = row['name']
+        firm_id = row['firm_id']
+
+        # Handle PostgreSQL memoryview for BYTEA
+        if hasattr(template_content, 'tobytes'):
+            template_content = template_content.tobytes()
 
         # Load document
         doc = Document(io.BytesIO(template_content))
@@ -911,29 +612,16 @@ class DocumentEngine:
                 f.write(output_bytes)
             output_filename = output_path.name
 
-        # Log generation
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            cursor.execute("""
-                INSERT INTO generated_documents (
-                    firm_id, template_id, template_name, variables_used,
-                    generated_by, output_filename
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                firm_id,
-                template_id,
-                template_name,
-                json.dumps(variables),
-                generated_by,
-                output_filename,
-            ))
-
-            # Update template usage
-            cursor.execute("""
-                UPDATE templates
-                SET usage_count = usage_count + 1, last_used = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (template_id,))
+        # Log generation and update usage
+        db_docs.record_generated_document(
+            firm_id=firm_id,
+            template_id=template_id,
+            template_name=template_name,
+            variables_used=variables,
+            generated_by=generated_by,
+            output_filename=output_filename,
+        )
+        db_docs.increment_template_usage(template_id)
 
         return output_bytes, output_filename
 
@@ -970,15 +658,12 @@ class DocumentEngine:
     # Helpers
     # =========================================================================
 
-    def _row_to_template(self, row: Union[sqlite3.Row, Dict]) -> FirmTemplate:
-        """Convert database row to FirmTemplate (works with dict or Row)."""
-        # Handle both dict (PostgreSQL) and Row (SQLite)
+    def _row_to_template(self, row: Dict) -> FirmTemplate:
+        """Convert database row to FirmTemplate."""
         def get(key, default=None):
-            if isinstance(row, dict):
-                return row.get(key, default)
-            return row[key] if row[key] is not None else default
+            return row.get(key, default)
 
-        # Parse JSON fields - PostgreSQL returns native Python objects, SQLite returns strings
+        # Parse JSON fields - PostgreSQL returns native Python objects
         def parse_json(val, default):
             if val is None:
                 return default
@@ -1009,19 +694,14 @@ class DocumentEngine:
 
     def get_template_content(self, template_id: int) -> Optional[bytes]:
         """Get the raw .docx content for a template."""
-        with self._get_connection() as conn:
-            cursor = self._get_cursor(conn)
-            query = self._convert_query("SELECT file_content FROM templates WHERE id = ?")
-            cursor.execute(query, (template_id,))
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            # Handle both dict (PostgreSQL) and Row (SQLite)
-            content = row['file_content'] if isinstance(row, dict) else row[0]
-            # PostgreSQL returns memoryview for BYTEA, convert to bytes
-            if hasattr(content, 'tobytes'):
-                content = content.tobytes()
-            return content
+        row = db_docs.get_template(template_id)
+        if row is None:
+            return None
+        content = row['file_content']
+        # PostgreSQL returns memoryview for BYTEA, convert to bytes
+        if hasattr(content, 'tobytes'):
+            content = content.tobytes()
+        return content
 
 
 # =========================================================================

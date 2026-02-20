@@ -1,7 +1,7 @@
 """
 MyCase Sync Manager
 
-Orchestrates syncing data from MyCase API to local cache.
+Orchestrates syncing data from MyCase API to PostgreSQL cache.
 Supports both full sync and incremental updates by comparing
 updated_at timestamps between API and cache.
 """
@@ -11,7 +11,22 @@ from typing import Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 
 from api_client import get_client, MyCaseClient
-from cache import get_cache, MyCaseCache
+from db.cache import (
+    batch_upsert_cases,
+    batch_upsert_contacts,
+    batch_upsert_clients,
+    batch_upsert_invoices,
+    batch_upsert_events,
+    batch_upsert_tasks,
+    batch_upsert_staff,
+    batch_upsert_payments,
+    batch_upsert_time_entries,
+    batch_upsert_documents,
+    get_cached_count,
+    get_cached_updated_at,
+    update_sync_status,
+)
+from db.connection import get_connection
 
 
 @dataclass
@@ -33,7 +48,7 @@ class SyncResult:
 
 class SyncManager:
     """
-    Manages syncing MyCase API data to local cache.
+    Manages syncing MyCase API data to PostgreSQL cache.
 
     Strategies:
     - Full sync: Fetch all records and update cache (slow but complete)
@@ -50,9 +65,16 @@ class SyncManager:
     - Provides accurate change detection for notifications
     """
 
-    def __init__(self, client: MyCaseClient = None, cache: MyCaseCache = None):
+    def __init__(self, client: MyCaseClient = None, firm_id: str = None):
+        """
+        Initialize sync manager.
+
+        Args:
+            client: MyCase API client (default: create new)
+            firm_id: Firm ID for multi-tenant isolation (default: 'default')
+        """
         self.client = client or get_client()
-        self.cache = cache or get_cache()
+        self.firm_id = firm_id or "default"
 
     def sync_all(
         self,
@@ -143,17 +165,18 @@ class SyncManager:
             raise ValueError(f"Unknown entity type: {entity_type}")
 
         # Check if we need a full sync
-        needs_full = force_full or self.cache.needs_full_sync(entity_type, max_cache_age_hours)
+        needs_full = force_full or self._needs_full_sync(entity_type, max_cache_age_hours)
 
         # Get cached updated_at timestamps for comparison
-        cached_timestamps = self.cache.get_cached_updated_at(entity_type)
+        cached_timestamps = get_cached_updated_at(self.firm_id, entity_type)
 
         # Perform sync
         result = sync_methods[entity_type](cached_timestamps, needs_full)
         result.duration_seconds = time.time() - start_time
 
         # Update sync metadata
-        self.cache.update_sync_status(
+        update_sync_status(
+            firm_id=self.firm_id,
             entity_type=entity_type,
             total_records=result.total_in_cache,
             sync_duration=result.duration_seconds,
@@ -163,9 +186,26 @@ class SyncManager:
 
         return result
 
+    def _needs_full_sync(self, entity_type: str, max_cache_age_hours: int) -> bool:
+        """Check if a full sync is needed based on cache age."""
+        from db.cache import get_sync_status
+
+        status = get_sync_status(self.firm_id, entity_type)
+        if status is None:
+            return True
+
+        last_sync = status.get('last_full_sync') or status.get('last_incremental_sync')
+        if last_sync is None:
+            return True
+
+        if isinstance(last_sync, str):
+            last_sync = datetime.fromisoformat(last_sync)
+
+        age_hours = (datetime.utcnow() - last_sync).total_seconds() / 3600
+        return age_hours > max_cache_age_hours
+
     def _sync_cases(self, cached_timestamps: Dict[int, str], full_sync: bool) -> SyncResult:
         """Sync cases from API to cache."""
-        # Fetch all cases from API
         print("  Fetching cases from API...")
         cases = self.client.get_all_pages(
             self.client.get_cases,
@@ -174,6 +214,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for case in cases:
             case_id = case.get('id')
@@ -181,20 +222,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(case_id)
 
             if cached_updated is None:
-                # New record
-                self.cache.upsert_case(case)
                 inserted += 1
+                to_upsert.append(case)
             elif api_updated != cached_updated:
-                # Updated record
-                self.cache.upsert_case(case)
                 updated += 1
+                to_upsert.append(case)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_cases(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='cases',
             total_in_api=len(cases),
-            total_in_cache=self.cache.get_cached_count('cases'),
+            total_in_cache=get_cached_count(self.firm_id, 'cases'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -211,6 +253,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for contact in contacts:
             contact_id = contact.get('id')
@@ -218,18 +261,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(contact_id)
 
             if cached_updated is None:
-                self.cache.upsert_contact(contact)
                 inserted += 1
+                to_upsert.append(contact)
             elif api_updated != cached_updated:
-                self.cache.upsert_contact(contact)
                 updated += 1
+                to_upsert.append(contact)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_contacts(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='contacts',
             total_in_api=len(contacts),
-            total_in_cache=self.cache.get_cached_count('contacts'),
+            total_in_cache=get_cached_count(self.firm_id, 'contacts'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -246,6 +292,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for client in clients:
             client_id = client.get('id')
@@ -253,18 +300,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(client_id)
 
             if cached_updated is None:
-                self.cache.upsert_client(client)
                 inserted += 1
+                to_upsert.append(client)
             elif api_updated != cached_updated:
-                self.cache.upsert_client(client)
                 updated += 1
+                to_upsert.append(client)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_clients(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='clients',
             total_in_api=len(clients),
-            total_in_cache=self.cache.get_cached_count('clients'),
+            total_in_cache=get_cached_count(self.firm_id, 'clients'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -281,6 +331,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for invoice in invoices:
             invoice_id = invoice.get('id')
@@ -288,18 +339,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(invoice_id)
 
             if cached_updated is None:
-                self.cache.upsert_invoice(invoice)
                 inserted += 1
+                to_upsert.append(invoice)
             elif api_updated != cached_updated:
-                self.cache.upsert_invoice(invoice)
                 updated += 1
+                to_upsert.append(invoice)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_invoices(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='invoices',
             total_in_api=len(invoices),
-            total_in_cache=self.cache.get_cached_count('invoices'),
+            total_in_cache=get_cached_count(self.firm_id, 'invoices'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -316,6 +370,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for event in events:
             event_id = event.get('id')
@@ -323,18 +378,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(event_id)
 
             if cached_updated is None:
-                self.cache.upsert_event(event)
                 inserted += 1
+                to_upsert.append(event)
             elif api_updated != cached_updated:
-                self.cache.upsert_event(event)
                 updated += 1
+                to_upsert.append(event)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_events(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='events',
             total_in_api=len(events),
-            total_in_cache=self.cache.get_cached_count('events'),
+            total_in_cache=get_cached_count(self.firm_id, 'events'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -351,6 +409,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for task in tasks:
             task_id = task.get('id')
@@ -358,18 +417,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(task_id)
 
             if cached_updated is None:
-                self.cache.upsert_task(task)
                 inserted += 1
+                to_upsert.append(task)
             elif api_updated != cached_updated:
-                self.cache.upsert_task(task)
                 updated += 1
+                to_upsert.append(task)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_tasks(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='tasks',
             total_in_api=len(tasks),
-            total_in_cache=self.cache.get_cached_count('tasks'),
+            total_in_cache=get_cached_count(self.firm_id, 'tasks'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -383,6 +445,7 @@ class SyncManager:
         staff_list = self.client.get_staff()
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for staff in staff_list:
             staff_id = staff.get('id')
@@ -390,18 +453,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(staff_id)
 
             if cached_updated is None:
-                self.cache.upsert_staff(staff)
                 inserted += 1
+                to_upsert.append(staff)
             elif api_updated != cached_updated:
-                self.cache.upsert_staff(staff)
                 updated += 1
+                to_upsert.append(staff)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_staff(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='staff',
             total_in_api=len(staff_list),
-            total_in_cache=self.cache.get_cached_count('staff'),
+            total_in_cache=get_cached_count(self.firm_id, 'staff'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -418,6 +484,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for payment in payments:
             payment_id = payment.get('id')
@@ -425,18 +492,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(payment_id)
 
             if cached_updated is None:
-                self.cache.upsert_payment(payment)
                 inserted += 1
+                to_upsert.append(payment)
             elif api_updated != cached_updated:
-                self.cache.upsert_payment(payment)
                 updated += 1
+                to_upsert.append(payment)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_payments(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='payments',
             total_in_api=len(payments),
-            total_in_cache=self.cache.get_cached_count('payments'),
+            total_in_cache=get_cached_count(self.firm_id, 'payments'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -453,6 +523,7 @@ class SyncManager:
         )
 
         inserted, updated, unchanged = 0, 0, 0
+        to_upsert = []
 
         for entry in entries:
             entry_id = entry.get('id')
@@ -460,18 +531,21 @@ class SyncManager:
             cached_updated = cached_timestamps.get(entry_id)
 
             if cached_updated is None:
-                self.cache.upsert_time_entry(entry)
                 inserted += 1
+                to_upsert.append(entry)
             elif api_updated != cached_updated:
-                self.cache.upsert_time_entry(entry)
                 updated += 1
+                to_upsert.append(entry)
             else:
                 unchanged += 1
+
+        if to_upsert:
+            batch_upsert_time_entries(self.firm_id, to_upsert)
 
         return SyncResult(
             entity_type='time_entries',
             total_in_api=len(entries),
-            total_in_cache=self.cache.get_cached_count('time_entries'),
+            total_in_cache=get_cached_count(self.firm_id, 'time_entries'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -480,22 +554,22 @@ class SyncManager:
 
     def _sync_documents(self, cached_timestamps: Dict[int, str], full_sync: bool) -> SyncResult:
         """Sync documents from API to cache (fetches per-case)."""
-        import sqlite3
-
         # Get all case IDs from cache
         print("  Fetching documents for all cases...")
-        with self.cache._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             # Only sync documents for 2025 cases to limit API calls
             cursor.execute("""
                 SELECT id FROM cached_cases
-                WHERE strftime('%Y', created_at) = '2025'
+                WHERE firm_id = %s
+                AND EXTRACT(YEAR FROM created_at) = 2025
                 ORDER BY created_at DESC
-            """)
+            """, (self.firm_id,))
             case_ids = [row['id'] for row in cursor.fetchall()]
 
         inserted, updated, unchanged = 0, 0, 0
         total_docs = 0
+        to_upsert = []
 
         for i, case_id in enumerate(case_ids):
             if i % 50 == 0:
@@ -511,11 +585,11 @@ class SyncManager:
                     cached_updated = cached_timestamps.get(doc_id)
 
                     if cached_updated is None:
-                        self.cache.upsert_document(doc)
                         inserted += 1
+                        to_upsert.append(doc)
                     elif api_updated != cached_updated:
-                        self.cache.upsert_document(doc)
                         updated += 1
+                        to_upsert.append(doc)
                     else:
                         unchanged += 1
 
@@ -524,10 +598,13 @@ class SyncManager:
                 # Skip cases with document fetch errors
                 continue
 
+        if to_upsert:
+            batch_upsert_documents(self.firm_id, to_upsert)
+
         return SyncResult(
             entity_type='documents',
             total_in_api=total_docs,
-            total_in_cache=self.cache.get_cached_count('documents'),
+            total_in_cache=get_cached_count(self.firm_id, 'documents'),
             inserted=inserted,
             updated=updated,
             unchanged=unchanged,
@@ -536,23 +613,28 @@ class SyncManager:
 
     def get_sync_summary(self) -> str:
         """Get a summary of sync status for all entity types."""
-        status_list = self.cache.get_all_sync_status()
+        from db.cache import get_all_sync_status
+
+        status_list = get_all_sync_status(self.firm_id)
 
         if not status_list:
             return "No sync history found. Run a sync first."
 
-        lines = ["MyCase Cache Sync Status", "=" * 50]
+        lines = [f"MyCase Cache Sync Status (Firm: {self.firm_id})", "=" * 50]
 
         for status in status_list:
             entity = status['entity_type']
-            records = status['total_records'] or 0
-            last_sync = status.get('last_incremental_sync') or status.get('last_full_sync')
+            records = status.get('total_records') or 0
+            last_sync = status.get('last_full_sync') or status.get('last_incremental_sync')
             duration = status.get('sync_duration_seconds') or 0
             error = status.get('last_error')
 
             if last_sync:
-                last_sync_dt = datetime.fromisoformat(last_sync)
-                age = datetime.now() - last_sync_dt
+                if isinstance(last_sync, str):
+                    last_sync_dt = datetime.fromisoformat(last_sync)
+                else:
+                    last_sync_dt = last_sync
+                age = datetime.utcnow() - last_sync_dt
                 age_str = f"{age.seconds // 3600}h {(age.seconds % 3600) // 60}m ago"
             else:
                 age_str = "never"
@@ -569,11 +651,11 @@ class SyncManager:
 _sync_manager = None
 
 
-def get_sync_manager() -> SyncManager:
+def get_sync_manager(firm_id: str = None) -> SyncManager:
     """Get or create a singleton sync manager."""
     global _sync_manager
     if _sync_manager is None:
-        _sync_manager = SyncManager()
+        _sync_manager = SyncManager(firm_id=firm_id)
     return _sync_manager
 
 

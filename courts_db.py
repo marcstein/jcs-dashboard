@@ -4,27 +4,19 @@ Courts and Agencies Database
 Manages court and law enforcement agency information for Missouri.
 Used for template selection and variable population in document generation.
 
-Key tables:
+Key tables (PostgreSQL):
 - courts: Circuit courts, municipal courts, administrative agencies
 - agencies: Police departments, sheriff's offices, state patrol
-- prosecutor_contacts: Prosecuting attorney contact information
+
+These are reference data tables shared across all firms (no firm_id needed).
 """
 
-import sqlite3
 import json
-import re
-from datetime import datetime
-from pathlib import Path
 from typing import List, Dict, Optional, Any
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 
-from config import DATA_DIR
-
-
-# Database location
-COURTS_DB = DATA_DIR / "courts.db"
+from db.connection import get_connection
 
 
 class CourtType(Enum):
@@ -116,36 +108,21 @@ class Agency:
 
 
 class CourtsDatabase:
-    """SQLite database for court and agency management."""
+    """PostgreSQL database for court and agency management."""
 
-    def __init__(self, db_path: Path = COURTS_DB):
-        self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self):
+        """Initialize database tables if they don't exist."""
         self._init_tables()
 
-    @contextmanager
-    def _get_connection(self):
-        """Context manager for database connections."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-
     def _init_tables(self):
-        """Initialize database tables."""
-        with self._get_connection() as conn:
+        """Initialize database tables (PostgreSQL)."""
+        with get_connection(autocommit=True) as conn:
             cursor = conn.cursor()
 
             # Courts table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS courts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     name TEXT NOT NULL,
                     short_name TEXT,
                     court_type TEXT NOT NULL,
@@ -172,7 +149,7 @@ class CourtsDatabase:
             # Agencies table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS agencies (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     name TEXT NOT NULL,
                     short_name TEXT,
                     agency_type TEXT NOT NULL,
@@ -192,41 +169,27 @@ class CourtsDatabase:
                 )
             """)
 
-            # Full-text search for courts
+            # Full-text search index for courts
             cursor.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS courts_fts USING fts5(
-                    name, short_name, county, city,
-                    content='courts',
-                    content_rowid='id'
+                CREATE INDEX IF NOT EXISTS courts_fts_idx
+                ON courts USING GIN (
+                    to_tsvector('english', COALESCE(name, '') || ' ' ||
+                                COALESCE(short_name, '') || ' ' ||
+                                COALESCE(county, '') || ' ' ||
+                                COALESCE(city, ''))
                 )
             """)
 
-            # FTS triggers for courts
+            # Full-text search index for agencies
             cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS courts_ai AFTER INSERT ON courts BEGIN
-                    INSERT INTO courts_fts(rowid, name, short_name, county, city)
-                    VALUES (new.id, new.name, new.short_name, new.county, new.city);
-                END
-            """)
-
-            # Full-text search for agencies
-            cursor.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS agencies_fts USING fts5(
-                    name, short_name, county, city,
-                    content='agencies',
-                    content_rowid='id'
+                CREATE INDEX IF NOT EXISTS agencies_fts_idx
+                ON agencies USING GIN (
+                    to_tsvector('english', COALESCE(name, '') || ' ' ||
+                                COALESCE(short_name, '') || ' ' ||
+                                COALESCE(county, '') || ' ' ||
+                                COALESCE(city, ''))
                 )
             """)
-
-            # FTS triggers for agencies
-            cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS agencies_ai AFTER INSERT ON agencies BEGIN
-                    INSERT INTO agencies_fts(rowid, name, short_name, county, city)
-                    VALUES (new.id, new.name, new.short_name, new.county, new.city);
-                END
-            """)
-
-            conn.commit()
 
     # =========================================================================
     # Court CRUD Operations
@@ -234,15 +197,33 @@ class CourtsDatabase:
 
     def add_court(self, court: Court) -> int:
         """Add a new court to the database."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO courts (
+                INSERT INTO courts (
                     name, short_name, court_type, county, city, address,
                     phone, fax, hours, payment_methods, clerk_name, clerk_email,
                     case_number_format, prosecutor_name, prosecutor_address,
                     prosecutor_email, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name, county) DO UPDATE SET
+                    short_name = EXCLUDED.short_name,
+                    court_type = EXCLUDED.court_type,
+                    city = EXCLUDED.city,
+                    address = EXCLUDED.address,
+                    phone = EXCLUDED.phone,
+                    fax = EXCLUDED.fax,
+                    hours = EXCLUDED.hours,
+                    payment_methods = EXCLUDED.payment_methods,
+                    clerk_name = EXCLUDED.clerk_name,
+                    clerk_email = EXCLUDED.clerk_email,
+                    case_number_format = EXCLUDED.case_number_format,
+                    prosecutor_name = EXCLUDED.prosecutor_name,
+                    prosecutor_address = EXCLUDED.prosecutor_address,
+                    prosecutor_email = EXCLUDED.prosecutor_email,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
             """, (
                 court.name,
                 court.short_name,
@@ -262,40 +243,44 @@ class CourtsDatabase:
                 court.prosecutor_email,
                 json.dumps(court.metadata),
             ))
-            return cursor.lastrowid
+            row = cursor.fetchone()
+            return row['id'] if row else None
 
     def get_court(self, court_id: int) -> Optional[Court]:
         """Get a court by ID."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM courts WHERE id = ?", (court_id,))
+            cursor.execute("SELECT * FROM courts WHERE id = %s", (court_id,))
             row = cursor.fetchone()
             return self._row_to_court(row) if row else None
 
     def get_court_by_name(self, name: str, county: Optional[str] = None) -> Optional[Court]:
         """Get a court by name, optionally filtering by county."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             if county:
                 cursor.execute(
-                    "SELECT * FROM courts WHERE name LIKE ? AND county = ?",
+                    "SELECT * FROM courts WHERE name ILIKE %s AND county = %s",
                     (f"%{name}%", county)
                 )
             else:
-                cursor.execute("SELECT * FROM courts WHERE name LIKE ?", (f"%{name}%",))
+                cursor.execute("SELECT * FROM courts WHERE name ILIKE %s", (f"%{name}%",))
             row = cursor.fetchone()
             return self._row_to_court(row) if row else None
 
     def search_courts(self, query: str, limit: int = 20) -> List[Court]:
-        """Full-text search for courts."""
-        with self._get_connection() as conn:
+        """Full-text search for courts using PostgreSQL tsvector."""
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT c.* FROM courts c
-                JOIN courts_fts fts ON c.id = fts.rowid
-                WHERE courts_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
+                SELECT * FROM courts
+                WHERE to_tsvector('english', COALESCE(name, '') || ' ' ||
+                                  COALESCE(short_name, '') || ' ' ||
+                                  COALESCE(county, '') || ' ' ||
+                                  COALESCE(city, ''))
+                    @@ plainto_tsquery('english', %s)
+                ORDER BY name ASC
+                LIMIT %s
             """, (query, limit))
             return [self._row_to_court(row) for row in cursor.fetchall()]
 
@@ -306,21 +291,21 @@ class CourtsDatabase:
         limit: int = 100
     ) -> List[Court]:
         """List courts with optional filters."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             query = "SELECT * FROM courts WHERE 1=1"
             params = []
 
             if court_type:
-                query += " AND court_type = ?"
+                query += " AND court_type = %s"
                 params.append(court_type)
 
             if county:
-                query += " AND county = ?"
+                query += " AND county = %s"
                 params.append(county)
 
-            query += " ORDER BY name ASC LIMIT ?"
+            query += " ORDER BY name ASC LIMIT %s"
             params.append(limit)
 
             cursor.execute(query, params)
@@ -328,7 +313,7 @@ class CourtsDatabase:
 
     def update_court(self, court_id: int, updates: dict) -> bool:
         """Update a court's information."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             set_clauses = []
@@ -336,14 +321,14 @@ class CourtsDatabase:
             for key, value in updates.items():
                 if key in ("payment_methods", "metadata"):
                     value = json.dumps(value)
-                set_clauses.append(f"{key} = ?")
+                set_clauses.append(f"{key} = %s")
                 params.append(value)
 
             set_clauses.append("updated_at = CURRENT_TIMESTAMP")
             params.append(court_id)
 
             cursor.execute(
-                f"UPDATE courts SET {', '.join(set_clauses)} WHERE id = ?",
+                f"UPDATE courts SET {', '.join(set_clauses)} WHERE id = %s",
                 params
             )
             return cursor.rowcount > 0
@@ -354,14 +339,28 @@ class CourtsDatabase:
 
     def add_agency(self, agency: Agency) -> int:
         """Add a new agency to the database."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO agencies (
+                INSERT INTO agencies (
                     name, short_name, agency_type, county, city, address,
                     phone, fax, records_custodian, records_email, records_phone,
                     preservation_email, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name, county) DO UPDATE SET
+                    short_name = EXCLUDED.short_name,
+                    agency_type = EXCLUDED.agency_type,
+                    city = EXCLUDED.city,
+                    address = EXCLUDED.address,
+                    phone = EXCLUDED.phone,
+                    fax = EXCLUDED.fax,
+                    records_custodian = EXCLUDED.records_custodian,
+                    records_email = EXCLUDED.records_email,
+                    records_phone = EXCLUDED.records_phone,
+                    preservation_email = EXCLUDED.preservation_email,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
             """, (
                 agency.name,
                 agency.short_name,
@@ -377,34 +376,38 @@ class CourtsDatabase:
                 agency.preservation_email,
                 json.dumps(agency.metadata),
             ))
-            return cursor.lastrowid
+            row = cursor.fetchone()
+            return row['id'] if row else None
 
     def get_agency(self, agency_id: int) -> Optional[Agency]:
         """Get an agency by ID."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM agencies WHERE id = ?", (agency_id,))
+            cursor.execute("SELECT * FROM agencies WHERE id = %s", (agency_id,))
             row = cursor.fetchone()
             return self._row_to_agency(row) if row else None
 
     def get_agency_by_name(self, name: str) -> Optional[Agency]:
         """Get an agency by name."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM agencies WHERE name LIKE ?", (f"%{name}%",))
+            cursor.execute("SELECT * FROM agencies WHERE name ILIKE %s", (f"%{name}%",))
             row = cursor.fetchone()
             return self._row_to_agency(row) if row else None
 
     def search_agencies(self, query: str, limit: int = 20) -> List[Agency]:
-        """Full-text search for agencies."""
-        with self._get_connection() as conn:
+        """Full-text search for agencies using PostgreSQL tsvector."""
+        with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT a.* FROM agencies a
-                JOIN agencies_fts fts ON a.id = fts.rowid
-                WHERE agencies_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
+                SELECT * FROM agencies
+                WHERE to_tsvector('english', COALESCE(name, '') || ' ' ||
+                                  COALESCE(short_name, '') || ' ' ||
+                                  COALESCE(county, '') || ' ' ||
+                                  COALESCE(city, ''))
+                    @@ plainto_tsquery('english', %s)
+                ORDER BY name ASC
+                LIMIT %s
             """, (query, limit))
             return [self._row_to_agency(row) for row in cursor.fetchall()]
 
@@ -415,21 +418,21 @@ class CourtsDatabase:
         limit: int = 100
     ) -> List[Agency]:
         """List agencies with optional filters."""
-        with self._get_connection() as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
 
             query = "SELECT * FROM agencies WHERE 1=1"
             params = []
 
             if agency_type:
-                query += " AND agency_type = ?"
+                query += " AND agency_type = %s"
                 params.append(agency_type)
 
             if county:
-                query += " AND county = ?"
+                query += " AND county = %s"
                 params.append(county)
 
-            query += " ORDER BY name ASC LIMIT ?"
+            query += " ORDER BY name ASC LIMIT %s"
             params.append(limit)
 
             cursor.execute(query, params)
@@ -439,46 +442,46 @@ class CourtsDatabase:
     # Helpers
     # =========================================================================
 
-    def _row_to_court(self, row: sqlite3.Row) -> Court:
-        """Convert a database row to a Court object."""
+    def _row_to_court(self, row: dict) -> Court:
+        """Convert a database row (dict) to a Court object."""
         return Court(
             id=row["id"],
             name=row["name"],
-            short_name=row["short_name"] or "",
+            short_name=row.get("short_name") or "",
             court_type=CourtType(row["court_type"]),
-            county=row["county"],
-            city=row["city"],
-            address=row["address"] or "",
-            phone=row["phone"] or "",
-            fax=row["fax"] or "",
-            hours=row["hours"] or "",
-            payment_methods=json.loads(row["payment_methods"] or "[]"),
-            clerk_name=row["clerk_name"] or "",
-            clerk_email=row["clerk_email"] or "",
-            case_number_format=row["case_number_format"] or "",
-            prosecutor_name=row["prosecutor_name"] or "",
-            prosecutor_address=row["prosecutor_address"] or "",
-            prosecutor_email=row["prosecutor_email"] or "",
-            metadata=json.loads(row["metadata"] or "{}"),
+            county=row.get("county"),
+            city=row.get("city"),
+            address=row.get("address") or "",
+            phone=row.get("phone") or "",
+            fax=row.get("fax") or "",
+            hours=row.get("hours") or "",
+            payment_methods=json.loads(row.get("payment_methods") or "[]"),
+            clerk_name=row.get("clerk_name") or "",
+            clerk_email=row.get("clerk_email") or "",
+            case_number_format=row.get("case_number_format") or "",
+            prosecutor_name=row.get("prosecutor_name") or "",
+            prosecutor_address=row.get("prosecutor_address") or "",
+            prosecutor_email=row.get("prosecutor_email") or "",
+            metadata=json.loads(row.get("metadata") or "{}"),
         )
 
-    def _row_to_agency(self, row: sqlite3.Row) -> Agency:
-        """Convert a database row to an Agency object."""
+    def _row_to_agency(self, row: dict) -> Agency:
+        """Convert a database row (dict) to an Agency object."""
         return Agency(
             id=row["id"],
             name=row["name"],
-            short_name=row["short_name"] or "",
+            short_name=row.get("short_name") or "",
             agency_type=AgencyType(row["agency_type"]),
-            county=row["county"],
-            city=row["city"],
-            address=row["address"] or "",
-            phone=row["phone"] or "",
-            fax=row["fax"] or "",
-            records_custodian=row["records_custodian"] or "",
-            records_email=row["records_email"] or "",
-            records_phone=row["records_phone"] or "",
-            preservation_email=row["preservation_email"] or "",
-            metadata=json.loads(row["metadata"] or "{}"),
+            county=row.get("county"),
+            city=row.get("city"),
+            address=row.get("address") or "",
+            phone=row.get("phone") or "",
+            fax=row.get("fax") or "",
+            records_custodian=row.get("records_custodian") or "",
+            records_email=row.get("records_email") or "",
+            records_phone=row.get("records_phone") or "",
+            preservation_email=row.get("preservation_email") or "",
+            metadata=json.loads(row.get("metadata") or "{}"),
         )
 
 

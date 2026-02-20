@@ -1,49 +1,45 @@
 """
 Dashboard Authentication for FastAPI
 
-Supports multiple users stored in SQLite database.
+Supports multiple users stored in PostgreSQL database.
 """
-import sqlite3
-from functools import wraps
-from pathlib import Path
 from fastapi import Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 from werkzeug.security import check_password_hash, generate_password_hash
 import dashboard.config as config
-
-
-# Database path
-USERS_DB = config.DATA_DIR / "mycase_cache.db"
-
-
-def _get_db_connection():
-    """Get database connection."""
-    conn = sqlite3.connect(USERS_DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+from db.connection import get_connection
 
 
 def init_users_table():
     """Create users table if it doesn't exist."""
-    conn = _get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS dashboard_users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            email TEXT,
-            role TEXT DEFAULT 'user',
-            is_active INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS dashboard_users (
+                    id SERIAL PRIMARY KEY,
+                    firm_id TEXT NOT NULL DEFAULT 'default',
+                    username TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    email TEXT,
+                    role TEXT DEFAULT 'user',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login TIMESTAMP,
+                    UNIQUE(firm_id, username)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dashboard_users_firm_id
+                ON dashboard_users(firm_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dashboard_users_username
+                ON dashboard_users(username)
+            """)
+        conn.commit()
 
 
-def create_user(username: str, password: str, email: str = None, role: str = "user") -> bool:
+def create_user(username: str, password: str, email: str = None, role: str = "user", firm_id: str = "default") -> bool:
     """
     Create a new user.
 
@@ -52,117 +48,134 @@ def create_user(username: str, password: str, email: str = None, role: str = "us
         password: Plain text password (will be hashed)
         email: Optional email address
         role: User role ('admin' or 'user')
+        firm_id: Firm ID for multi-tenant isolation
 
     Returns:
         bool: True if created successfully
     """
     init_users_table()
-    conn = _get_db_connection()
-    cursor = conn.cursor()
 
     try:
         password_hash = generate_password_hash(password)
-        cursor.execute("""
-            INSERT INTO dashboard_users (username, password_hash, email, role)
-            VALUES (?, ?, ?, ?)
-        """, (username, password_hash, email, role))
-        conn.commit()
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO dashboard_users (firm_id, username, password_hash, email, role)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (firm_id, username, password_hash, email, role))
+            conn.commit()
         return True
-    except sqlite3.IntegrityError:
-        # Username already exists
+    except Exception:
+        # Username already exists or other error
         return False
-    finally:
-        conn.close()
 
 
-def get_user(username: str) -> dict | None:
-    """Get user by username."""
+def get_user(username: str, firm_id: str = "default") -> dict | None:
+    """Get user by username and firm_id."""
     init_users_table()
-    conn = _get_db_connection()
-    cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT id, username, password_hash, email, role, is_active, created_at, last_login
-        FROM dashboard_users
-        WHERE username = ? AND is_active = 1
-    """, (username,))
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, firm_id, username, password_hash, email, role, is_active, created_at, last_login
+                FROM dashboard_users
+                WHERE username = %s AND firm_id = %s AND is_active = TRUE
+            """, (username, firm_id))
 
-    row = cursor.fetchone()
-    conn.close()
+            row = cur.fetchone()
 
     if row:
-        return dict(row)
+        return {
+            "id": row[0],
+            "firm_id": row[1],
+            "username": row[2],
+            "password_hash": row[3],
+            "email": row[4],
+            "role": row[5],
+            "is_active": row[6],
+            "created_at": row[7],
+            "last_login": row[8],
+        }
     return None
 
 
-def list_users() -> list:
-    """List all users."""
+def list_users(firm_id: str = "default") -> list:
+    """List all users for a firm."""
     init_users_table()
-    conn = _get_db_connection()
-    cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT id, username, email, role, is_active, created_at, last_login
-        FROM dashboard_users
-        ORDER BY created_at DESC
-    """)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, firm_id, username, email, role, is_active, created_at, last_login
+                FROM dashboard_users
+                WHERE firm_id = %s
+                ORDER BY created_at DESC
+            """, (firm_id,))
 
-    users = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+            rows = cur.fetchall()
+
+    users = []
+    for row in rows:
+        users.append({
+            "id": row[0],
+            "firm_id": row[1],
+            "username": row[2],
+            "email": row[3],
+            "role": row[4],
+            "is_active": row[5],
+            "created_at": row[6],
+            "last_login": row[7],
+        })
     return users
 
 
-def update_user_password(username: str, new_password: str) -> bool:
+def update_user_password(username: str, new_password: str, firm_id: str = "default") -> bool:
     """Update user's password."""
-    conn = _get_db_connection()
-    cursor = conn.cursor()
-
     password_hash = generate_password_hash(new_password)
-    cursor.execute("""
-        UPDATE dashboard_users
-        SET password_hash = ?
-        WHERE username = ?
-    """, (password_hash, username))
 
-    success = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE dashboard_users
+                SET password_hash = %s
+                WHERE username = %s AND firm_id = %s
+            """, (password_hash, username, firm_id))
+
+            success = cur.rowcount > 0
+        conn.commit()
+
     return success
 
 
-def delete_user(username: str) -> bool:
-    """Delete a user (soft delete - sets is_active=0)."""
-    conn = _get_db_connection()
-    cursor = conn.cursor()
+def delete_user(username: str, firm_id: str = "default") -> bool:
+    """Delete a user (soft delete - sets is_active=FALSE)."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE dashboard_users
+                SET is_active = FALSE
+                WHERE username = %s AND firm_id = %s
+            """, (username, firm_id))
 
-    cursor.execute("""
-        UPDATE dashboard_users
-        SET is_active = 0
-        WHERE username = ?
-    """, (username,))
+            success = cur.rowcount > 0
+        conn.commit()
 
-    success = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
     return success
 
 
-def update_last_login(username: str):
+def update_last_login(username: str, firm_id: str = "default"):
     """Update user's last login timestamp."""
-    conn = _get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        UPDATE dashboard_users
-        SET last_login = CURRENT_TIMESTAMP
-        WHERE username = ?
-    """, (username,))
-
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE dashboard_users
+                SET last_login = CURRENT_TIMESTAMP
+                WHERE username = %s AND firm_id = %s
+            """, (username, firm_id))
+        conn.commit()
 
 
-def login_user(request: Request, username: str, password: str) -> bool:
+def login_user(request: Request, username: str, password: str, firm_id: str = "default") -> bool:
     """
     Authenticate user credentials.
 
@@ -172,12 +185,13 @@ def login_user(request: Request, username: str, password: str) -> bool:
         bool: True if authentication successful, False otherwise
     """
     # Check database users first
-    user = get_user(username)
+    user = get_user(username, firm_id)
     if user and check_password_hash(user["password_hash"], password):
         request.session["logged_in"] = True
         request.session["username"] = username
+        request.session["firm_id"] = firm_id
         request.session["role"] = user["role"]
-        update_last_login(username)
+        update_last_login(username, firm_id)
         return True
 
     # Fallback to env-based admin (for backwards compatibility)
@@ -185,6 +199,7 @@ def login_user(request: Request, username: str, password: str) -> bool:
         if check_password_hash(config.ADMIN_PASSWORD_HASH, password):
             request.session["logged_in"] = True
             request.session["username"] = username
+            request.session["firm_id"] = firm_id
             request.session["role"] = "admin"
             return True
 
@@ -206,6 +221,13 @@ def get_current_user(request: Request) -> str | None:
     if is_authenticated(request):
         return request.session.get("username")
     return None
+
+
+def get_current_firm_id(request: Request) -> str:
+    """Get the current user's firm_id."""
+    if is_authenticated(request):
+        return request.session.get("firm_id", "default")
+    return "default"
 
 
 def get_current_role(request: Request) -> str | None:

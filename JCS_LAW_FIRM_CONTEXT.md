@@ -1,316 +1,314 @@
-# JCS Law Firm - MyCase Analytics & Automation Context Document
+# JCS Law Firm - LawMetrics.ai Dashboard & Analytics Context
 
-**Last Updated:** January 2026
-**Purpose:** Comprehensive reference for continuing work in Claude Desktop
+**Last Updated:** February 20, 2026
+**Purpose:** Comprehensive reference for continuing work in Cowork/Claude Desktop
 
 ---
 
 ## Table of Contents
 1. [Project Overview](#1-project-overview)
-2. [Database Schema & Cache Structure](#2-database-schema--cache-structure)
-3. [Analytics Module Reference](#3-analytics-module-reference)
-4. [Key Data & Current Metrics](#4-key-data--current-metrics)
-5. [API Reference](#5-api-reference)
-6. [CLI Commands Reference](#6-cli-commands-reference)
-7. [Generated Reports](#7-generated-reports)
-8. [Staff & Roles](#8-staff--roles)
-9. [Common Tasks & Queries](#9-common-tasks--queries)
-10. [Known Issues & Limitations](#10-known-issues--limitations)
+2. [Server & Infrastructure](#2-server--infrastructure)
+3. [Database Architecture](#3-database-architecture)
+4. [Dashboard (models.py)](#4-dashboard-modelspy)
+5. [Case Phases System](#5-case-phases-system)
+6. [Document Generation System](#6-document-generation-system)
+7. [Analytics Module Reference](#7-analytics-module-reference)
+8. [Key Data & Current Metrics](#8-key-data--current-metrics)
+9. [API Reference](#9-api-reference)
+10. [Staff & Roles](#10-staff--roles)
+11. [Known Issues & Remaining Work](#11-known-issues--remaining-work)
+12. [Change Log - Feb 20 2026 Session](#12-change-log---feb-20-2026-session)
 
 ---
 
 ## 1. Project Overview
 
 ### Purpose
-Automated SOP compliance monitoring and analytics system for JCS Law Firm, a criminal defense firm specializing in DUI/DWI cases in the St. Louis, Missouri metro area.
+LawMetrics.ai - Legal analytics SaaS platform for JCS Law Firm, a criminal defense firm specializing in DUI/DWI cases in the St. Louis, Missouri metro area. Provides automated insights, notifications, case phase tracking, document generation, and business intelligence.
+
+### Production URL
+- **Dashboard:** https://jcs.lawmetrics.ai
+- **Login:** session-based authentication
+
+### Architecture (Current - Post Migration)
+```
+MyCase API (Cloud) → Celery Workers → PostgreSQL (DigitalOcean)
+                                            ↓
+                                   FastAPI Dashboard (models.py)
+                                            ↓
+                              Templates (Jinja2 HTML) → Browser
+                                            
+SQLite DBs (case_phases.db, attorney_profiles.db, document_engine.db)
+    ↕ (local auxiliary data - phases, profiles, doc templates)
+PostgreSQL (cached_cases, cached_invoices, etc. - main data)
+```
+
+### Server Directory Structure
+```
+/opt/jcs-mycase/
+├── dashboard/
+│   ├── models.py            # Data access layer (~2500+ lines)
+│   ├── routes.py            # FastAPI route handlers
+│   └── templates/           # Jinja2 HTML templates
+│       ├── base.html
+│       ├── phases.html      # Case phase tracking
+│       ├── documents.html   # Document generation UI
+│       ├── payments.html    # Payment analytics
+│       └── ...
+├── document_chat.py         # AI document generation chat engine
+├── document_engine.py       # Template storage & variable engine
+├── attorney_profiles.py     # Attorney profile management
+├── data/
+│   ├── case_phases.db       # SQLite - phase tracking
+│   ├── attorney_profiles.db # SQLite - attorney signature data
+│   ├── document_engine.db   # SQLite - doc templates (migrating to PG)
+│   ├── mycase_cache.db      # SQLite - legacy cache (dashboard migrated to PG)
+│   └── mycase_agent.db      # SQLite - agent/tracking
+├── .env                     # DATABASE_URL and other config
+└── .venv/                   # Python virtual environment
+```
+
+---
+
+## 2. Server & Infrastructure
+
+### Access
+```bash
+ssh jcs-server                    # SSH alias to DigitalOcean droplet
+```
+
+### Services
+```bash
+sudo systemctl restart mycase-dashboard   # Restart dashboard
+sudo systemctl status mycase-dashboard    # Check status
+sudo journalctl -u mycase-dashboard --since '5 min ago' --no-pager  # View logs
+```
+
+### Python Environment
+```bash
+# Use the venv directly (uv not available on server PATH)
+/opt/jcs-mycase/.venv/bin/python3 -c "..."
+
+# Or for scripts
+cd /opt/jcs-mycase && python3 /tmp/script.py
+```
+
+### Firm ID (Multi-tenant)
+```
+d5AgNpGZZvZ9Lgpce7ri4Q
+```
+All PostgreSQL queries MUST be scoped with `AND firm_id = %s` using this ID.
+
+---
+
+## 3. Database Architecture
+
+### PostgreSQL (Primary - DigitalOcean Managed)
+Connection: via `DATABASE_URL` in `/opt/jcs-mycase/.env`
+
+**Cache Tables** (synced from MyCase API):
+| Table | Description | Key Columns |
+|-------|-------------|-------------|
+| cached_cases | All cases (2,845+) | id, status, practice_area, lead_attorney_id/name, date_opened, date_closed, firm_id |
+| cached_invoices | Billing data | id, case_id, total_amount, paid_amount, balance_due, invoice_date, due_date, firm_id |
+| cached_clients | Client records | id, first_name, last_name, zip_code, firm_id |
+| cached_staff | Staff directory | id, name, title, firm_id |
+| cached_tasks | Task assignments | id, case_id, assignee_name, completed (boolean), firm_id |
+| cached_contacts | Basic contact info | id, firm_id |
+| cached_events | Calendar events | id, firm_id |
+| cached_payments | Payment records | id, firm_id |
+| cached_time_entries | Time tracking | id, firm_id |
+
+**Document Engine Tables** (created Feb 20, 2026):
+| Table | Description |
+|-------|-------------|
+| firms | Firm registry for doc engine |
+| templates | Document templates (SERIAL PK, BYTEA for file_content) |
+| generated_documents | Audit log of generated docs |
+| attorneys | Attorney profiles for signature blocks |
+
+### SQLite Databases (Auxiliary - Server Local)
+
+**case_phases.db** - `/opt/jcs-mycase/data/case_phases.db`
+- `phases` - Phase definitions (intake, discovery, motions, strategy, trial_prep, disposition, post_disposition)
+- `case_phase_history` - Tracks which phase each case is in (exited_at IS NULL = current)
+- `case_workflows`, `stage_phase_mappings` - Workflow configuration
+
+**attorney_profiles.db** - `/opt/jcs-mycase/data/attorney_profiles.db`
+- `attorneys` table - Signature block data (name, bar#, firm address, etc.)
+- Primary attorney: John C. Schleiffarth (bar #63222, firm_id='jcs_law')
+
+**document_engine.db** - `/opt/jcs-mycase/data/document_engine.db`
+- `templates`, `firms`, `generated_documents` - Legacy SQLite (now also in PG)
+- Document engine auto-detects PG and prefers it
+
+### Key PostgreSQL Syntax Notes (vs SQLite)
+```sql
+-- Date functions
+strftime('%Y', x)           → EXTRACT(YEAR FROM x)
+DATE('now', 'start of month') → date_trunc('month', CURRENT_DATE)
+julianday('now') - julianday(x) → CURRENT_DATE - x::date
+
+-- Placeholders
+?                           → %s
+
+-- Booleans
+t.completed = 1             → t.completed = true
+
+-- Auto-increment
+INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
+```
+
+---
+
+## 4. Dashboard (models.py)
+
+### File: `/opt/jcs-mycase/dashboard/models.py` (~2500+ lines)
+
+### Connection Methods
+```python
+# PostgreSQL (main data) - added Feb 20, 2026
+def _get_pg_connection(self):
+    # Uses psycopg2 + RealDictCursor
+    # Connection string from DATABASE_URL env var
+
+# SQLite cache (legacy - being phased out)  
+def _get_cache_connection(self):
+    # sqlite3 connection to mycase_cache.db
+
+# SQLite phases
+def _get_phases_connection(self):
+    # sqlite3 connection to case_phases.db
+```
+
+### Key Methods (Migrated to PostgreSQL Feb 20, 2026)
+
+**Attorney Productivity** - `get_attorney_productivity_data(year=None)`
+- **CRITICAL FIX:** active_cases counts ALL open cases regardless of year
+- Financial metrics and closed counts filtered by year
+- Uses `_get_pg_connection()`, scoped by `firm_id`
+
+**Staff Caseload** - `get_staff_caseload_data(staff_name, year=None)`
+- **CRITICAL FIX:** active_cases counts ALL open cases regardless of year
+- Attorneys: counts by `lead_attorney_id`
+- Non-attorneys: counts by task assignment (`assignee_name LIKE` patterns)
+- Closed cases filtered by `date_closed` year, not `created_at`
+
+**Attorney Detail** - `get_attorney_detail(attorney_id)`
+- Active cases list query migrated to PG with firm_id scoping
+
+### Phase Methods
+
+**Phase Distribution** - `get_phase_distribution()`
+- Queries `case_phase_history` from SQLite phases DB
+
+**Phase by Case Type** - `get_phase_by_case_type()`
+- Joins phases DB (SQLite) with cache (SQLite) for practice_area
+
+**Phase by Case Type by Attorney** - `get_phase_by_case_type_by_attorney()` *(NEW - Feb 20)*
+- Joins phases DB (SQLite) with PostgreSQL cache for practice_area + lead_attorney_name
+- Returns: `[{attorney_name, case_types: [{practice_area, phases: {code: count}, total}], total}]`
+- Sorted by total cases descending
+
+---
+
+## 5. Case Phases System
+
+### Phase Codes
+| Code | Display Name | Order |
+|------|-------------|-------|
+| intake | Intake | 1 |
+| discovery | Discovery | 2 |
+| motions | Motions | 3 |
+| strategy | Strategy | 4 |
+| trial_prep | Trial Prep | 5 |
+| disposition | Disposition | 6 |
+| post_disposition | Closing | 7 |
+
+### How It Works
+- `case_phase_history` tracks phase transitions
+- Current phase: `WHERE exited_at IS NULL`
+- Days in phase: `CURRENT_DATE - entered_at`
+- Stalled cases: threshold_days parameter (default 30)
+
+### Dashboard Pages
+- **Phases page** (`/phases`): Shows phase distribution, stalled cases, velocity, by case type, by attorney & case type
+- **Template:** `phases.html`
+- **Route context:** summary, stalled, velocity, by_case_type, by_case_type_attorney, phase_cases
+
+---
+
+## 6. Document Generation System
 
 ### Architecture
 ```
-MyCase API (Cloud) → api_client.py → sync.py → SQLite Cache → Analytics/Reports
-                                                    ↓
-                                          firm_analytics.py
-                                                    ↓
-                                    generate_report.py / generate_heatmaps.py
+documents.html (chat UI) → routes.py → DocumentChatEngine → Anthropic API
+                                              ↓
+                                    DocumentEngine (templates DB)
+                                    AttorneyProfiles (signature data)
 ```
 
-### Project Directory Structure
+### Key Files
+- `/opt/jcs-mycase/dashboard/templates/documents.html` - Chat UI
+- `/opt/jcs-mycase/document_chat.py` - Chat engine with document type routing
+- `/opt/jcs-mycase/document_engine.py` - Template storage, variable detection
+- `/opt/jcs-mycase/attorney_profiles.py` - Attorney signature block data
+
+### Document Types (from DOCUMENT_TYPES dict in document_chat.py)
+- Motion to Dismiss (General, DOR, Criminal, and 10+ specific grounds)
+- Motion to Continue
+- Bond Assignment
+- Entry of Appearance
+- Subpoena for Records
+- Waiver of Arraignment
+- Preservation Letter
+- Request for Discovery (Municipal, Circuit)
+- And more...
+
+### Attorney Profile (Configured Feb 20, 2026)
 ```
-/Users/marcstein/Desktop/Legal/
-├── agent.py                 # CLI entry point (Click framework)
-├── api_client.py            # MyCase API client
-├── cache.py                 # SQLite cache management
-├── sync.py                  # API → Cache sync manager
-├── firm_analytics.py        # Analytics engine (14 report types)
-├── generate_report.py       # Markdown report generator
-├── generate_heatmaps.py     # Interactive map generator
-├── config.py                # Configuration settings
-├── data/
-│   ├── mycase_cache.db      # Main cache database
-│   └── mycase_agent.db      # Agent/tracking database
-├── reports/
-│   ├── analytics_report.md  # Comprehensive analytics report
-│   ├── clients_heatmap.html # Client location heatmap
-│   └── revenue_heatmap.html # Revenue by location heatmap
-├── dashboard/               # FastAPI web dashboard
-└── templates/               # Notification templates
+Attorney: John C. Schleiffarth
+Bar Number: 63222
+Email: john@jcsattorney.com
+Firm: JCS Law - John C. Schleiffarth, P.C.
+Address: 120 S Central Ave, Ste 1550, Clayton, Missouri 63105
+Phone: 314-561-9690
+Fax: 314-596-0658
+Firm ID: jcs_law
+Is Primary: Yes
 ```
+Stored in BOTH:
+- SQLite: `/opt/jcs-mycase/data/attorney_profiles.db` → `attorneys` table
+- PostgreSQL: `attorneys` table
+
+### Motion to Dismiss - Respondent Logic
+- **General motion:** `respondent_name` is REQUIRED (user must provide)
+- **DOR motion:** defaults to "DIRECTOR OF REVENUE"
+- **Criminal motion:** uses defendant_name terminology
 
 ---
 
-## 2. Database Schema & Cache Structure
+## 7. Analytics Module Reference
 
-### Cache Database: `data/mycase_cache.db`
+### File: `/opt/jcs-mycase/firm_analytics.py` (also `firm_analytics_mt.py` for multi-tenant PG)
 
-**Current Record Counts (as of Jan 2026):**
-| Table | Records |
-|-------|---------|
-| cached_cases | 2,736 |
-| cached_clients | 2,360 |
-| cached_contacts | 2,363 |
-| cached_events | 16,167 |
-| cached_invoices | 1,842 |
-| cached_staff | 24 |
-| cached_tasks | 348 |
-| cached_time_entries | 444 |
+The `FirmAnalytics` class provides 14 analytics methods. See original context doc for full method signatures.
 
-### Table Schemas
-
-#### cached_cases
-```sql
-CREATE TABLE cached_cases (
-    id INTEGER PRIMARY KEY,
-    name TEXT,                    -- Case name (contains jurisdiction info)
-    case_number TEXT,
-    status TEXT,                  -- 'open', 'closed'
-    case_type TEXT,
-    practice_area TEXT,           -- 'DUI/DWI', 'Criminal Defense', etc.
-    date_opened DATE,
-    date_closed DATE,
-    lead_attorney_id INTEGER,
-    lead_attorney_name TEXT,
-    stage TEXT,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    data_json TEXT,               -- Full API response as JSON
-    cached_at TIMESTAMP
-);
-```
-
-#### cached_clients (with address data for heatmaps)
-```sql
-CREATE TABLE cached_clients (
-    id INTEGER PRIMARY KEY,
-    first_name TEXT,
-    last_name TEXT,
-    email TEXT,
-    cell_phone TEXT,
-    work_phone TEXT,
-    home_phone TEXT,
-    address1 TEXT,
-    address2 TEXT,
-    city TEXT,
-    state TEXT,
-    zip_code TEXT,                -- Key for geographic analysis
-    country TEXT,
-    birthdate DATE,
-    archived BOOLEAN,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    data_json TEXT,
-    cached_at TIMESTAMP
-);
--- Indexes: zip_code, city, state, updated_at
-```
-
-#### cached_invoices
-```sql
-CREATE TABLE cached_invoices (
-    id INTEGER PRIMARY KEY,
-    invoice_number TEXT,
-    case_id INTEGER,              -- Links to cached_cases.id
-    contact_id INTEGER,
-    status TEXT,                  -- 'paid', 'overdue', 'partial', etc.
-    total_amount REAL,            -- Amount billed
-    paid_amount REAL,             -- Amount collected
-    balance_due REAL,             -- total_amount - paid_amount
-    invoice_date DATE,
-    due_date DATE,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    data_json TEXT,
-    cached_at TIMESTAMP
-);
--- Indexes: case_id, status, updated_at
-```
-
-#### cached_staff
-```sql
-CREATE TABLE cached_staff (
-    id INTEGER PRIMARY KEY,
-    first_name TEXT,
-    last_name TEXT,
-    name TEXT,                    -- Full name
-    email TEXT,
-    title TEXT,
-    staff_type TEXT,
-    active BOOLEAN,
-    hourly_rate REAL,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    data_json TEXT,
-    cached_at TIMESTAMP
-);
-```
-
-### Key Relationships
-```
-cached_cases.id ←→ cached_invoices.case_id
-cached_cases.lead_attorney_id ←→ cached_staff.id
-cached_cases.data_json.clients[] ←→ cached_clients.id
-```
+### Key Methods
+| Method | Returns |
+|--------|---------|
+| `get_revenue_by_case_type()` | case_type, billed, collected, count, rate |
+| `get_revenue_by_attorney()` | attorney_name, billed, collected, count, rate |
+| `get_revenue_by_attorney_monthly(months)` | attorney, month, billed, collected |
+| `get_avg_case_length_by_type()` | category, avg/min/max days, count |
+| `get_avg_fee_charged_by_type()` | case_type, avg charged/collected, count |
+| `get_new_cases_past_12_months()` | total, monthly breakdown |
+| `get_clients_by_zip_code()` | {zip: count} |
+| `get_revenue_by_zip_code()` | {zip: {clients, cases, billed, collected}} |
 
 ---
 
-## 3. Analytics Module Reference
-
-### File: `firm_analytics.py`
-
-The `FirmAnalytics` class provides 14 analytics methods:
-
-#### Revenue Analytics
-```python
-# 1. Revenue by Case Type
-get_revenue_by_case_type() -> List[RevenueByType]
-# Returns: case_type, total_billed, total_collected, case_count, collection_rate
-
-# 2. Revenue by Attorney
-get_revenue_by_attorney() -> List[RevenueByAttorney]
-# Returns: attorney_name, total_billed, total_collected, case_count, collection_rate
-
-# 3. Revenue by Attorney Monthly
-get_revenue_by_attorney_monthly(months: int = 12) -> List[MonthlyRevenue]
-# Returns: attorney_name, month (YYYY-MM), billed, collected
-```
-
-#### Case Analytics
-```python
-# 4. Average Case Length by Type
-get_avg_case_length_by_type() -> List[CaseLengthStats]
-# Returns: category, avg_days, min_days, max_days, case_count
-# NOTE: Only includes closed cases with both open and close dates
-
-# 5. Average Case Length by Type per Attorney
-get_avg_case_length_by_type_attorney() -> Dict[str, List[CaseLengthStats]]
-# Returns: Dict of attorney_name -> List of CaseLengthStats
-```
-
-#### Fee Analytics
-```python
-# 6 & 7. Average Fee by Case Type
-get_avg_fee_charged_by_type() -> List[FeeStats]
-# Returns: case_type, avg_fee_charged, avg_fee_collected, total_cases
-```
-
-#### Intake Analytics
-```python
-# 8. New Cases Past 12 Months
-get_new_cases_past_12_months() -> Dict
-# Returns: {'total': int, 'monthly': {YYYY-MM: count}}
-
-# 9. New Cases Since August (Ty Start)
-get_new_cases_since_august(year: int = 2025) -> Dict
-# Returns: {'total': int, 'since_date': str, 'by_case_type': {type: count}}
-
-# 10. Fee Comparison: Since August vs Prior 12 Months
-get_fee_comparison_august_vs_prior(year: int = 2025) -> Dict
-# Returns comparison data with change percentages
-
-# 13. New Cases per Month per Attorney
-get_new_cases_per_month_per_attorney(months: int = 12) -> List[NewCasesMonth]
-# Returns: month, attorney_name, case_count
-```
-
-#### Geographic Analytics
-```python
-# 11. Clients by Zip Code (Heat Map Data)
-get_clients_by_zip_code() -> Dict[str, int]
-# Returns: {zip_code: client_count} sorted by count descending
-
-# 12. Revenue by Zip Code (Heat Map Data)
-get_revenue_by_zip_code() -> Dict[str, Dict]
-# Returns: {zip_code: {clients, cases, billed, collected, collection_rate}}
-
-# Alternative: Cases by Jurisdiction (from case names)
-get_cases_by_jurisdiction() -> Dict[str, int]
-get_revenue_by_jurisdiction() -> Dict[str, Dict]
-```
-
-#### Usage Example
-```python
-from firm_analytics import FirmAnalytics, format_currency, format_percent
-
-analytics = FirmAnalytics()
-
-# Get revenue by case type
-for r in analytics.get_revenue_by_case_type():
-    print(f"{r.case_type}: {format_currency(r.total_billed)} billed, "
-          f"{format_percent(r.collection_rate)} collected")
-
-# Get zip code heatmap data
-zip_data = analytics.get_clients_by_zip_code()
-print(f"Top zip: {list(zip_data.items())[0]}")
-```
-
-### Data Classes (from firm_analytics.py)
-```python
-@dataclass
-class RevenueByType:
-    case_type: str
-    total_billed: float
-    total_collected: float
-    case_count: int
-    collection_rate: float
-
-@dataclass
-class RevenueByAttorney:
-    attorney_name: str
-    total_billed: float
-    total_collected: float
-    case_count: int
-    collection_rate: float
-
-@dataclass
-class MonthlyRevenue:
-    attorney_name: str
-    month: str  # YYYY-MM format
-    billed: float
-    collected: float
-
-@dataclass
-class CaseLengthStats:
-    category: str  # Case type or attorney name
-    avg_days: float
-    min_days: int
-    max_days: int
-    case_count: int
-
-@dataclass
-class FeeStats:
-    case_type: str
-    avg_fee_charged: float
-    avg_fee_collected: float
-    total_cases: int
-
-@dataclass
-class NewCasesMonth:
-    month: str
-    attorney_name: str
-    case_count: int
-```
-
----
-
-## 4. Key Data & Current Metrics
+## 8. Key Data & Current Metrics
 
 ### Top Attorneys by Revenue (All Time)
 | Attorney | Cases | Billed | Collected | Rate |
@@ -323,362 +321,155 @@ class NewCasesMonth:
 | Andy Morris | 258 | $837,790 | $770,082 | 91.9% |
 | Jen Kusmer | 137 | $799,380 | $624,814 | 78.2% |
 
-### Top Case Types by Revenue
-| Case Type | Cases | Billed | Collected | Rate |
-|-----------|------:|-------:|----------:|-----:|
-| DUI/DWI | 536 | $2,509,031 | $2,260,126 | 90.1% |
-| Criminal Defense | 675 | $2,207,292 | $1,887,477 | 85.5% |
-| Criminal - Felony | 211 | $1,729,178 | $1,358,068 | 78.5% |
-| Criminal - Federal | 85 | $848,390 | $666,699 | 78.6% |
-| DUI/DWI-Muni | 137 | $790,828 | $633,140 | 80.1% |
+### Database Counts (Feb 2026)
+| Table | Records |
+|-------|---------|
+| cached_cases | 2,845+ |
+| cached_clients | 2,360+ |
+| cached_invoices | 1,842+ |
+| cached_events | 16,167+ |
+| cached_staff | 24 |
+| cached_tasks | 348+ |
 
-### Average Fee by Case Type (Top 10)
-| Case Type | Avg Charged | Avg Collected |
-|-----------|------------:|--------------:|
-| Post Conviction Relief | $25,000 | $25,000 |
-| Criminal - Federal | $13,908 | $10,929 |
-| Criminal - Felony | $9,938 | $7,805 |
-| DWI/DUI - Felony | $7,270 | $6,261 |
-| DUI/DWI-Muni | $6,227 | $4,985 |
-| DUI/DWI-Federal | $5,816 | $4,695 |
-| Criminal Defense | $5,718 | $4,890 |
-| Criminal - Juvenile | $5,700 | $3,728 |
-| DUI/DWI | $5,613 | $5,056 |
-
-### New Cases (Past 12 Months)
-- **Total:** 715 cases
-- **Peak Month:** August 2025 (89 cases)
-- **Since Ty Started (Aug 2025):** 361 cases
-
-### Top Jurisdictions
-| Jurisdiction | Cases | Billed |
-|--------------|------:|-------:|
-| Other/Unknown | 981 | $2,826,758 |
-| St. Louis County | 363 | $1,194,767 |
-| Franklin County | 138 | $889,817 |
-| Jefferson County | 213 | $789,664 |
-| Federal (EDMO) | 95 | $754,914 |
-| St. Charles County | 136 | $422,504 |
-
-### Top Client Zip Codes
-| Zip Code | Clients | Revenue |
-|----------|--------:|--------:|
-| 63026 (Fenton) | 52 | $174,850 |
-| 63123 (Affton) | 42 | $159,758 |
-| 63033 (Florissant) | 36 | $105,473 |
-| 63052 (Imperial) | 35 | $109,037 |
-| 63301 (St. Charles) | 33 | $147,361 |
-| 63368 (O'Fallon) | 31 | $154,197 |
-| 63129 (Mehlville) | 31 | $135,336 |
+### Anthony Muhlenkamp Active Cases
+- **71 open cases** (all-time, no year filter)
+- Previously showed 4 due to year filter bug (fixed Feb 20)
 
 ---
 
-## 5. API Reference
+## 9. API Reference
 
-### MyCase API Client (api_client.py)
-
+### MyCase API Client
 ```python
 from api_client import get_client
-
 client = get_client()
-
-# Get all cases (paginated)
 cases = client.get_all_pages(client.get_cases, per_page=100)
-
-# Get all clients with addresses
-clients = client.get_all_pages(client.get_clients, per_page=100)
-
-# Get invoices
-invoices = client.get_all_pages(client.get_invoices, per_page=100)
-
-# Get staff (small dataset, no pagination)
-staff = client.get_staff()
 ```
 
 ### Available Endpoints
-| Method | Endpoint | Returns |
-|--------|----------|---------|
-| `get_cases()` | `/cases` | Case list with staff assignments |
-| `get_clients()` | `/clients` | **Full client data with addresses** |
-| `get_contacts()` | `/contacts` | Basic contact info (id, name only) |
-| `get_invoices()` | `/invoices` | Invoice with amounts, case link |
-| `get_staff()` | `/staff` | Staff directory |
-| `get_tasks()` | `/tasks` | Tasks (OPEN cases only!) |
+| Method | Endpoint | Notes |
+|--------|----------|-------|
+| `get_cases()` | `/cases` | Includes staff assignments |
+| `get_clients()` | `/clients` | Full address data |
+| `get_invoices()` | `/invoices` | Amounts, case links |
+| `get_staff()` | `/staff` | Small dataset |
+| `get_tasks()` | `/tasks` | OPEN cases only! |
 | `get_events()` | `/events` | Calendar events |
 | `get_payments()` | `/payments` | Payment records |
 | `get_time_entries()` | `/time_entries` | Time tracking |
 
-### Pagination
-```python
-# endpoint_map for pagination support
-endpoint_map = {
-    "get_cases": "/cases",
-    "get_contacts": "/contacts",
-    "get_clients": "/clients",     # Added for zip code support
-    "get_invoices": "/invoices",
-    "get_tasks": "/tasks",
-    "get_events": "/events",
-    "get_payments": "/payments",
-    "get_time_entries": "/time_entries",
-}
-
-# Use get_all_pages() for automatic pagination
-all_records = client.get_all_pages(
-    client.get_cases,
-    page_delay=0.3,  # Rate limiting
-    per_page=100
-)
-```
-
 ---
 
-## 6. CLI Commands Reference
+## 10. Staff & Roles
 
-### Analytics Commands
-```bash
-# Generate full console report
-uv run python agent.py analytics report
-
-# Individual reports
-uv run python agent.py analytics revenue-type
-uv run python agent.py analytics revenue-attorney
-uv run python agent.py analytics revenue-monthly
-uv run python agent.py analytics case-length
-uv run python agent.py analytics fees
-uv run python agent.py analytics new-cases
-uv run python agent.py analytics since-august
-uv run python agent.py analytics fee-comparison
-uv run python agent.py analytics jurisdiction
-uv run python agent.py analytics zip-codes
-uv run python agent.py analytics attorney-monthly
+### Firm Info
 ```
-
-### Report Generation
-```bash
-# Generate markdown report
-uv run python generate_report.py
-# Output: reports/analytics_report.md
-
-# Generate heatmaps
-uv run python generate_heatmaps.py
-# Output: reports/clients_heatmap.html, reports/revenue_heatmap.html
+JCS Law - John C. Schleiffarth, P.C.
+120 S Central Ave, Ste 1550
+Clayton, Missouri 63105
+Office: 314-561-9690 | Fax: 314-596-0658
 ```
-
-### Sync Commands
-```bash
-# Sync all entities
-uv run python sync.py
-
-# Sync specific entity
-uv run python sync.py cases
-uv run python sync.py clients
-uv run python sync.py invoices
-
-# Force full sync
-uv run python sync.py full
-
-# Check sync status
-uv run python sync.py status
-```
-
-### SOP Reports
-```bash
-uv run python agent.py sop melissa    # AR/Collections
-uv run python agent.py sop ty         # Intake
-uv run python agent.py sop tiffany    # Paralegal ops
-uv run python agent.py sop alison     # Legal assistant
-```
-
-### Dashboard
-```bash
-uv run python agent.py dashboard --host 0.0.0.0 --port 3000
-# Access: http://127.0.0.1:3000 (admin/admin)
-```
-
----
-
-## 7. Generated Reports
-
-### Analytics Report (reports/analytics_report.md)
-Contains 14 sections:
-1. Revenue by Case Type
-2. Revenue by Attorney
-3. Revenue by Attorney (Last 12 Months)
-4. Average Case Length by Type
-5. Average Fee by Case Type
-6. New Cases - Past 12 Months
-7. New Cases Since August (Ty Start)
-8. Fee Comparison: Since August vs Prior 12 Months
-9. Cases by Jurisdiction
-10. Revenue by Jurisdiction
-11. Clients by Zip Code (Heat Map Data)
-12. Revenue by Zip Code (Heat Map Data)
-13. New Cases per Month per Attorney
-14. Positive Reviews - Staff Analysis (placeholder)
-
-### Heatmaps
-- **clients_heatmap.html** - Interactive Folium map showing client concentration by zip code
-- **revenue_heatmap.html** - Interactive Folium map showing revenue by zip code
-
----
-
-## 8. Staff & Roles
 
 ### Administrative Staff
 | Name | Role | Responsibilities |
 |------|------|------------------|
 | Melissa Scarlett | AR Specialist | Collections, payment plans, aging reports |
 | Ty Christian | Intake Lead | New client intake, lead tracking, case setup |
-| Tiffany Willis | Senior Paralegal | Task management, team operations, daily huddles |
+| Tiffany Willis | Senior Paralegal | Task management, team operations |
 | Alison Ehrhard | Legal Assistant | Case tasks, discovery, license filings |
 | Cole Chadderdon | Legal Assistant | Case tasks, discovery, license filings |
 
-### Key Staff IDs (for queries)
+### Key Staff IDs
 | Staff Member | ID | Role |
 |-------------|-----|------|
 | Tiffany Willis | 31928330 | Senior Paralegal |
 | Alison Ehrhard | 41594387 | Legal Assistant |
 | Cole Chadderdon | 56011402 | Legal Assistant |
 
-### Attorneys (by Revenue)
-| Attorney | Active Cases | Total Billed |
-|----------|-------------|--------------|
-| Heidi Leopold | 1,001 | $2,037,242 |
-| Anthony Muhlenkamp | 175 | $1,827,386 |
-| Leigh Hawk | 306 | $1,092,174 |
-| John Schleiffarth | 230 | $852,591 |
-| Christopher LaPee | 200 | $849,403 |
-| Andy Morris | 258 | $837,790 |
-| Jen Kusmer | 137 | $799,380 |
-
 ---
 
-## 9. Common Tasks & Queries
+## 11. Known Issues & Remaining Work
 
-### Direct SQLite Queries
+### Active Issues
+1. **Document generation signature block** - Attorney profile exists in both SQLite and PG; doc engine loads it via `get_primary_attorney('jcs_law')` from PG `attorneys` table. Verify it renders in generated docs.
+2. **Dashboard methods still on SQLite** - Many methods in models.py still use `_get_cache_connection()` (SQLite). Only attorney productivity, staff caseload, attorney detail, and phase-by-attorney have been migrated to PG.
+3. **Document engine dual-DB** - `document_engine.py` auto-detects PG and uses it, but templates table is empty in both SQLite and PG. No actual .docx templates uploaded yet — AI generates from scratch.
+4. **Tasks API limitation** - Only returns tasks for OPEN cases; historical task data incomplete.
 
-```sql
--- Revenue by case type
-SELECT
-    COALESCE(c.practice_area, 'Unknown') as case_type,
-    COUNT(DISTINCT c.id) as case_count,
-    SUM(i.total_amount) as total_billed,
-    SUM(i.paid_amount) as total_collected
-FROM cached_cases c
-LEFT JOIN cached_invoices i ON i.case_id = c.id
-GROUP BY COALESCE(c.practice_area, 'Unknown')
-ORDER BY total_billed DESC;
+### Remaining Dashboard Migration (SQLite → PostgreSQL)
+These methods in `models.py` still use `_get_cache_connection()` and need migration:
+- Revenue analytics methods
+- Case analytics methods  
+- Geographic analytics
+- Payment/time-to-payment analytics
+- Most other data methods
 
--- Clients by zip code
-SELECT
-    SUBSTR(zip_code, 1, 5) as zip,
-    COUNT(*) as client_count
-FROM cached_clients
-WHERE zip_code IS NOT NULL AND zip_code != ''
-GROUP BY SUBSTR(zip_code, 1, 5)
-ORDER BY client_count DESC
-LIMIT 20;
-
--- New cases since August 2025
-SELECT
-    COALESCE(practice_area, 'Unknown') as case_type,
-    COUNT(*) as count
-FROM cached_cases
-WHERE date_opened >= '2025-08-01'
-   OR (date_opened IS NULL AND created_at >= '2025-08-01')
-GROUP BY COALESCE(practice_area, 'Unknown')
-ORDER BY count DESC;
-
--- Monthly revenue by attorney
-SELECT
-    COALESCE(c.lead_attorney_name, 'Unassigned') as attorney,
-    strftime('%Y-%m', i.invoice_date) as month,
-    SUM(i.total_amount) as billed,
-    SUM(i.paid_amount) as collected
-FROM cached_invoices i
-JOIN cached_cases c ON c.id = i.case_id
-WHERE i.invoice_date >= date('now', '-12 months')
-GROUP BY c.lead_attorney_name, strftime('%Y-%m', i.invoice_date)
-ORDER BY month DESC, attorney;
-```
-
-### Python Snippets
-
-```python
-# Connect to cache directly
-import sqlite3
-conn = sqlite3.connect('/Users/marcstein/Desktop/Legal/data/mycase_cache.db')
-conn.row_factory = sqlite3.Row
-
-# Quick stats
-cursor = conn.cursor()
-cursor.execute("SELECT COUNT(*) FROM cached_cases WHERE status = 'open'")
-print(f"Open cases: {cursor.fetchone()[0]}")
-
-# Use analytics module
-from firm_analytics import FirmAnalytics
-analytics = FirmAnalytics()
-report = analytics.generate_full_report()
-
-# Access specific data
-revenue = analytics.get_revenue_by_case_type()
-zip_data = analytics.get_clients_by_zip_code()
-```
-
----
-
-## 10. Known Issues & Limitations
-
-### API Limitations
-1. **Tasks API only returns tasks for OPEN cases** - Historical task data is incomplete
-2. **Contacts endpoint only returns id/name** - Use `/clients` for full address data
-3. **No `updated_since` filter** - Must fetch all records and compare locally
-4. **Rate limiting** - Use 0.3s delay between paginated requests
-
-### Data Quality Issues
-1. **Limited closed case data** - Only 1 case type has avg_days data (most cases still open or missing close dates)
-2. **Missing zip codes** - ~530 clients out of 2,360 have no zip code data
-3. **Jurisdiction extraction** - Case names don't always contain clear jurisdiction info
-4. **Review data unavailable** - Reviews are on external platforms (Google, Avvo), not in MyCase
-
-### Cache Behavior
-- **Records are NEVER deleted** - Upsert only (INSERT ON CONFLICT UPDATE)
-- **Closed case tasks preserved** - Once synced, tasks remain even after case closes
-- **Client-case linking** - Uses data_json.clients[] array, may have inconsistencies
-
-### Geographic Coverage
-- Heatmap zip coordinates cover St. Louis metro area
-- ~305 out of 445 zip codes missing coordinates (clients outside metro area)
-- Fallback: Use jurisdiction extraction from case names
-
----
-
-## Quick Reference Card
-
-### Key File Paths
-```
-Cache DB:     /Users/marcstein/Desktop/Legal/data/mycase_cache.db
-Analytics:    /Users/marcstein/Desktop/Legal/firm_analytics.py
-Reports:      /Users/marcstein/Desktop/Legal/reports/
-Heatmaps:     /Users/marcstein/Desktop/Legal/reports/*_heatmap.html
-```
-
-### Most Useful Commands
+### Deployment Pattern for Patches
 ```bash
-# Refresh data
-uv run python sync.py
-
-# Generate all reports
-uv run python generate_report.py && uv run python generate_heatmaps.py
-
-# Quick analytics
-uv run python agent.py analytics report
-
-# Start dashboard
-uv run python agent.py dashboard
+# 1. Create patch file locally or base64 encode
+# 2. Transfer to server
+ssh jcs-server "echo '<base64>' | base64 -d > /tmp/patchN.py && python3 /tmp/patchN.py"
+# 3. Restart
+ssh jcs-server "sudo systemctl restart mycase-dashboard"
+# 4. Check logs
+ssh jcs-server "sudo journalctl -u mycase-dashboard --since '2 min ago' --no-pager | tail -20"
 ```
 
-### Key Contacts
-- **Firm Focus:** Criminal Defense / DUI/DWI
-- **Location:** St. Louis, Missouri metro area
-- **Ty Start Date:** August 1, 2025 (reference point for intake metrics)
+---
+
+## 12. Change Log - Feb 20, 2026 Session
+
+### Bug Fix: Active Cases Year Filter
+**Problem:** Dashboard showed Anthony Muhlenkamp with 4 active cases; actual count is 71.
+**Root cause:** Active cases query in `get_attorney_productivity_data()` filtered by `created_at` year, showing only cases opened in the selected year that remain open.
+**Fix:** Removed year filter from active_cases count. Active cases = ALL cases where `status = 'open'`, period. Year filter only applies to closed counts and financial metrics.
+**Methods patched:**
+- `get_attorney_productivity_data()` — Patch 2
+- `get_staff_caseload_data()` — Patch 3  
+- `get_attorney_detail()` — Patch 4
+
+### Migration: Dashboard SQLite → PostgreSQL (Partial)
+**Patch 1:** Added `_get_pg_connection()` method, `self.database_url`, `self.firm_id`
+**Patches 2-4:** Migrated 3 methods from SQLite to PostgreSQL syntax:
+- `?` → `%s` placeholders
+- `strftime()` → `EXTRACT()`
+- `DATE('now',...)` → `date_trunc()`
+- `t.completed = 1` → `t.completed = true`
+- Added `firm_id` scoping to all queries
+
+### New Feature: Phase Distribution by Attorney & Case Type
+**Patch 5:** Added `get_phase_by_case_type_by_attorney()` method
+- Joins phases SQLite DB with PostgreSQL cache
+- Returns breakdown: attorney → case_type → phase → count
+- Added to routes.py and phases.html template
+- Shows per-attorney tables with phase columns
+
+### Fix: /payments 500 Error
+**Cause:** Patch 5 string replacement accidentally added `by_case_type_attorney` to payments route context (routes.py line 312) without the data call.
+**Fix:** Removed orphaned line from payments template context.
+
+### Fix: Document Generation "templates" Table Missing
+**Problem:** Document generation page threw "relation 'templates' does not exist"
+**Cause:** `document_engine.py` auto-detects PostgreSQL and skips SQLite init, but PG tables were never created.
+**Fix:** Created `firms`, `templates`, `generated_documents` tables in PostgreSQL with PG-compatible syntax (SERIAL, BYTEA).
+
+### Fix: Attorney Profile for Signature Blocks
+**Problem:** Generated documents showed `[Firm Name]`, `[Attorney Name]` placeholders instead of actual data.
+**Cause:** `attorneys` table was empty in both SQLite and PostgreSQL.
+**Fix:** 
+- Inserted John C. Schleiffarth profile into SQLite `attorney_profiles.db`
+- Created `attorneys` table in PostgreSQL and inserted same profile
+- Attorney profile: bar #63222, JCS Law - John C. Schleiffarth, P.C., 120 S Central Ave Ste 1550, Clayton MO 63105
+
+### Fix: Motion to Dismiss Respondent Default
+**Problem:** General motion to dismiss defaulted respondent to "DIRECTOR OF REVENUE"
+**Fix:** Made `respondent_name` a required variable for general motions (removed from defaults). DOR-specific motion keeps the Director of Revenue default.
+
+### UI Fix: Document Generation Send Button
+**Problem:** "Send" button text was truncated/clipped on doc gen page.
+**Fix:** Changed button label from "Send" to "Go", removed SVG icon to fit smaller space. Also added CSS tweaks (flex-shrink, white-space, overflow adjustments).
+
+### Backup
+```
+/opt/jcs-mycase/dashboard/models.py.bak.YYYYMMDD
+```

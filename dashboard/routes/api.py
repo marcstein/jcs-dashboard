@@ -1,374 +1,42 @@
 """
-FastAPI Dashboard Routes
+JSON API endpoints: Chat, docket management, document generation, sync, etc.
 """
 import threading
-import csv
-import io
-import os
 import json
-import sqlite3
+import os
+import io
 from datetime import datetime
-from fastapi import APIRouter, Request, Form, Depends, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
 from pathlib import Path
-import anthropic
 
-from dashboard.auth import login_user, logout_user, is_authenticated, require_auth
+import anthropic
+from fastapi import APIRouter, Request, BackgroundTasks
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
+
+from dashboard.auth import is_authenticated
 from dashboard.models import DashboardData
+from db.connection import get_connection
 
 router = APIRouter()
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 data = DashboardData()
 
 # Track sync status
 _sync_status = {"running": False, "last_result": None, "error": None}
 
+# Store active document chat sessions
+_doc_sessions = {}
 
-@router.get("/", response_class=HTMLResponse)
-async def index(request: Request, year: int = None):
-    """Dashboard home page."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
 
-    # Default to current year if not specified
-    current_year = datetime.now().year
-    if year is None:
-        year = current_year
-    available_years = [2025, 2026]
+# ============================================================================
+# Dashboard Stats API
+# ============================================================================
 
-    stats = data.get_dashboard_stats(year=year)
-    ar_aging = data.get_ar_aging_breakdown(year=year)
-    recent_reports = data.get_recent_reports(limit=5)
-
-    # SOP widget data
-    melissa_sop = data.get_melissa_sop_data(year=year)
-    ty_sop = data.get_ty_sop_data()
-    tiffany_sop = data.get_tiffany_sop_data()
-    alison_sop = data.get_legal_assistant_sop_data("Alison")
-    cole_sop = data.get_legal_assistant_sop_data("Cole")
-
-    # Additional staff with overdue tasks
-    heidi_sop = data.get_legal_assistant_sop_data("Heidi")
-    anthony_sop = data.get_legal_assistant_sop_data("Anthony")
-    melinda_sop = data.get_legal_assistant_sop_data("Melinda")
-    tiffany_personal_sop = data.get_legal_assistant_sop_data("Tiffany")
-
-    # Attorney summary for dashboard widget
-    attorney_summary = data.get_attorney_summary(year=year)
-
-    # Staff caseload data
-    tiffany_caseload = data.get_staff_caseload_data("Tiffany Willis")
-    alison_caseload = data.get_staff_caseload_data("Alison Ehrhard")
-    cole_caseload = data.get_staff_caseload_data("Cole Chadderdon")
-    heidi_caseload = data.get_staff_caseload_data("Heidi Leopold")
-    anthony_caseload = data.get_staff_caseload_data("Anthony Muhlenkamp")
-    melinda_caseload = data.get_staff_caseload_data("Melinda Gorman")
-
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "year": year,
-        "current_year": current_year,
-        "available_years": available_years,
-        "stats": stats,
-        "ar_aging": ar_aging,
-        "recent_reports": recent_reports,
-        "melissa_sop": melissa_sop,
-        "ty_sop": ty_sop,
-        "tiffany_sop": tiffany_sop,
-        "alison_sop": alison_sop,
-        "cole_sop": cole_sop,
-        "heidi_sop": heidi_sop,
-        "anthony_sop": anthony_sop,
-        "melinda_sop": melinda_sop,
-        "tiffany_personal_sop": tiffany_personal_sop,
-        "attorney_summary": attorney_summary,
-        "tiffany_caseload": tiffany_caseload,
-        "alison_caseload": alison_caseload,
-        "cole_caseload": cole_caseload,
-        "heidi_caseload": heidi_caseload,
-        "anthony_caseload": anthony_caseload,
-        "melinda_caseload": melinda_caseload,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    """Login page."""
-    if is_authenticated(request):
-        return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("login.html", {
-        "request": request,
-        "error": None,
-    })
-
-
-@router.post("/login")
-async def login_submit(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-):
-    """Handle login form submission."""
-    print(f"Login attempt: {username}")
-    if login_user(request, username, password):
-        print(f"Login SUCCESS - session: {dict(request.session)}")
-        # 303 See Other - forces GET on redirect (proper POST-Redirect-GET pattern)
-        return RedirectResponse(url="/", status_code=303)
-
-    print(f"Login FAILED for {username}")
-    return templates.TemplateResponse("login.html", {
-        "request": request,
-        "error": "Invalid username or password.",
-    })
-
-
-@router.get("/logout")
-async def logout(request: Request):
-    """Logout route."""
-    logout_user(request)
-    return RedirectResponse(url="/login", status_code=303)
-
-
-@router.get("/staff/{staff_name}", response_class=HTMLResponse)
-async def staff_tasks(request: Request, staff_name: str):
-    """Staff task detail page."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    staff = data.get_staff_tasks(staff_name, include_completed=False)
-    active_cases = data.get_staff_active_cases_list(staff_name)
-
-    return templates.TemplateResponse("staff_tasks.html", {
-        "request": request,
-        "staff": staff,
-        "active_cases": active_cases,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/ar", response_class=HTMLResponse)
-async def ar_dashboard(request: Request, year: int = None):
-    """AR/Collections dashboard."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    # Default to current year if not specified
-    current_year = datetime.now().year
-    if year is None:
-        year = current_year
-    available_years = [2025, 2026]
-
-    summary = data.get_daily_collections_summary(year=year)
-    ar_aging = data.get_ar_aging_breakdown(year=year)
-    trend = data.get_collections_trend(days_back=30)
-    plans = data.get_payment_plans_summary()
-
-    return templates.TemplateResponse("ar.html", {
-        "request": request,
-        "year": year,
-        "current_year": current_year,
-        "available_years": available_years,
-        "summary": summary,
-        "ar_aging": ar_aging,
-        "trend": trend,
-        "plans": plans,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/noiw", response_class=HTMLResponse)
-async def noiw_pipeline(request: Request, status: str = None):
-    """NOIW Pipeline page."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    pipeline = data.get_noiw_pipeline(status_filter=status)
-    summary = data.get_noiw_summary()
-
-    return templates.TemplateResponse("noiw.html", {
-        "request": request,
-        "pipeline": pipeline,
-        "summary": summary,
-        "current_filter": status,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/wonky", response_class=HTMLResponse)
-async def wonky_invoices(request: Request):
-    """Wonky invoices page."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    invoices = data.get_wonky_invoices()
-
-    return templates.TemplateResponse("wonky.html", {
-        "request": request,
-        "invoices": invoices,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/phases", response_class=HTMLResponse)
-async def phases_dashboard(request: Request, phase: str = None):
-    """Case Phases dashboard showing phase distribution and stalled cases."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    summary = data.get_phases_summary()
-    stalled = data.get_stalled_cases(threshold_days=30)
-    velocity = data.get_phase_velocity()
-    by_case_type = data.get_phase_by_case_type()
-
-    # If a specific phase is selected, get cases in that phase
-    phase_cases = []
-    if phase:
-        phase_cases = data.get_cases_in_phase(phase, limit=50)
-
-    return templates.TemplateResponse("phases.html", {
-        "request": request,
-        "summary": summary,
-        "stalled": stalled,
-        "velocity": velocity,
-        "by_case_type": by_case_type,
-        "current_phase": phase,
-        "phase_cases": phase_cases,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/trends", response_class=HTMLResponse)
-async def trends_dashboard(request: Request, metric: str = None):
-    """Historical KPI trends dashboard."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    summary = data.get_trends_summary()
-
-    # If a specific metric is selected, get detailed comparison
-    metric_detail = None
-    metric_history = []
-    if metric:
-        metric_detail = data.get_metric_comparison(metric)
-        metric_history = data.get_trend_data(metric, days_back=30)
-
-    return templates.TemplateResponse("trends.html", {
-        "request": request,
-        "summary": summary,
-        "current_metric": metric,
-        "metric_detail": metric_detail,
-        "metric_history": metric_history,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/promises", response_class=HTMLResponse)
-async def promises_dashboard(request: Request, status: str = None):
-    """Payment promises tracking dashboard."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    summary = data.get_promises_summary()
-    promises = data.get_promises_list(status=status)
-
-    return templates.TemplateResponse("promises.html", {
-        "request": request,
-        "summary": summary,
-        "promises": promises,
-        "current_filter": status,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/payments", response_class=HTMLResponse)
-async def payments_analytics(request: Request, year: int = None):
-    """Payment analytics dashboard - time to payment by attorney and case type."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    # Default to current year if not specified
-    current_year = datetime.now().year
-    if year is None:
-        year = current_year
-    available_years = [2025, 2026]
-
-    summary = data.get_payment_analytics_summary(year=year)
-    by_attorney = data.get_time_to_payment_by_attorney(year=year)
-    by_case_type = data.get_time_to_payment_by_case_type(year=year)
-    velocity_trend = data.get_payment_velocity_trend(year=year)
-
-    return templates.TemplateResponse("payments.html", {
-        "request": request,
-        "year": year,
-        "current_year": current_year,
-        "available_years": available_years,
-        "summary": summary,
-        "by_attorney": by_attorney,
-        "by_case_type": by_case_type,
-        "velocity_trend": velocity_trend,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/dunning", response_class=HTMLResponse)
-async def dunning_preview(request: Request, stage: int = None):
-    """Dunning notices preview and approval dashboard."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    summary = data.get_dunning_summary()
-    queue = data.get_dunning_queue(stage=stage)
-    history = data.get_dunning_history(limit=20)
-
-    return templates.TemplateResponse("dunning.html", {
-        "request": request,
-        "summary": summary,
-        "queue": queue,
-        "history": history,
-        "current_stage": stage,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/reports", response_class=HTMLResponse)
-async def reports_list(request: Request):
-    """Reports listing page."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    reports = data.get_recent_reports(limit=50)
-
-    return templates.TemplateResponse("reports.html", {
-        "request": request,
-        "reports": reports,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/reports/{filename}", response_class=HTMLResponse)
-async def view_report(request: Request, filename: str):
-    """View a specific report."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    content = data.get_report_content(filename)
-
-    return templates.TemplateResponse("report_view.html", {
-        "request": request,
-        "filename": filename,
-        "content": content,
-        "username": request.session.get("username"),
-    })
-
-
-# API endpoints for HTMX/JSON
 @router.get("/api/stats")
 async def api_stats(request: Request, year: int = None):
     """API endpoint for dashboard stats."""
     if not is_authenticated(request):
-        return {"error": "Unauthorized"}, 401
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     current_year = datetime.now().year
     if year is None:
         year = current_year
@@ -379,12 +47,16 @@ async def api_stats(request: Request, year: int = None):
 async def api_ar_aging(request: Request, year: int = None):
     """API endpoint for AR aging data."""
     if not is_authenticated(request):
-        return {"error": "Unauthorized"}, 401
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     current_year = datetime.now().year
     if year is None:
         year = current_year
     return data.get_ar_aging_breakdown(year=year)
 
+
+# ============================================================================
+# Sync Management API
+# ============================================================================
 
 def _run_sync():
     """Run the sync in background thread."""
@@ -395,7 +67,7 @@ def _run_sync():
 
         # Import sync manager here to avoid circular imports
         import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent))
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent))
         from sync import get_sync_manager
 
         manager = get_sync_manager()
@@ -446,153 +118,9 @@ async def api_sync_status(request: Request):
     })
 
 
-# =========================================================================
-# Attorney Productivity Routes
-# =========================================================================
-
-@router.get("/attorneys", response_class=HTMLResponse)
-async def attorneys_dashboard(request: Request, year: int = None):
-    """Attorney productivity dashboard."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    # Default to current year if not specified
-    current_year = datetime.now().year
-    if year is None:
-        year = current_year
-    available_years = [2025, 2026]
-
-    productivity = data.get_attorney_productivity_data(year=year)
-    aging = data.get_attorney_invoice_aging(year=year)
-
-    # Merge aging data into productivity
-    aging_by_id = {a['attorney_id']: a for a in aging}
-    for p in productivity:
-        a = aging_by_id.get(p['attorney_id'], {})
-        p['aging'] = a
-
-    return templates.TemplateResponse("attorneys.html", {
-        "request": request,
-        "year": year,
-        "current_year": current_year,
-        "available_years": available_years,
-        "attorneys": productivity,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/attorney/{attorney_name}", response_class=HTMLResponse)
-async def attorney_detail_view(request: Request, attorney_name: str, year: int = None):
-    """Attorney detail page with call list."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    # Default to current year if not specified
-    current_year = datetime.now().year
-    if year is None:
-        year = current_year
-    available_years = [2025, 2026]
-
-    detail = data.get_attorney_detail(attorney_name, year=year)
-
-    return templates.TemplateResponse("attorney_detail.html", {
-        "request": request,
-        "year": year,
-        "current_year": current_year,
-        "available_years": available_years,
-        "attorney": detail,
-        "username": request.session.get("username"),
-    })
-
-
-@router.get("/attorneys/export")
-async def attorneys_export_csv(request: Request, year: int = None):
-    """Export attorney productivity data to CSV."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-
-    # Default to current year if not specified
-    current_year = datetime.now().year
-    if year is None:
-        year = current_year
-
-    productivity = data.get_attorney_productivity_data(year=year)
-    aging = data.get_attorney_invoice_aging(year=year)
-
-    # Merge aging data into productivity
-    aging_by_id = {a['attorney_id']: a for a in aging}
-    for p in productivity:
-        a = aging_by_id.get(p['attorney_id'], {})
-        p['aging'] = a
-
-    # Create CSV in memory
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    # Header row
-    writer.writerow([
-        'Attorney',
-        'Active Cases',
-        'Closed MTD',
-        'Closed YTD',
-        f'Billed {year}',
-        f'Collected {year}',
-        'Total Outstanding',
-        'Collection Rate %',
-        'Paid in Full',
-        '1-30 DPD',
-        '31-60 DPD',
-        '61-90 DPD',
-        '91-120 DPD',
-        '121-180 DPD',
-        '180+ DPD',
-        'Total Invoices 60-180 DPD (Needs Calls)',
-    ])
-
-    # Data rows - only attorneys with active cases
-    for atty in productivity:
-        if atty.get('active_cases', 0) > 0:
-            aging = atty.get('aging', {})
-            needs_calls = (
-                (aging.get('dpd_61_90') or 0) +
-                (aging.get('dpd_91_120') or 0) +
-                (aging.get('dpd_121_180') or 0)
-            )
-            writer.writerow([
-                atty.get('attorney_name', ''),
-                atty.get('active_cases', 0),
-                atty.get('closed_mtd', 0),
-                atty.get('closed_ytd', 0),
-                atty.get('total_billed', 0),
-                atty.get('total_collected', 0),
-                atty.get('total_outstanding', 0),
-                round(atty.get('collection_rate', 0), 1),
-                aging.get('paid_full', 0),
-                aging.get('dpd_1_30', 0),
-                aging.get('dpd_31_60', 0),
-                aging.get('dpd_61_90', 0),
-                aging.get('dpd_91_120', 0),
-                aging.get('dpd_121_180', 0),
-                aging.get('dpd_over_180', 0),
-                needs_calls,
-            ])
-
-    # Generate filename with year and date
-    today = datetime.now().strftime('%Y-%m-%d')
-    filename = f"attorney_productivity_{year}_{today}.csv"
-
-    # Return as downloadable CSV
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
-
-
-# =========================================================================
-# AI Chat API
-# =========================================================================
+# ============================================================================
+# Chat API
+# ============================================================================
 
 # Database schema context for Claude
 MYCASE_SCHEMA = """
@@ -675,7 +203,7 @@ NEVER show SQL queries to users - they cannot run them. The system handles execu
 
 When the user asks a question:
 1. Determine if it requires a database query
-2. If yes, generate a SQLite query - the system will run it and show results
+2. If yes, generate a PostgreSQL query - the system will run it and show results
 3. Return ONLY this JSON format (no markdown, no extra text):
 
 For database queries:
@@ -686,7 +214,7 @@ For general questions (no query needed):
 
 Guidelines:
 - ALWAYS return valid JSON only - nothing else
-- Use proper SQLite syntax
+- Use proper PostgreSQL syntax
 - Limit results to 20 rows unless user asks for more
 - Order results meaningfully (by amount, date, etc.)
 - When comparing attorneys, include collection rate calculations
@@ -697,25 +225,26 @@ Guidelines:
 - For percentages use aliases containing "rate" or "pct" (system auto-formats with %)
 
 Example - user asks "Show billing by attorney":
-{{"type": "query", "sql": "SELECT lead_attorney_name, COUNT(*) as invoice_count, SUM(total_amount) as total_billed, SUM(paid_amount) as collected FROM cached_invoices i JOIN cached_cases c ON i.case_id = c.id WHERE strftime('%Y', invoice_date) = '2025' GROUP BY lead_attorney_name ORDER BY total_billed DESC LIMIT 20", "explanation": "Billing by attorney for 2025"}}
+{{"type": "query", "sql": "SELECT lead_attorney_name, COUNT(*) as invoice_count, SUM(total_amount) as total_billed, SUM(paid_amount) as collected FROM cached_invoices i JOIN cached_cases c ON i.case_id = c.id WHERE EXTRACT(YEAR FROM invoice_date) = 2025 GROUP BY lead_attorney_name ORDER BY total_billed DESC LIMIT 20", "explanation": "Billing by attorney for 2025"}}
 """
 
 
 def execute_chat_query(sql: str) -> tuple[list[dict], str | None]:
-    """Execute a SQL query against the MyCase cache database."""
-    # Use the main data cache (dashboard copy may be empty or stale)
-    db_path = Path(__file__).parent.parent / "data" / "mycase_cache.db"
-    if not db_path.exists():
-        db_path = Path(__file__).parent / "mycase_cache.db"
-
+    """Execute a SQL query against the PostgreSQL MyCase cache database."""
     try:
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        rows = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        return rows, None
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql)
+
+            # Get column names
+            column_names = [desc[0] for desc in cursor.description]
+
+            # Fetch all rows
+            rows = []
+            for row in cursor.fetchall():
+                rows.append(dict(zip(column_names, row)))
+
+            return rows, None
     except Exception as e:
         return [], str(e)
 
@@ -893,7 +422,7 @@ async def api_chat(request: Request):
 
 
 # ============================================================================
-# Docket Management Endpoints
+# Docket Management API
 # ============================================================================
 
 @router.post("/api/docket/import")
@@ -978,64 +507,77 @@ async def send_docket_notifications(request: Request):
 @router.get("/case/{case_id}", response_class=HTMLResponse)
 async def case_detail(request: Request, case_id: int):
     """Case detail page with docket timeline."""
+    from dashboard.auth import is_authenticated, require_auth
     if not is_authenticated(request):
+        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/login", status_code=303)
 
-    # Get case info from cache
-    import sqlite3
-    from pathlib import Path
-    db_path = Path(__file__).parent.parent / "data" / "mycase_cache.db"
+    try:
+        # Get case info from cache using db functions
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+            # Get case details
+            cursor.execute(
+                "SELECT * FROM cached_cases WHERE id = %s",
+                (case_id,)
+            )
+            case_row = cursor.fetchone()
 
-    # Get case details
-    cursor.execute("SELECT * FROM cached_cases WHERE id = ?", (case_id,))
-    case_row = cursor.fetchone()
-    case_info = dict(case_row) if case_row else None
+            if not case_row:
+                return HTMLResponse("<h1>Case not found</h1>", status_code=404)
 
-    # Get docket entries
-    cursor.execute("""
-        SELECT * FROM cached_docket_entries
-        WHERE case_id = ?
-        ORDER BY entry_date DESC, id DESC
-    """, (case_id,))
-    docket_entries = [dict(row) for row in cursor.fetchall()]
+            # Convert to dict
+            case_info = {}
+            if case_row:
+                column_names = [desc[0] for desc in cursor.description]
+                case_info = dict(zip(column_names, case_row))
 
-    # Get documents
-    cursor.execute("""
-        SELECT * FROM cached_documents
-        WHERE case_id = ?
-        ORDER BY created_at DESC
-    """, (case_id,))
-    documents = [dict(row) for row in cursor.fetchall()]
+            # Get docket entries
+            cursor.execute(
+                """SELECT * FROM cached_docket_entries
+                   WHERE case_id = %s
+                   ORDER BY entry_date DESC, id DESC""",
+                (case_id,)
+            )
+            docket_rows = cursor.fetchall()
+            docket_column_names = [desc[0] for desc in cursor.description]
+            docket_entries = [dict(zip(docket_column_names, row)) for row in docket_rows]
 
-    conn.close()
+            # Get documents
+            cursor.execute(
+                """SELECT * FROM cached_documents
+                   WHERE case_id = %s
+                   ORDER BY created_at DESC""",
+                (case_id,)
+            )
+            doc_rows = cursor.fetchall()
+            doc_column_names = [desc[0] for desc in cursor.description]
+            documents = [dict(zip(doc_column_names, row)) for row in doc_rows]
 
-    if not case_info:
-        return HTMLResponse("<h1>Case not found</h1>", status_code=404)
+        if not case_info:
+            return HTMLResponse("<h1>Case not found</h1>", status_code=404)
 
-    return templates.TemplateResponse("case_detail.html", {
-        "request": request,
-        "username": request.session.get("username"),
-        "case": case_info,
-        "docket_entries": docket_entries,
-        "documents": documents,
-    })
+        return templates.TemplateResponse("case_detail.html", {
+            "request": request,
+            "username": request.session.get("username"),
+            "case": case_info,
+            "docket_entries": docket_entries,
+            "documents": documents,
+        })
+    except Exception as e:
+        return HTMLResponse(f"<h1>Error loading case</h1><p>{str(e)}</p>", status_code=500)
 
 
 # ============================================================================
-# Document Generation
+# Document Generation API
 # ============================================================================
-
-# Store active document chat sessions
-_doc_sessions = {}
 
 @router.get("/documents", response_class=HTMLResponse)
 async def documents_page(request: Request):
     """Document generation page."""
     if not is_authenticated(request):
+        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/login", status_code=303)
 
     return templates.TemplateResponse("documents.html", {
@@ -1130,7 +672,7 @@ async def api_documents_download_file(request: Request, filename: str):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     # Security: only allow files from the generated directory
-    generated_dir = Path(__file__).parent.parent / "data" / "generated"
+    generated_dir = Path(__file__).parent.parent.parent / "data" / "generated"
     file_path = generated_dir / filename
 
     # Prevent directory traversal attacks

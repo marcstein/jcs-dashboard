@@ -8,17 +8,20 @@ Sends staged collection notices based on invoice past due dates:
 - Notice 4: Final Notice (45-60 days past due)
 
 Uses SendGrid for email delivery with test mode support.
+Multi-tenant PostgreSQL support via firm_id parameter.
 """
 import os
-import sqlite3
 import json
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
+from db.cache import get_invoices, get_contacts
+from db.tracking import record_dunning_notice, get_last_dunning_level
+
 # Load .env file if it exists
-from config import DATA_DIR, BASE_DIR
+from config import BASE_DIR
 
 env_file = BASE_DIR / ".env"
 if env_file.exists():
@@ -448,10 +451,10 @@ JCS Law Firm
 
 
 class DunningEmailManager:
-    """Manages sending dunning emails."""
+    """Manages sending dunning emails. PostgreSQL multi-tenant via firm_id."""
 
-    def __init__(self, cache_path: Path = None, test_mode: bool = True, test_email: str = None):
-        self.cache_path = cache_path or DATA_DIR / "mycase_cache.db"
+    def __init__(self, firm_id: str, test_mode: bool = True, test_email: str = None):
+        self.firm_id = firm_id
         self.test_mode = test_mode
         self.test_email = test_email or "marc.stein@gmail.com"
         self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
@@ -459,56 +462,72 @@ class DunningEmailManager:
         self.from_name = "Melissa Scarlett - JCS Law Firm"
 
     def get_invoices_for_stage(self, stage: DunningStage, limit: int = 1) -> List[DunningInvoice]:
-        """Get invoices that match a dunning stage."""
-        conn = sqlite3.connect(self.cache_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        """Get invoices that match a dunning stage from PostgreSQL."""
+        # Get all invoices for this firm
+        all_invoices = get_invoices(self.firm_id)
 
-        query = """
-            SELECT
-                i.id as invoice_id,
-                i.invoice_number,
-                i.case_id,
-                c.name as case_name,
-                i.total_amount,
-                i.paid_amount,
-                i.balance_due,
-                i.due_date,
-                CAST(julianday('now') - julianday(i.due_date) AS INTEGER) as days_overdue,
-                COALESCE(cl.first_name || ' ' || cl.last_name, 'Client') as client_name,
-                COALESCE(cl.email, '') as client_email
-            FROM cached_invoices i
-            LEFT JOIN cached_cases c ON c.id = i.case_id
-            LEFT JOIN cached_clients cl ON cl.id = (
-                SELECT json_extract(c.data_json, '$.clients[0].id')
-            )
-            WHERE i.balance_due > 0
-            AND CAST(julianday('now') - julianday(i.due_date) AS INTEGER) BETWEEN ? AND ?
-            ORDER BY days_overdue DESC
-            LIMIT ?
-        """
+        # Get all cases and contacts for lookup
+        from db.cache import get_cases, get_contacts as get_cached_contacts
+        all_cases = get_cases(self.firm_id)
+        all_contacts = get_cached_contacts(self.firm_id)
 
-        cursor.execute(query, (stage.min_days, stage.max_days, limit))
-        rows = cursor.fetchall()
-        conn.close()
+        # Build lookup maps
+        cases_map = {c['id']: c for c in all_cases}
+        contacts_map = {c['id']: c for c in all_contacts}
 
+        # Filter invoices by balance due and days overdue
         invoices = []
-        for row in rows:
+        today = date.today()
+
+        for inv in all_invoices:
+            # Skip if no balance due
+            if not inv.get('balance_due') or inv['balance_due'] <= 0:
+                continue
+
+            # Skip if no due date
+            if not inv.get('due_date'):
+                continue
+
+            # Parse due date
+            due_date = inv['due_date']
+            if isinstance(due_date, str):
+                due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+
+            # Calculate days overdue
+            days_overdue = (today - due_date).days
+
+            # Check if in stage range
+            if not (stage.min_days <= days_overdue <= stage.max_days):
+                continue
+
+            # Get case name
+            case_id = inv.get('case_id')
+            case_data = cases_map.get(case_id, {})
+            case_name = case_data.get('name', 'Unknown Case')
+
+            # Get client info from contact
+            contact_id = inv.get('contact_id')
+            contact_data = contacts_map.get(contact_id, {})
+            client_name = f"{contact_data.get('first_name', '')} {contact_data.get('last_name', '')}".strip() or 'Client'
+            client_email = contact_data.get('email', '')
+
             invoices.append(DunningInvoice(
-                invoice_id=row['invoice_id'],
-                invoice_number=str(row['invoice_number']),
-                case_id=row['case_id'],
-                case_name=row['case_name'] or 'Unknown Case',
-                client_name=row['client_name'],
-                client_email=row['client_email'],
-                total_amount=float(row['total_amount']),
-                paid_amount=float(row['paid_amount']),
-                balance_due=float(row['balance_due']),
-                due_date=datetime.strptime(row['due_date'], '%Y-%m-%d').date() if row['due_date'] else date.today(),
-                days_overdue=int(row['days_overdue']),
+                invoice_id=inv['id'],
+                invoice_number=str(inv.get('invoice_number', '')),
+                case_id=case_id,
+                case_name=case_name,
+                client_name=client_name,
+                client_email=client_email,
+                total_amount=float(inv.get('total_amount', 0)),
+                paid_amount=float(inv.get('paid_amount', 0)),
+                balance_due=float(inv.get('balance_due', 0)),
+                due_date=due_date,
+                days_overdue=days_overdue,
             ))
 
-        return invoices
+        # Return up to limit invoices, sorted by days overdue descending
+        invoices.sort(key=lambda x: x.days_overdue, reverse=True)
+        return invoices[:limit]
 
     def send_email_smtp(
         self,
@@ -608,7 +627,7 @@ class DunningEmailManager:
             return False, str(e)
 
     def send_dunning_notice(self, stage: int, inv: DunningInvoice) -> Tuple[bool, str]:
-        """Send a dunning notice for the given stage."""
+        """Send a dunning notice for the given stage and record to database."""
         stage_info = DUNNING_STAGES[stage - 1]
 
         # Generate case reference for subject
@@ -634,7 +653,24 @@ class DunningEmailManager:
         # Determine recipient
         recipient = self.test_email if self.test_mode else (inv.client_email or self.test_email)
 
-        return self.send_email(recipient, subject, text, html)
+        # Send email
+        success, message = self.send_email(recipient, subject, text, html)
+
+        # Record to database if successful
+        if success:
+            record_dunning_notice(
+                firm_id=self.firm_id,
+                invoice_id=inv.invoice_id,
+                contact_id=0,  # TODO: Get actual contact_id if available
+                days_overdue=inv.days_overdue,
+                notice_level=stage,
+                amount_due=inv.balance_due,
+                invoice_number=inv.invoice_number,
+                case_id=inv.case_id,
+                template_used=f"notice_{stage}",
+            )
+
+        return success, message
 
     def send_test_samples(self) -> Dict:
         """Send one sample of each dunning stage for testing."""
@@ -705,7 +741,9 @@ class DunningEmailManager:
 if __name__ == "__main__":
     import sys
 
-    test_email = sys.argv[1] if len(sys.argv) > 1 else "marc.stein@gmail.com"
+    # For testing, use default firm_id
+    firm_id = sys.argv[1] if len(sys.argv) > 1 else "jcs_law"
+    test_email = sys.argv[2] if len(sys.argv) > 2 else "marc.stein@gmail.com"
 
-    manager = DunningEmailManager(test_mode=True, test_email=test_email)
+    manager = DunningEmailManager(firm_id=firm_id, test_mode=True, test_email=test_email)
     results = manager.send_test_samples()

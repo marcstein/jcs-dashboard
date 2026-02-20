@@ -16,7 +16,6 @@ Standard Placeholders:
 """
 
 import re
-import sqlite3
 import hashlib
 import io
 from pathlib import Path
@@ -25,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from docx import Document
 
-from config import DATA_DIR
+from db.connection import get_connection
 
 
 # =============================================================================
@@ -127,8 +126,8 @@ class DuplicateGroup:
 class TemplatePreprocessor:
     """Preprocesses templates to use standardized placeholders."""
 
-    def __init__(self, db_path: Path = None):
-        self.db_path = db_path or (DATA_DIR / "document_engine.db")
+    def __init__(self, firm_id: Optional[str] = None):
+        self.firm_id = firm_id
         self.processed: List[ProcessedTemplate] = []
         self.duplicates: List[DuplicateGroup] = []
 
@@ -139,17 +138,18 @@ class TemplatePreprocessor:
         Returns:
             Tuple of (templates_processed, duplicates_found)
         """
-        conn = sqlite3.connect(self.db_path)
+        firm_id = firm_id or self.firm_id
 
-        query = "SELECT id, name, file_content FROM templates WHERE is_active = 1"
-        params = []
-        if firm_id:
-            query += " AND firm_id = ?"
-            params.append(firm_id)
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                query = "SELECT id, name, file_content FROM templates WHERE status = 'active'"
+                params = []
+                if firm_id:
+                    query += " AND firm_id = %s"
+                    params.append(firm_id)
 
-        cursor = conn.execute(query, params)
-        templates = cursor.fetchall()
-        conn.close()
+                cursor.execute(query, params)
+                templates = cursor.fetchall()
 
         print(f"Processing {len(templates)} templates...")
 
@@ -169,12 +169,12 @@ class TemplatePreprocessor:
                 hash_to_templates[processed.content_hash].append((template_id, name))
 
         # Find duplicates
-        for content_hash, templates in hash_to_templates.items():
-            if len(templates) > 1:
+        for content_hash, templates_list in hash_to_templates.items():
+            if len(templates_list) > 1:
                 group = DuplicateGroup(
                     content_hash=content_hash,
-                    template_ids=[t[0] for t in templates],
-                    template_names=[t[1] for t in templates]
+                    template_ids=[t[0] for t in templates_list],
+                    template_names=[t[1] for t in templates_list]
                 )
                 self.duplicates.append(group)
 
@@ -324,6 +324,7 @@ class TemplatePreprocessor:
 
     def save_processed_templates(self, output_dir: Path = None):
         """Save all processed templates to a directory."""
+        from config import DATA_DIR
         output_dir = output_dir or (DATA_DIR / "processed_templates")
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -337,22 +338,21 @@ class TemplatePreprocessor:
 
     def update_database(self):
         """Update the database with processed templates."""
-        conn = sqlite3.connect(self.db_path)
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                for processed in self.processed:
+                    cursor.execute("""
+                        UPDATE templates
+                        SET file_content = %s,
+                            variables = %s
+                        WHERE id = %s
+                    """, (
+                        processed.processed_content,
+                        ','.join(processed.variables_found),
+                        processed.id
+                    ))
+            conn.commit()
 
-        for processed in self.processed:
-            conn.execute("""
-                UPDATE templates
-                SET file_content = ?,
-                    variables = ?
-                WHERE id = ?
-            """, (
-                processed.processed_content,
-                ','.join(processed.variables_found),
-                processed.id
-            ))
-
-        conn.commit()
-        conn.close()
         print(f"Updated {len(self.processed)} templates in database")
 
     def print_report(self):
@@ -387,7 +387,7 @@ class TemplatePreprocessor:
 
 def preprocess_templates(firm_id: str = None, update_db: bool = False):
     """Main function to preprocess templates."""
-    preprocessor = TemplatePreprocessor()
+    preprocessor = TemplatePreprocessor(firm_id=firm_id)
 
     processed, duplicates = preprocessor.process_all_templates(firm_id)
 
