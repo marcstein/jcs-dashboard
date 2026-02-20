@@ -196,66 +196,111 @@ class DashboardData:
 
     # ─── Staff Caseload (for dashboard widgets) ───────────────────
 
+    def _is_attorney(self, staff_name: str) -> bool:
+        """Check if a staff member is an attorney (by staff_type or lead_attorney presence)."""
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                # Check staff_type first
+                cursor.execute("""
+                    SELECT staff_type FROM cached_staff
+                    WHERE firm_id = %s AND name ILIKE %s
+                """, (self.firm_id, f'%{staff_name}%'))
+                row = cursor.fetchone()
+                if row and row[0] and 'attorney' in (row[0] or '').lower():
+                    return True
+                # Also check if they appear as lead_attorney on any case
+                cursor.execute("""
+                    SELECT COUNT(*) FROM cached_cases
+                    WHERE firm_id = %s AND lead_attorney_name ILIKE %s AND status = 'open'
+                """, (self.firm_id, f'%{staff_name}%'))
+                return (cursor.fetchone()[0] or 0) > 0
+        except Exception:
+            return False
+
     def get_staff_caseload_data(self, staff_name: str) -> Dict:
-        """Get caseload summary for a staff member (dashboard widget)."""
+        """Get caseload summary for a staff member (dashboard widget).
+
+        For attorneys: active cases = cases where they are lead attorney.
+        For staff: active cases = cases where they have tasks assigned.
+        """
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
                 staff_id = self._get_staff_id_by_name(staff_name)
+                is_attorney = self._is_attorney(staff_name)
 
-                if not staff_id:
+                if not staff_id and not is_attorney:
                     return {'active_cases': 0, 'tasks_done': 0, 'tasks_total': 0, 'overdue_tasks': 0}
 
-                # Build assignee filter for tasks
-                assignee_filter = "AND (t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name = %s)"
-                assignee_params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
+                # Build assignee filter for tasks (used for task counts)
+                assignee_filter = ""
+                assignee_params = []
+                if staff_id:
+                    assignee_filter = "AND (t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name = %s)"
+                    assignee_params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
 
-                # Active cases where this staff member has ANY task assigned (open cases)
-                cursor.execute(f"""
-                    SELECT COUNT(DISTINCT t.case_id)
-                    FROM cached_tasks t
-                    JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
-                    WHERE t.firm_id = %s
-                      AND c.status = 'open'
-                      {assignee_filter}
-                """, [self.firm_id] + assignee_params)
-                active_cases = cursor.fetchone()[0] or 0
+                # Active cases: attorneys use lead_attorney_name, staff use task assignments
+                if is_attorney:
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name ILIKE %s AND status = 'open'
+                    """, (self.firm_id, f'%{staff_name}%'))
+                    active_cases = cursor.fetchone()[0] or 0
+                elif staff_id:
+                    cursor.execute(f"""
+                        SELECT COUNT(DISTINCT t.case_id)
+                        FROM cached_tasks t
+                        JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
+                        WHERE t.firm_id = %s
+                          AND c.status = 'open'
+                          {assignee_filter}
+                    """, [self.firm_id] + assignee_params)
+                    active_cases = cursor.fetchone()[0] or 0
+                else:
+                    active_cases = 0
 
                 # Tasks done this week
-                cursor.execute(f"""
-                    SELECT COUNT(*)
-                    FROM cached_tasks t
-                    JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
-                    WHERE t.firm_id = %s
-                      AND t.completed = true
-                      AND DATE(t.completed_at) >= CURRENT_DATE - INTERVAL '7 days'
-                      {assignee_filter}
-                """, [self.firm_id] + assignee_params)
-                tasks_done = cursor.fetchone()[0] or 0
+                tasks_done = 0
+                if staff_id:
+                    cursor.execute(f"""
+                        SELECT COUNT(*)
+                        FROM cached_tasks t
+                        JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
+                        WHERE t.firm_id = %s
+                          AND t.completed = true
+                          AND DATE(t.completed_at) >= CURRENT_DATE - INTERVAL '7 days'
+                          {assignee_filter}
+                    """, [self.firm_id] + assignee_params)
+                    tasks_done = cursor.fetchone()[0] or 0
 
-                # Total tasks assigned
-                cursor.execute(f"""
-                    SELECT COUNT(*)
-                    FROM cached_tasks t
-                    JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
-                    WHERE t.firm_id = %s
-                      AND (t.completed = false OR t.completed IS NULL)
-                      {assignee_filter}
-                """, [self.firm_id] + assignee_params)
-                tasks_total = cursor.fetchone()[0] or 0
+                # Total open tasks assigned
+                tasks_total = 0
+                if staff_id:
+                    cursor.execute(f"""
+                        SELECT COUNT(*)
+                        FROM cached_tasks t
+                        JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
+                        WHERE t.firm_id = %s
+                          AND (t.completed = false OR t.completed IS NULL)
+                          {assignee_filter}
+                    """, [self.firm_id] + assignee_params)
+                    tasks_total = cursor.fetchone()[0] or 0
 
                 # Overdue tasks
-                cursor.execute(f"""
-                    SELECT COUNT(*)
-                    FROM cached_tasks t
-                    JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
-                    WHERE t.firm_id = %s
-                      AND t.due_date < CURRENT_DATE
-                      AND t.due_date >= CURRENT_DATE - INTERVAL '200 days'
-                      AND (t.completed = false OR t.completed IS NULL)
-                      {assignee_filter}
-                """, [self.firm_id] + assignee_params)
-                overdue_tasks = cursor.fetchone()[0] or 0
+                overdue_tasks = 0
+                if staff_id:
+                    cursor.execute(f"""
+                        SELECT COUNT(*)
+                        FROM cached_tasks t
+                        JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
+                        WHERE t.firm_id = %s
+                          AND t.due_date < CURRENT_DATE
+                          AND t.due_date >= CURRENT_DATE - INTERVAL '200 days'
+                          AND (t.completed = false OR t.completed IS NULL)
+                          {assignee_filter}
+                    """, [self.firm_id] + assignee_params)
+                    overdue_tasks = cursor.fetchone()[0] or 0
 
                 return {
                     'active_cases': active_cases,
@@ -270,27 +315,42 @@ class DashboardData:
     # ─── Staff Active Cases List (for detail page) ────────────────
 
     def get_staff_active_cases_list(self, staff_name: str) -> list:
-        """Get list of active cases for a staff member (detail page)."""
+        """Get list of active cases for a staff member (detail page).
+
+        For attorneys: cases where they are lead attorney.
+        For staff: cases where they have tasks assigned.
+        """
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
-                staff_id = self._get_staff_id_by_name(staff_name)
+                is_attorney = self._is_attorney(staff_name)
 
-                if not staff_id:
-                    return []
+                if is_attorney:
+                    cursor.execute("""
+                        SELECT c.id, c.name, c.practice_area as case_type, c.case_number
+                        FROM cached_cases c
+                        WHERE c.firm_id = %s
+                          AND c.lead_attorney_name ILIKE %s
+                          AND c.status = 'open'
+                        ORDER BY c.name
+                    """, (self.firm_id, f'%{staff_name}%'))
+                else:
+                    staff_id = self._get_staff_id_by_name(staff_name)
+                    if not staff_id:
+                        return []
 
-                assignee_filter = "AND (t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name = %s)"
-                assignee_params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
+                    assignee_filter = "AND (t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name = %s)"
+                    assignee_params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
 
-                cursor.execute(f"""
-                    SELECT DISTINCT c.id, c.name, c.practice_area as case_type, c.case_number
-                    FROM cached_cases c
-                    JOIN cached_tasks t ON t.case_id = c.id AND t.firm_id = c.firm_id
-                    WHERE c.firm_id = %s
-                      AND c.status = 'open'
-                      {assignee_filter}
-                    ORDER BY c.name
-                """, [self.firm_id] + assignee_params)
+                    cursor.execute(f"""
+                        SELECT DISTINCT c.id, c.name, c.practice_area as case_type, c.case_number
+                        FROM cached_cases c
+                        JOIN cached_tasks t ON t.case_id = c.id AND t.firm_id = c.firm_id
+                        WHERE c.firm_id = %s
+                          AND c.status = 'open'
+                          {assignee_filter}
+                        ORDER BY c.name
+                    """, [self.firm_id] + assignee_params)
 
                 return [{'id': r[0], 'name': r[1], 'case_type': r[2], 'case_number': r[3]}
                         for r in cursor.fetchall()]
