@@ -388,3 +388,168 @@ class ARDataMixin:
                         'last_notice_date': r[6]} for r in cursor.fetchall()]
         except Exception:
             return []
+
+    def get_dunning_summary(self) -> Dict:
+        """Get dunning summary with counts per stage."""
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT stage, COUNT(*) as count, COALESCE(SUM(balance_due), 0) as total
+                    FROM dunning_notices
+                    WHERE firm_id = %s AND status = 'pending'
+                    GROUP BY stage ORDER BY stage
+                """, (self.firm_id,))
+                by_stage = {}
+                total_count = 0
+                total_amount = 0
+                for r in cursor.fetchall():
+                    by_stage[r[0]] = {'count': r[1], 'total': r[2]}
+                    total_count += r[1]
+                    total_amount += r[2]
+                return {
+                    'by_stage': by_stage,
+                    'total_count': total_count,
+                    'total_amount': total_amount,
+                }
+        except Exception:
+            return {'by_stage': {}, 'total_count': 0, 'total_amount': 0}
+
+    def get_dunning_queue(self, stage: int = None) -> List[Dict]:
+        """Get dunning queue (alias for get_dunning_preview)."""
+        return self.get_dunning_preview(stage=stage)
+
+    def get_dunning_history(self, limit: int = 20) -> List[Dict]:
+        """Get recent dunning notice history."""
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT invoice_id, case_name, contact_name, balance_due,
+                           stage, status, last_notice_date, updated_at
+                    FROM dunning_notices
+                    WHERE firm_id = %s AND status != 'pending'
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                """, (self.firm_id, limit))
+                return [{'invoice_id': r[0], 'case_name': r[1], 'contact_name': r[2],
+                        'balance_due': r[3], 'stage': r[4], 'status': r[5],
+                        'last_notice_date': r[6], 'updated_at': r[7]}
+                       for r in cursor.fetchall()]
+        except Exception:
+            return []
+
+    def get_payment_analytics_summary(self, year: int = None) -> Dict:
+        """Get payment analytics summary."""
+        from datetime import datetime
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT COUNT(*) as total_invoices,
+                           COALESCE(SUM(total_amount), 0) as total_billed,
+                           COALESCE(SUM(paid_amount), 0) as total_collected,
+                           COALESCE(AVG(CASE WHEN paid_amount > 0
+                               THEN GREATEST((CURRENT_DATE - due_date), 0) END), 0) as avg_days_to_payment
+                    FROM cached_invoices
+                    WHERE firm_id = %s AND EXTRACT(YEAR FROM invoice_date) = %s
+                """, (self.firm_id, year))
+                r = cursor.fetchone()
+                return {
+                    'total_invoices': r[0] or 0,
+                    'total_billed': r[1] or 0,
+                    'total_collected': r[2] or 0,
+                    'avg_days_to_payment': round(r[3] or 0),
+                    'collection_rate': (r[2] / r[1] * 100) if r[1] else 0,
+                }
+        except Exception:
+            return {'total_invoices': 0, 'total_billed': 0, 'total_collected': 0,
+                    'avg_days_to_payment': 0, 'collection_rate': 0}
+
+    def get_time_to_payment_by_attorney(self, year: int = None) -> List[Dict]:
+        """Get average time-to-payment broken down by attorney."""
+        from datetime import datetime
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT c.lead_attorney_name,
+                           COUNT(i.id) as invoice_count,
+                           COALESCE(SUM(i.total_amount), 0) as total_billed,
+                           COALESCE(SUM(i.paid_amount), 0) as total_collected,
+                           COALESCE(AVG(CASE WHEN i.paid_amount > 0
+                               THEN GREATEST((CURRENT_DATE - i.due_date), 0) END), 0) as avg_days
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s AND EXTRACT(YEAR FROM i.invoice_date) = %s
+                      AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                    GROUP BY c.lead_attorney_name
+                    ORDER BY avg_days DESC
+                """, (self.firm_id, year))
+                return [{'attorney_name': r[0], 'invoice_count': r[1],
+                        'total_billed': r[2], 'total_collected': r[3],
+                        'avg_days': round(r[4] or 0)}
+                       for r in cursor.fetchall()]
+        except Exception:
+            return []
+
+    def get_time_to_payment_by_case_type(self, year: int = None) -> List[Dict]:
+        """Get average time-to-payment broken down by case type."""
+        from datetime import datetime
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT COALESCE(c.practice_area, 'Unknown') as case_type,
+                           COUNT(i.id) as invoice_count,
+                           COALESCE(SUM(i.total_amount), 0) as total_billed,
+                           COALESCE(SUM(i.paid_amount), 0) as total_collected,
+                           COALESCE(AVG(CASE WHEN i.paid_amount > 0
+                               THEN GREATEST((CURRENT_DATE - i.due_date), 0) END), 0) as avg_days
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s AND EXTRACT(YEAR FROM i.invoice_date) = %s
+                    GROUP BY c.practice_area
+                    ORDER BY total_billed DESC
+                """, (self.firm_id, year))
+                return [{'case_type': r[0], 'invoice_count': r[1],
+                        'total_billed': r[2], 'total_collected': r[3],
+                        'avg_days': round(r[4] or 0)}
+                       for r in cursor.fetchall()]
+        except Exception:
+            return []
+
+    def get_payment_velocity_trend(self, year: int = None, months_back: int = 6) -> List[Dict]:
+        """Get payment velocity trend over recent months."""
+        from datetime import datetime
+        current_year = datetime.now().year
+        if year is None:
+            year = current_year
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT DATE_TRUNC('month', invoice_date) as month,
+                           COUNT(*) as invoice_count,
+                           COALESCE(SUM(total_amount), 0) as billed,
+                           COALESCE(SUM(paid_amount), 0) as collected
+                    FROM cached_invoices
+                    WHERE firm_id = %s
+                      AND invoice_date >= CURRENT_DATE - INTERVAL '%s months'
+                    GROUP BY DATE_TRUNC('month', invoice_date)
+                    ORDER BY month
+                """ % ('%s', months_back), (self.firm_id,))
+                return [{'month': str(r[0])[:10], 'invoice_count': r[1],
+                        'billed': r[2], 'collected': r[3]}
+                       for r in cursor.fetchall()]
+        except Exception:
+            return []
