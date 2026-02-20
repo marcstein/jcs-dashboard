@@ -221,6 +221,15 @@ CREATE TABLE IF NOT EXISTS cached_time_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_cte_date ON cached_time_entries(firm_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_cte_staff ON cached_time_entries(firm_id, staff_id);
+
+CREATE TABLE IF NOT EXISTS staff_exclusions (
+    firm_id VARCHAR(36) NOT NULL,
+    staff_id INTEGER NOT NULL,
+    staff_name TEXT,
+    excluded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reason TEXT,
+    PRIMARY KEY (firm_id, staff_id)
+);
 """
 
 
@@ -620,14 +629,73 @@ def get_staff(firm_id: str, active_only: bool = True) -> List[Dict]:
         cur = conn.cursor()
         if active_only:
             cur.execute(
-                "SELECT * FROM cached_staff WHERE firm_id = %s AND active = TRUE ORDER BY name",
-                (firm_id,),
+                """SELECT s.* FROM cached_staff s
+                   WHERE s.firm_id = %s AND s.active = TRUE
+                     AND s.id NOT IN (SELECT staff_id FROM staff_exclusions WHERE firm_id = %s)
+                   ORDER BY s.name""",
+                (firm_id, firm_id),
             )
         else:
             cur.execute(
-                "SELECT * FROM cached_staff WHERE firm_id = %s ORDER BY name",
-                (firm_id,),
+                """SELECT s.* FROM cached_staff s
+                   WHERE s.firm_id = %s
+                     AND s.id NOT IN (SELECT staff_id FROM staff_exclusions WHERE firm_id = %s)
+                   ORDER BY s.name""",
+                (firm_id, firm_id),
             )
+        return [dict(r) for r in cur.fetchall()]
+
+
+# ============================================================
+# Staff Exclusions
+# ============================================================
+
+def get_excluded_staff_ids(firm_id: str) -> set:
+    """Return set of staff IDs that should be skipped during sync."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT staff_id FROM staff_exclusions WHERE firm_id = %s",
+            (firm_id,),
+        )
+        return {row[0] if isinstance(row, tuple) else row['staff_id'] for row in cur.fetchall()}
+
+
+def exclude_staff(firm_id: str, staff_id: int, staff_name: str = None, reason: str = None):
+    """Mark a staff member as excluded from sync. They won't be re-added."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO staff_exclusions (firm_id, staff_id, staff_name, reason)
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (firm_id, staff_id) DO UPDATE SET
+                   staff_name = EXCLUDED.staff_name,
+                   reason = EXCLUDED.reason,
+                   excluded_at = CURRENT_TIMESTAMP""",
+            (firm_id, staff_id, staff_name, reason),
+        )
+    logger.info("Excluded staff %s (ID %d) for firm %s", staff_name, staff_id, firm_id)
+
+
+def include_staff(firm_id: str, staff_id: int):
+    """Remove a staff member from the exclusion list so they sync again."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM staff_exclusions WHERE firm_id = %s AND staff_id = %s",
+            (firm_id, staff_id),
+        )
+    logger.info("Re-included staff ID %d for firm %s", staff_id, firm_id)
+
+
+def get_excluded_staff(firm_id: str) -> List[Dict]:
+    """List all excluded staff members."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM staff_exclusions WHERE firm_id = %s ORDER BY excluded_at",
+            (firm_id,),
+        )
         return [dict(r) for r in cur.fetchall()]
 
 

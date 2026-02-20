@@ -24,6 +24,7 @@ from db.cache import (
     batch_upsert_documents,
     get_cached_count,
     get_cached_updated_at,
+    get_excluded_staff_ids,
     update_sync_status,
 )
 from db.connection import get_connection
@@ -439,16 +440,27 @@ class SyncManager:
         )
 
     def _sync_staff(self, cached_timestamps: Dict[int, str], full_sync: bool) -> SyncResult:
-        """Sync staff from API to cache."""
+        """Sync staff from API to cache, skipping excluded staff."""
         print("  Fetching staff from API...")
         # Staff endpoint returns all at once (small dataset)
         staff_list = self.client.get_staff()
 
-        inserted, updated, unchanged = 0, 0, 0
+        # Load excluded staff IDs so we don't re-add deleted/inactive staff
+        excluded_ids = get_excluded_staff_ids(self.firm_id)
+        if excluded_ids:
+            print(f"  Skipping {len(excluded_ids)} excluded staff members")
+
+        inserted, updated, unchanged, skipped = 0, 0, 0, 0
         to_upsert = []
 
         for staff in staff_list:
             staff_id = staff.get('id')
+
+            # Skip excluded staff — they were intentionally removed
+            if staff_id in excluded_ids:
+                skipped += 1
+                continue
+
             api_updated = staff.get('updated_at')
             cached_updated = cached_timestamps.get(staff_id)
 

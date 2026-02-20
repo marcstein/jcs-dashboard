@@ -12,7 +12,7 @@ from commands.collections import collections
 from commands.deadlines import deadlines
 from commands.analytics import analytics
 from commands.templates_cmd import templates
-from commands.sync import sync_data, run_all
+from commands.sync import sync_data, run_all, staff_group
 from commands.kpi import kpi
 from commands.plans import plans
 from commands.intake import intake
@@ -56,6 +56,7 @@ cli.add_command(analytics)
 cli.add_command(templates, name="templates")
 cli.add_command(sync_data, name="sync")
 cli.add_command(run_all, name="run")
+cli.add_command(staff_group, name="staff")
 cli.add_command(kpi)
 cli.add_command(plans)
 cli.add_command(intake)
