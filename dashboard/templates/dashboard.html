@@ -245,6 +245,110 @@
     </div>
     </a>
 
+    <!-- John Schleiffarth - Managing Attorney -->
+    <a href="/staff/John" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>John Schleiffarth<span class="sop-title">Managing Attorney</span></h3>
+            <span class="sop-status {% if john_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if john_sop.overdue_count == 0 %}On Track{% else %}{{ john_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ john_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ john_caseload.closed_cases }}</span>
+                <span class="metric-label">Closed Cases</span>
+            </div>
+            <div class="sop-metric {% if john_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ john_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Leigh Hawk - Attorney -->
+    <a href="/staff/Leigh" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Leigh Hawk<span class="sop-title">Attorney</span></h3>
+            <span class="sop-status {% if leigh_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if leigh_sop.overdue_count == 0 %}On Track{% else %}{{ leigh_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ leigh_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ leigh_caseload.closed_cases }}</span>
+                <span class="metric-label">Closed Cases</span>
+            </div>
+            <div class="sop-metric {% if leigh_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ leigh_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Jen Kusmer - Attorney -->
+    <a href="/staff/Jen" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Jen Kusmer<span class="sop-title">Attorney</span></h3>
+            <span class="sop-status {% if jen_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if jen_sop.overdue_count == 0 %}On Track{% else %}{{ jen_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ jen_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ jen_caseload.closed_cases }}</span>
+                <span class="metric-label">Closed Cases</span>
+            </div>
+            <div class="sop-metric {% if jen_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ jen_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
+    <!-- Ethan Dwyer - Attorney -->
+    <a href="/staff/Ethan" class="sop-widget-link">
+    <div class="sop-widget sop-widget-sm sop-widget-clickable">
+        <div class="sop-header">
+            <h3>Ethan Dwyer<span class="sop-title">Attorney</span></h3>
+            <span class="sop-status {% if ethan_sop.overdue_count == 0 %}status-ok{% else %}status-alert{% endif %}">
+                {% if ethan_sop.overdue_count == 0 %}On Track{% else %}{{ ethan_sop.overdue_count }} Overdue{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics sop-metrics-compact">
+            <div class="sop-metric">
+                <span class="metric-value">{{ ethan_caseload.active_cases }}</span>
+                <span class="metric-label">Active Cases</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ ethan_caseload.closed_cases }}</span>
+                <span class="metric-label">Closed Cases</span>
+            </div>
+            <div class="sop-metric {% if ethan_sop.overdue_count > 0 %}metric-alert{% endif %}">
+                <span class="metric-value">{{ ethan_sop.overdue_count }}</span>
+                <span class="metric-label">Overdue Tasks</span>
+            </div>
+        </div>
+    </div>
+    </a>
+
     <!-- Melinda Gorman - Task Owner (2025 only - no longer with firm) -->
     {% if year == 2025 %}
     <a href="/staff/Melinda" class="sop-widget-link">

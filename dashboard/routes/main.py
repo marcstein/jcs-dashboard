@@ -43,6 +43,10 @@ async def index(request: Request, year: int = None):
     anthony_sop = data.get_legal_assistant_sop_data("Anthony")
     melinda_sop = data.get_legal_assistant_sop_data("Melinda")
     tiffany_personal_sop = data.get_legal_assistant_sop_data("Tiffany")
+    john_sop = data.get_legal_assistant_sop_data("John")
+    leigh_sop = data.get_legal_assistant_sop_data("Leigh")
+    jen_sop = data.get_legal_assistant_sop_data("Jen")
+    ethan_sop = data.get_legal_assistant_sop_data("Ethan")
 
     # Attorney summary for dashboard widget
     attorney_summary = data.get_attorney_summary(year=year)
@@ -54,6 +58,10 @@ async def index(request: Request, year: int = None):
     heidi_caseload = data.get_staff_caseload_data("Heidi Leopold")
     anthony_caseload = data.get_staff_caseload_data("Anthony Muhlenkamp")
     melinda_caseload = data.get_staff_caseload_data("Melinda Gorman")
+    john_caseload = data.get_staff_caseload_data("John Schleiffarth")
+    leigh_caseload = data.get_staff_caseload_data("Leigh Hawk")
+    jen_caseload = data.get_staff_caseload_data("Jen Kusmer")
+    ethan_caseload = data.get_staff_caseload_data("Ethan Dwyer")
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
@@ -72,6 +80,10 @@ async def index(request: Request, year: int = None):
         "anthony_sop": anthony_sop,
         "melinda_sop": melinda_sop,
         "tiffany_personal_sop": tiffany_personal_sop,
+        "john_sop": john_sop,
+        "leigh_sop": leigh_sop,
+        "jen_sop": jen_sop,
+        "ethan_sop": ethan_sop,
         "attorney_summary": attorney_summary,
         "tiffany_caseload": tiffany_caseload,
         "alison_caseload": alison_caseload,
@@ -79,6 +91,10 @@ async def index(request: Request, year: int = None):
         "heidi_caseload": heidi_caseload,
         "anthony_caseload": anthony_caseload,
         "melinda_caseload": melinda_caseload,
+        "john_caseload": john_caseload,
+        "leigh_caseload": leigh_caseload,
+        "jen_caseload": jen_caseload,
+        "ethan_caseload": ethan_caseload,
         "username": request.session.get("username"),
     })
 
