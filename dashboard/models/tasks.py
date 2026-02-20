@@ -48,6 +48,8 @@ class TaskDataMixin:
     def get_staff_tasks(self, staff_name: str, include_completed: bool = False) -> Dict:
         """Get detailed task list for a specific staff member.
 
+        For attorneys, also includes tasks on cases where they are lead attorney.
+
         Returns dict with keys matching what the staff_tasks.html template expects:
         - staff_name, overdue_tasks, overdue_count
         - due_today (list), due_today_count
@@ -61,11 +63,20 @@ class TaskDataMixin:
                 staff_id = self._get_staff_id_by_name(staff_name)
                 staff_lookup = self._get_staff_lookup()
                 full_name = staff_lookup.get(staff_id, staff_name) if staff_id else staff_name
+                is_attorney = self._is_attorney(staff_name)
 
                 # Build assignee filter
+                # For attorneys, also match tasks on their cases (via lead_attorney_name)
                 assignee_filter = ""
                 assignee_params = []
-                if staff_id:
+                if staff_id and is_attorney:
+                    assignee_filter = """AND (
+                        t.assignee_name LIKE %s OR t.assignee_name LIKE %s
+                        OR t.assignee_name LIKE %s OR t.assignee_name = %s
+                        OR c.lead_attorney_name ILIKE %s
+                    )"""
+                    assignee_params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id, f'%{staff_name}%']
+                elif staff_id:
                     assignee_filter = "AND (t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name = %s)"
                     assignee_params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
 

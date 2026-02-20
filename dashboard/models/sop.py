@@ -273,20 +273,33 @@ class SOPDataMixin:
             }
 
     def get_legal_assistant_sop_data(self, assignee_name: str = None) -> Dict:
-        """Get Legal Assistant (Alison/Cole) SOP metrics from cache database (2025 cases only)."""
+        """Get Legal Assistant (Alison/Cole) SOP metrics from cache database (2025 cases only).
+
+        For attorneys, also includes tasks on cases where they are lead attorney.
+        """
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
                 # Get staff ID for the assignee name
                 staff_id = None
+                is_attorney = False
                 if assignee_name:
                     staff_id = self._get_staff_id_by_name(assignee_name)
+                    is_attorney = self._is_attorney(assignee_name)
 
                 # Build assignee filter - search for staff ID in comma-separated assignee_name field
+                # For attorneys, also match tasks on their cases (via lead_attorney_name)
                 assignee_filter = ""
                 params = [self.firm_id]
-                if staff_id:
+                if staff_id and is_attorney:
+                    assignee_filter = """AND (
+                        t.assignee_name LIKE %s OR t.assignee_name LIKE %s
+                        OR t.assignee_name LIKE %s OR t.assignee_name = %s
+                        OR c.lead_attorney_name ILIKE %s
+                    )"""
+                    params.extend([f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id, f'%{assignee_name}%'])
+                elif staff_id:
                     # Match staff ID anywhere in the comma-separated list
                     assignee_filter = "AND (t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name LIKE %s OR t.assignee_name = %s)"
                     params.extend([f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id])
@@ -306,10 +319,14 @@ class SOPDataMixin:
                 row = cursor.fetchone()
                 overdue_count = row[0] if row else 0
 
-                # Reset params for next query
-                params = [self.firm_id]
-                if staff_id:
-                    params.extend([f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id])
+                # Helper to build params for each query
+                def _build_params():
+                    p = [self.firm_id]
+                    if staff_id and is_attorney:
+                        p.extend([f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id, f'%{assignee_name}%'])
+                    elif staff_id:
+                        p.extend([f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id])
+                    return p
 
                 # Tasks due today on 2025 cases
                 cursor.execute(f"""
@@ -321,14 +338,9 @@ class SOPDataMixin:
                       AND (t.completed = false OR t.completed IS NULL)
                       AND EXTRACT(YEAR FROM c.created_at) = 2025
                       {assignee_filter}
-                """, params)
+                """, _build_params())
                 row = cursor.fetchone()
                 due_today = row[0] if row else 0
-
-                # Reset params
-                params = [self.firm_id]
-                if staff_id:
-                    params.extend([f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id])
 
                 # Completed in last 7 days on 2025 cases
                 cursor.execute(f"""
@@ -340,14 +352,9 @@ class SOPDataMixin:
                       AND DATE(t.completed_at) >= CURRENT_DATE - INTERVAL '7 days'
                       AND EXTRACT(YEAR FROM c.created_at) = 2025
                       {assignee_filter}
-                """, params)
+                """, _build_params())
                 row = cursor.fetchone()
                 completed_week = row[0] if row else 0
-
-                # Reset params
-                params = [self.firm_id]
-                if staff_id:
-                    params.extend([f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id])
 
                 # License deadlines (DOR/PFR tasks) on 2025 cases
                 cursor.execute(f"""
@@ -363,7 +370,7 @@ class SOPDataMixin:
                       {assignee_filter}
                     ORDER BY t.due_date ASC
                     LIMIT 5
-                """, params)
+                """, _build_params())
                 license_deadlines = [{'task': r[0], 'case': r[1] or 'Unknown',
                                      'due': r[2], 'days_until': r[3]}
                                     for r in cursor.fetchall()]
