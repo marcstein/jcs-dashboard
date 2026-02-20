@@ -125,54 +125,57 @@ class ARDataMixin:
             pass  # Fall through to legacy method
 
         # Fallback to legacy KPI snapshots
-        with get_connection() as conn:
-            cursor = self._cursor(conn)
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
 
-            # Try to get cached KPI data for this date (or most recent)
-            cursor.execute("""
-                SELECT kpi_name, kpi_value
-                FROM kpi_snapshots
-                WHERE firm_id = %s
-                  AND category = 'collections'
-                  AND snapshot_date = (
-                      SELECT MAX(snapshot_date) FROM kpi_snapshots
-                      WHERE firm_id = %s
-                        AND snapshot_date <= %s
-                  )
-            """, (self.firm_id, self.firm_id, str(target_date)))
+                # Try to get cached KPI data for this date (or most recent)
+                cursor.execute("""
+                    SELECT kpi_name, kpi_value
+                    FROM kpi_snapshots
+                    WHERE firm_id = %s
+                      AND category = 'collections'
+                      AND snapshot_date = (
+                          SELECT MAX(snapshot_date) FROM kpi_snapshots
+                          WHERE firm_id = %s
+                            AND snapshot_date <= %s
+                      )
+                """, (self.firm_id, self.firm_id, str(target_date)))
 
-            rows = cursor.fetchall()
+                rows = cursor.fetchall()
 
-            if rows:
-                # Build from cached KPIs
-                kpis = {row[0]: row[1] for row in rows}
-                return {
-                    'date': str(target_date),
-                    'cash_received': kpis.get('cash_received', 0),
-                    'payment_count': int(kpis.get('payment_count', 0)),
-                    'total_ar': kpis.get('total_ar', 0),
-                    'ar_0_30': kpis.get('ar_0_30', 0),
-                    'ar_31_60': kpis.get('ar_31_60', 0),
-                    'ar_61_90': kpis.get('ar_61_90', 0),
-                    'ar_90_plus': kpis.get('ar_90_plus', 0),
-                    'aging_over_60_pct': kpis.get('aging_over_60_pct', 0),
-                    'delinquent_accounts': int(kpis.get('delinquent_accounts', 0)),
-                }
+                if rows:
+                    # Build from cached KPIs
+                    kpis = {row[0]: row[1] for row in rows}
+                    return {
+                        'date': str(target_date),
+                        'cash_received': kpis.get('cash_received', 0),
+                        'payment_count': int(kpis.get('payment_count', 0)),
+                        'total_ar': kpis.get('total_ar', 0),
+                        'ar_0_30': kpis.get('ar_0_30', 0),
+                        'ar_31_60': kpis.get('ar_31_60', 0),
+                        'ar_61_90': kpis.get('ar_61_90', 0),
+                        'ar_90_plus': kpis.get('ar_90_plus', 0),
+                        'aging_over_60_pct': kpis.get('aging_over_60_pct', 0),
+                        'delinquent_accounts': int(kpis.get('delinquent_accounts', 0)),
+                    }
+        except Exception:
+            pass
 
-            # No data at all - return empty placeholder
-            return {
-                'date': str(target_date),
-                'cash_received': 0,
-                'payment_count': 0,
-                'total_ar': 0,
-                'ar_0_30': 0,
-                'ar_31_60': 0,
-                'ar_61_90': 0,
-                'ar_90_plus': 0,
-                'aging_over_60_pct': 0,
-                'delinquent_accounts': 0,
-                'no_data': True,
-            }
+        # No data at all - return empty placeholder
+        return {
+            'date': str(target_date),
+            'cash_received': 0,
+            'payment_count': 0,
+            'total_ar': 0,
+            'ar_0_30': 0,
+            'ar_31_60': 0,
+            'ar_61_90': 0,
+            'ar_90_plus': 0,
+            'aging_over_60_pct': 0,
+            'delinquent_accounts': 0,
+            'no_data': True,
+        }
 
     def get_ar_aging_breakdown(self, year: int = None) -> Dict:
         """Get AR aging breakdown for charts (for specified year)."""
@@ -189,173 +192,192 @@ class ARDataMixin:
 
     def get_collections_trend(self, days_back: int = 30) -> List[Dict]:
         """Get collections trend for the last N days."""
-        with get_connection() as conn:
-            cursor = self._cursor(conn)
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
 
-            cursor.execute("""
-                SELECT snapshot_date, SUM(kpi_value) as total
-                FROM kpi_snapshots
-                WHERE firm_id = %s
-                  AND category = 'collections'
-                  AND kpi_name = 'cash_received'
-                  AND snapshot_date >= CURRENT_DATE - INTERVAL %s
-                GROUP BY snapshot_date
-                ORDER BY snapshot_date
-            """, (self.firm_id, f'{days_back} days'))
+                cursor.execute("""
+                    SELECT snapshot_date, SUM(kpi_value) as total
+                    FROM kpi_snapshots
+                    WHERE firm_id = %s
+                      AND category = 'collections'
+                      AND kpi_name = 'cash_received'
+                      AND snapshot_date >= CURRENT_DATE - INTERVAL %s
+                    GROUP BY snapshot_date
+                    ORDER BY snapshot_date
+                """, (self.firm_id, f'{days_back} days'))
 
-            rows = cursor.fetchall()
-            return [{'date': str(row[0]), 'amount': row[1]} for row in rows]
+                rows = cursor.fetchall()
+                return [{'date': str(row[0]), 'amount': row[1]} for row in rows]
+        except Exception:
+            return []
 
     def get_payment_plans_summary(self) -> Dict:
         """Get payment plans summary from local database."""
-        with get_connection() as conn:
-            cursor = self._cursor(conn)
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
 
-            # Active plans
-            cursor.execute("""
-                SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
-                FROM payment_plans
-                WHERE firm_id = %s
-                  AND status = 'active'
-            """, (self.firm_id,))
-            active = cursor.fetchone()
+                # Active plans
+                cursor.execute("""
+                    SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
+                    FROM payment_plans
+                    WHERE firm_id = %s
+                      AND status = 'active'
+                """, (self.firm_id,))
+                active = cursor.fetchone()
 
-            # Delinquent plans
-            cursor.execute("""
-                SELECT COUNT(*) as count
-                FROM payment_plans
-                WHERE firm_id = %s
-                  AND status = 'delinquent'
-            """, (self.firm_id,))
-            delinquent = cursor.fetchone()
+                # Delinquent plans
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM payment_plans
+                    WHERE firm_id = %s
+                      AND status = 'delinquent'
+                """, (self.firm_id,))
+                delinquent = cursor.fetchone()
 
-            # Completed this month
-            cursor.execute("""
-                SELECT COUNT(*) as count
-                FROM payment_plans
-                WHERE firm_id = %s
-                  AND status = 'completed'
-                  AND DATE(updated_at) >= DATE_TRUNC('month', CURRENT_DATE)
-            """, (self.firm_id,))
-            completed = cursor.fetchone()
+                # Completed this month
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM payment_plans
+                    WHERE firm_id = %s
+                      AND status = 'completed'
+                      AND DATE(updated_at) >= DATE_TRUNC('month', CURRENT_DATE)
+                """, (self.firm_id,))
+                completed = cursor.fetchone()
 
-            return {
-                'active_count': active[0] if active else 0,
-                'active_total': active[1] if active else 0,
-                'delinquent_count': delinquent[0] if delinquent else 0,
-                'completed_month': completed[0] if completed else 0,
-            }
+                return {
+                    'active_count': active[0] if active else 0,
+                    'active_total': active[1] if active else 0,
+                    'delinquent_count': delinquent[0] if delinquent else 0,
+                    'completed_month': completed[0] if completed else 0,
+                }
+        except Exception:
+            return {'active_count': 0, 'active_total': 0, 'delinquent_count': 0, 'completed_month': 0}
 
     def get_noiw_pipeline(self, status_filter: str = None) -> List[Dict]:
         """Get NOIW pipeline cases from local database."""
-        with get_connection() as conn:
-            cursor = self._cursor(conn)
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
 
-            if status_filter:
-                cursor.execute("""
-                    SELECT case_id, case_name, contact_name, invoice_id, balance_due,
-                           days_delinquent, status, assigned_to, warning_sent_date,
-                           final_notice_date, created_at, updated_at
-                    FROM noiw_tracking
-                    WHERE firm_id = %s
-                      AND status = %s
-                    ORDER BY days_delinquent ASC, balance_due DESC
-                """, (self.firm_id, status_filter))
-            else:
-                cursor.execute("""
-                    SELECT case_id, case_name, contact_name, invoice_id, balance_due,
-                           days_delinquent, status, assigned_to, warning_sent_date,
-                           final_notice_date, created_at, updated_at
-                    FROM noiw_tracking
-                    WHERE firm_id = %s
-                      AND status NOT IN ('resolved', 'withdrawn')
-                    ORDER BY days_delinquent ASC, balance_due DESC
-                """, (self.firm_id,))
+                if status_filter:
+                    cursor.execute("""
+                        SELECT case_id, case_name, contact_name, invoice_id, balance_due,
+                               days_delinquent, status, assigned_to, warning_sent_date,
+                               final_notice_date, created_at, updated_at
+                        FROM noiw_tracking
+                        WHERE firm_id = %s
+                          AND status = %s
+                        ORDER BY days_delinquent ASC, balance_due DESC
+                    """, (self.firm_id, status_filter))
+                else:
+                    cursor.execute("""
+                        SELECT case_id, case_name, contact_name, invoice_id, balance_due,
+                               days_delinquent, status, assigned_to, warning_sent_date,
+                               final_notice_date, created_at, updated_at
+                        FROM noiw_tracking
+                        WHERE firm_id = %s
+                          AND status NOT IN ('resolved', 'withdrawn')
+                        ORDER BY days_delinquent ASC, balance_due DESC
+                    """, (self.firm_id,))
 
-            rows = cursor.fetchall()
-            return [{
-                'case_id': row[0],
-                'case_name': row[1],
-                'contact_name': row[2],
-                'invoice_id': row[3],
-                'balance_due': row[4],
-                'days_delinquent': row[5],
-                'status': row[6],
-                'assigned_to': row[7],
-                'warning_sent_date': row[8],
-                'final_notice_date': row[9],
-                'created_at': row[10],
-                'updated_at': row[11],
-            } for row in rows]
+                rows = cursor.fetchall()
+                return [{
+                    'case_id': row[0],
+                    'case_name': row[1],
+                    'contact_name': row[2],
+                    'invoice_id': row[3],
+                    'balance_due': row[4],
+                    'days_delinquent': row[5],
+                    'status': row[6],
+                    'assigned_to': row[7],
+                    'warning_sent_date': row[8],
+                    'final_notice_date': row[9],
+                    'created_at': row[10],
+                    'updated_at': row[11],
+                } for row in rows]
+        except Exception:
+            return []
 
     def get_noiw_summary(self) -> Dict:
         """Get NOIW pipeline summary statistics."""
-        with get_connection() as conn:
-            cursor = self._cursor(conn)
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
 
-            # Get status counts
-            cursor.execute("""
-                SELECT status, COUNT(*) as count, SUM(balance_due) as total_balance
-                FROM noiw_tracking
-                WHERE firm_id = %s
-                GROUP BY status
-            """, (self.firm_id,))
-            by_status = {}
-            for row in cursor.fetchall():
-                by_status[row[0]] = {
-                    'count': row[1],
-                    'total_balance': row[2] or 0
+                # Get status counts
+                cursor.execute("""
+                    SELECT status, COUNT(*) as count, SUM(balance_due) as total_balance
+                    FROM noiw_tracking
+                    WHERE firm_id = %s
+                    GROUP BY status
+                """, (self.firm_id,))
+                by_status = {}
+                for row in cursor.fetchall():
+                    by_status[row[0]] = {
+                        'count': row[1],
+                        'total_balance': row[2] or 0
+                    }
+
+                # Get age buckets for active cases
+                cursor.execute("""
+                    SELECT
+                        SUM(CASE WHEN days_delinquent >= 30 AND days_delinquent < 60 THEN 1 ELSE 0 END) as bucket_30_60,
+                        SUM(CASE WHEN days_delinquent >= 60 AND days_delinquent < 90 THEN 1 ELSE 0 END) as bucket_60_90,
+                        SUM(CASE WHEN days_delinquent >= 90 AND days_delinquent < 180 THEN 1 ELSE 0 END) as bucket_90_180,
+                        SUM(CASE WHEN days_delinquent >= 180 THEN 1 ELSE 0 END) as bucket_180_plus,
+                        COUNT(*) as total_active,
+                        SUM(balance_due) as total_balance
+                    FROM noiw_tracking
+                    WHERE firm_id = %s
+                      AND status NOT IN ('resolved', 'withdrawn')
+                """, (self.firm_id,))
+                totals = cursor.fetchone()
+
+                return {
+                    'by_status': by_status,
+                    'bucket_30_60': totals[0] or 0,
+                    'bucket_60_90': totals[1] or 0,
+                    'bucket_90_180': totals[2] or 0,
+                    'bucket_180_plus': totals[3] or 0,
+                    'total_active': totals[4] or 0,
+                    'total_balance': totals[5] or 0,
                 }
-
-            # Get age buckets for active cases
-            cursor.execute("""
-                SELECT
-                    SUM(CASE WHEN days_delinquent >= 30 AND days_delinquent < 60 THEN 1 ELSE 0 END) as bucket_30_60,
-                    SUM(CASE WHEN days_delinquent >= 60 AND days_delinquent < 90 THEN 1 ELSE 0 END) as bucket_60_90,
-                    SUM(CASE WHEN days_delinquent >= 90 AND days_delinquent < 180 THEN 1 ELSE 0 END) as bucket_90_180,
-                    SUM(CASE WHEN days_delinquent >= 180 THEN 1 ELSE 0 END) as bucket_180_plus,
-                    COUNT(*) as total_active,
-                    SUM(balance_due) as total_balance
-                FROM noiw_tracking
-                WHERE firm_id = %s
-                  AND status NOT IN ('resolved', 'withdrawn')
-            """, (self.firm_id,))
-            totals = cursor.fetchone()
-
+        except Exception:
             return {
-                'by_status': by_status,
-                'bucket_30_60': totals[0] or 0,
-                'bucket_60_90': totals[1] or 0,
-                'bucket_90_180': totals[2] or 0,
-                'bucket_180_plus': totals[3] or 0,
-                'total_active': totals[4] or 0,
-                'total_balance': totals[5] or 0,
+                'by_status': {}, 'bucket_30_60': 0, 'bucket_60_90': 0,
+                'bucket_90_180': 0, 'bucket_180_plus': 0,
+                'total_active': 0, 'total_balance': 0,
             }
 
     def get_wonky_invoices(self) -> List[Dict]:
         """Get open wonky invoices from local database."""
-        with get_connection() as conn:
-            cursor = self._cursor(conn)
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
 
-            cursor.execute("""
-                SELECT invoice_id, invoice_number, case_name, issue_type,
-                       issue_description, discrepancy, opened_date
-                FROM wonky_invoices
-                WHERE firm_id = %s
-                  AND status = 'open'
-                ORDER BY opened_date DESC
-            """, (self.firm_id,))
+                cursor.execute("""
+                    SELECT invoice_id, invoice_number, case_name, issue_type,
+                           issue_description, discrepancy, opened_date
+                    FROM wonky_invoices
+                    WHERE firm_id = %s
+                      AND status = 'open'
+                    ORDER BY opened_date DESC
+                """, (self.firm_id,))
 
-            rows = cursor.fetchall()
-            return [{
-                'invoice_id': row[0],
-                'invoice_number': row[1],
-                'case_name': row[2],
-                'issue_type': row[3],
-                'description': row[4],
-                'discrepancy': row[5],
-                'opened_date': row[6],
-            } for row in rows]
+                rows = cursor.fetchall()
+                return [{
+                    'invoice_id': row[0],
+                    'invoice_number': row[1],
+                    'case_name': row[2],
+                    'issue_type': row[3],
+                    'description': row[4],
+                    'discrepancy': row[5],
+                    'opened_date': row[6],
+                } for row in rows]
+        except Exception:
+            return []
 
     def get_dunning_preview(self, stage: int = None) -> List[Dict]:
         """Get preview of dunning notices by stage."""
