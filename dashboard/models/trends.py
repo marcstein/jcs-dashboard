@@ -13,7 +13,7 @@ class TrendsDataMixin:
         """Get KPI trends for a specific metric over time (2025 data only)."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 cursor.execute("""
                     SELECT snapshot_date, kpi_value
@@ -32,7 +32,7 @@ class TrendsDataMixin:
         """Get payment promises tracking summary."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 # Pending promises
                 cursor.execute("""

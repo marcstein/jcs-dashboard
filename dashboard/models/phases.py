@@ -13,7 +13,7 @@ class PhasesDataMixin:
         """Get distribution of cases across the 7 universal phases (2025 cases only)."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 cursor.execute("""
                     SELECT phase_name, COUNT(*) as count
@@ -36,16 +36,16 @@ class PhasesDataMixin:
         """Get cases stalled in current phase (2025 cases only)."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 cursor.execute(f"""
                     SELECT cp.case_id, c.name as case_name, cp.phase_name, cp.entered_phase_date,
-                           EXTRACT(DAY FROM CURRENT_DATE - cp.entered_phase_date) as days_in_phase
+                           (CURRENT_DATE - cp.entered_phase_date::date) as days_in_phase
                     FROM case_phases cp
                     JOIN cached_cases c ON cp.case_id = c.id
                     WHERE cp.firm_id = %s
                       AND EXTRACT(YEAR FROM c.created_at) = 2025
-                      AND EXTRACT(DAY FROM CURRENT_DATE - cp.entered_phase_date) >= %s
+                      AND (CURRENT_DATE - cp.entered_phase_date::date) >= %s
                     ORDER BY days_in_phase DESC
                     LIMIT 20
                 """, (self.firm_id, days_in_phase))

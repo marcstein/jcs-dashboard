@@ -26,7 +26,7 @@ class ARDataMixin:
         # First try to get data from the cache database (cached_invoices)
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
                 # Filter to specified year invoices
                 cursor.execute(f"""
                     SELECT
@@ -126,7 +126,7 @@ class ARDataMixin:
 
         # Fallback to legacy KPI snapshots
         with get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
 
             # Try to get cached KPI data for this date (or most recent)
             cursor.execute("""
@@ -190,7 +190,7 @@ class ARDataMixin:
     def get_collections_trend(self, days_back: int = 30) -> List[Dict]:
         """Get collections trend for the last N days."""
         with get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
 
             cursor.execute("""
                 SELECT snapshot_date, SUM(kpi_value) as total
@@ -209,7 +209,7 @@ class ARDataMixin:
     def get_payment_plans_summary(self) -> Dict:
         """Get payment plans summary from local database."""
         with get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
 
             # Active plans
             cursor.execute("""
@@ -249,7 +249,7 @@ class ARDataMixin:
     def get_noiw_pipeline(self, status_filter: str = None) -> List[Dict]:
         """Get NOIW pipeline cases from local database."""
         with get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
 
             if status_filter:
                 cursor.execute("""
@@ -291,7 +291,7 @@ class ARDataMixin:
     def get_noiw_summary(self) -> Dict:
         """Get NOIW pipeline summary statistics."""
         with get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
 
             # Get status counts
             cursor.execute("""
@@ -335,7 +335,7 @@ class ARDataMixin:
     def get_wonky_invoices(self) -> List[Dict]:
         """Get open wonky invoices from local database."""
         with get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
 
             cursor.execute("""
                 SELECT invoice_id, invoice_number, case_name, issue_type,
@@ -361,7 +361,7 @@ class ARDataMixin:
         """Get preview of dunning notices by stage."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 if stage:
                     cursor.execute("""

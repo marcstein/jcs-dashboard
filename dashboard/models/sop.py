@@ -61,7 +61,7 @@ class SOPDataMixin:
         """Get Ty (Intake Lead) SOP metrics from cache database (2025 data only)."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 # New cases in last 7 days (on 2025 cases)
                 cursor.execute("""
@@ -135,7 +135,7 @@ class SOPDataMixin:
         """Get Tiffany (Senior Paralegal) SOP metrics from cache database (2025 cases only)."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 # Overdue tasks on 2025 cases (exclude > 200 days as stale)
                 cursor.execute("""
@@ -228,7 +228,7 @@ class SOPDataMixin:
                 quality_audits_count = 0
                 try:
                     with get_connection() as audit_conn:
-                        audit_cursor = audit_conn.cursor()
+                        audit_cursor = self._cursor(audit_conn)
                         audit_cursor.execute("""
                             SELECT AVG(quality_score) as avg_score, COUNT(*) as audit_count
                             FROM case_quality_audits
@@ -276,7 +276,7 @@ class SOPDataMixin:
         """Get Legal Assistant (Alison/Cole) SOP metrics from cache database (2025 cases only)."""
         try:
             with get_connection() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
 
                 # Get staff ID for the assignee name
                 staff_id = None
@@ -352,7 +352,7 @@ class SOPDataMixin:
                 # License deadlines (DOR/PFR tasks) on 2025 cases
                 cursor.execute(f"""
                     SELECT t.name as task_name, c.name as case_name, t.due_date,
-                           CAST(EXTRACT(DAY FROM t.due_date - CURRENT_DATE) AS INTEGER) as days_until
+                           (t.due_date - CURRENT_DATE) as days_until
                     FROM cached_tasks t
                     LEFT JOIN cached_cases c ON t.case_id = c.id
                     WHERE t.firm_id = %s
