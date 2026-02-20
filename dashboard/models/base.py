@@ -175,8 +175,74 @@ class DashboardData:
                 """, (self.firm_id, year))
                 overdue_tasks = cursor.fetchone()[0] or 0
 
+                # AR aging buckets for Key Metrics section
+                if year < current_year:
+                    ref_date = f"DATE('{year}-12-31')"
+                else:
+                    ref_date = "CURRENT_DATE"
+
+                cursor.execute(f"""
+                    SELECT
+                        COALESCE(SUM(CASE WHEN ({ref_date} - due_date) <= 180 THEN balance_due ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN ({ref_date} - due_date) > 180 THEN balance_due ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN ({ref_date} - due_date) BETWEEN 61 AND 120 THEN balance_due ELSE 0 END), 0),
+                        COALESCE(SUM(balance_due), 0)
+                    FROM cached_invoices
+                    WHERE firm_id = %s AND balance_due > 0
+                      AND EXTRACT(YEAR FROM invoice_date) = %s
+                """, (self.firm_id, year))
+                ar_row = cursor.fetchone()
+                ar_under_180 = ar_row[0] or 0
+                ar_over_180 = ar_row[1] or 0
+                ar_60_to_120 = ar_row[2] or 0
+                total_ar_all = ar_row[3] or 0
+
+                # Get today's payments
+                today_collected = 0
+                payment_count = 0
+                try:
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(amount), 0), COUNT(*)
+                        FROM cached_payments
+                        WHERE firm_id = %s AND DATE(payment_date) = CURRENT_DATE
+                    """, (self.firm_id,))
+                    pay_row = cursor.fetchone()
+                    today_collected = pay_row[0] or 0
+                    payment_count = pay_row[1] or 0
+                except Exception:
+                    pass
+
+                # Payment plans summary
+                active_plans = 0
+                delinquent_plans = 0
+                try:
+                    cursor.execute("""
+                        SELECT
+                            COUNT(CASE WHEN status = 'active' THEN 1 END),
+                            COUNT(CASE WHEN status = 'delinquent' THEN 1 END)
+                        FROM payment_plans WHERE firm_id = %s
+                    """, (self.firm_id,))
+                    plan_row = cursor.fetchone()
+                    active_plans = plan_row[0] or 0
+                    delinquent_plans = plan_row[1] or 0
+                except Exception:
+                    pass
+
+                # NOIW pipeline count
+                noiw_pipeline = 0
+                try:
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM noiw_tracking
+                        WHERE firm_id = %s AND status NOT IN ('resolved', 'withdrawn')
+                    """, (self.firm_id,))
+                    noiw_pipeline = cursor.fetchone()[0] or 0
+                except Exception:
+                    pass
+
                 # Last sync time
                 last_sync = self.get_last_sync_time()
+
+                aging_60_to_120_pct = (ar_60_to_120 / total_ar_all * 100) if total_ar_all > 0 else 0
 
                 return {
                     'active_cases': active_cases,
@@ -185,6 +251,14 @@ class DashboardData:
                     'total_ar': total_ar,
                     'overdue_tasks': overdue_tasks,
                     'last_sync': last_sync,
+                    'ar_under_180': ar_under_180,
+                    'ar_over_180': ar_over_180,
+                    'aging_60_to_120_pct': aging_60_to_120_pct,
+                    'today_collected': today_collected,
+                    'payment_count': payment_count,
+                    'active_plans': active_plans,
+                    'delinquent_plans': delinquent_plans,
+                    'noiw_pipeline': noiw_pipeline,
                 }
         except Exception as e:
             print(f"get_dashboard_stats error: {e}")
@@ -192,6 +266,10 @@ class DashboardData:
                 'active_cases': 0, 'year_cases': 0,
                 'open_invoices': 0, 'total_ar': 0,
                 'overdue_tasks': 0, 'last_sync': None,
+                'ar_under_180': 0, 'ar_over_180': 0,
+                'aging_60_to_120_pct': 0, 'today_collected': 0,
+                'payment_count': 0, 'active_plans': 0,
+                'delinquent_plans': 0, 'noiw_pipeline': 0,
             }
 
     # ─── Staff Caseload (for dashboard widgets) ───────────────────
@@ -241,12 +319,21 @@ class DashboardData:
                     assignee_params = [f'{staff_id},%', f'%,{staff_id},%', f'%,{staff_id}', staff_id]
 
                 # Active cases: attorneys use lead_attorney_name, staff use task assignments
+                closed_cases = 0
                 if is_attorney:
                     cursor.execute("""
                         SELECT COUNT(*) FROM cached_cases
                         WHERE firm_id = %s AND lead_attorney_name ILIKE %s AND status = 'open'
                     """, (self.firm_id, f'%{staff_name}%'))
                     active_cases = cursor.fetchone()[0] or 0
+
+                    # Closed cases this year for attorneys
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name ILIKE %s AND status = 'closed'
+                          AND EXTRACT(YEAR FROM date_closed) = EXTRACT(YEAR FROM CURRENT_DATE)
+                    """, (self.firm_id, f'%{staff_name}%'))
+                    closed_cases = cursor.fetchone()[0] or 0
                 elif staff_id:
                     cursor.execute(f"""
                         SELECT COUNT(DISTINCT t.case_id)
@@ -304,13 +391,14 @@ class DashboardData:
 
                 return {
                     'active_cases': active_cases,
+                    'closed_cases': closed_cases,
                     'tasks_done': tasks_done,
                     'tasks_total': tasks_total,
                     'overdue_tasks': overdue_tasks,
                 }
         except Exception as e:
             print(f"get_staff_caseload_data error for {staff_name}: {e}")
-            return {'active_cases': 0, 'tasks_done': 0, 'tasks_total': 0, 'overdue_tasks': 0}
+            return {'active_cases': 0, 'closed_cases': 0, 'tasks_done': 0, 'tasks_total': 0, 'overdue_tasks': 0}
 
     # ─── Staff Active Cases List (for detail page) ────────────────
 
