@@ -114,6 +114,17 @@ def import_template():
                 %s, %s, %s,
                 %s, %s, %s, TRUE
             )
+            ON CONFLICT (firm_id, name) DO UPDATE SET
+                original_filename = EXCLUDED.original_filename,
+                category = EXCLUDED.category,
+                subcategory = EXCLUDED.subcategory,
+                variables = EXCLUDED.variables,
+                variable_mappings = EXCLUDED.variable_mappings,
+                tags = EXCLUDED.tags,
+                file_content = EXCLUDED.file_content,
+                file_hash = EXCLUDED.file_hash,
+                file_size = EXCLUDED.file_size,
+                is_active = TRUE
             RETURNING id
         """, (
             "jcs_law",
