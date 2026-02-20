@@ -82,39 +82,6 @@
 <!-- SOP Widgets Grid -->
 <h2>SOP Compliance by Role</h2>
 <div class="sop-widgets">
-    <!-- Ty - Intake Lead -->
-    <div class="sop-widget">
-        <div class="sop-header">
-            <h3>Ty - Intake Lead</h3>
-            <span class="sop-status {% if ty_sop.attorney_compliant %}status-ok{% else %}status-alert{% endif %}">
-                {% if ty_sop.attorney_compliant %}On Track{% else %}Needs Attention{% endif %}
-            </span>
-        </div>
-        <div class="sop-metrics">
-            <div class="sop-metric">
-                <span class="metric-value">{{ ty_sop.new_cases_week }}</span>
-                <span class="metric-label">New This Week</span>
-            </div>
-            <div class="sop-metric">
-                <span class="metric-value">{{ ty_sop.new_cases_month }}</span>
-                <span class="metric-label">New This Month</span>
-            </div>
-            <div class="sop-metric {% if not ty_sop.attorney_compliant %}metric-alert{% endif %}">
-                <span class="metric-value">{{ "{:.0f}".format(ty_sop.attorney_assignment_rate or 0) }}%</span>
-                <span class="metric-label">Attorney Assigned</span>
-                <span class="metric-target">Target: 100%</span>
-            </div>
-        </div>
-        {% if ty_sop.case_types %}
-        <div class="sop-breakdown">
-            <span class="breakdown-label">Case Types:</span>
-            {% for ct in ty_sop.case_types[:3] %}
-            <span class="breakdown-item">{{ ct.type }} ({{ ct.count }})</span>
-            {% endfor %}
-        </div>
-        {% endif %}
-    </div>
-
     <!-- Tiffany Willis - Sr. Paralegal (Personal Tasks) -->
     <a href="/staff/Tiffany" class="sop-widget-link">
     <div class="sop-widget sop-widget-sm sop-widget-clickable">
@@ -376,6 +343,39 @@
     </div>
     </a>
     {% endif %}
+
+    <!-- Ty - Intake Lead -->
+    <div class="sop-widget">
+        <div class="sop-header">
+            <h3>Ty - Intake Lead</h3>
+            <span class="sop-status {% if ty_sop.attorney_compliant %}status-ok{% else %}status-alert{% endif %}">
+                {% if ty_sop.attorney_compliant %}On Track{% else %}Needs Attention{% endif %}
+            </span>
+        </div>
+        <div class="sop-metrics">
+            <div class="sop-metric">
+                <span class="metric-value">{{ ty_sop.new_cases_week }}</span>
+                <span class="metric-label">New This Week</span>
+            </div>
+            <div class="sop-metric">
+                <span class="metric-value">{{ ty_sop.new_cases_month }}</span>
+                <span class="metric-label">New This Month</span>
+            </div>
+            <div class="sop-metric {% if not ty_sop.attorney_compliant %}metric-alert{% endif %}">
+                <span class="metric-value">{{ "{:.0f}".format(ty_sop.attorney_assignment_rate or 0) }}%</span>
+                <span class="metric-label">Attorney Assigned</span>
+                <span class="metric-target">Target: 100%</span>
+            </div>
+        </div>
+        {% if ty_sop.case_types %}
+        <div class="sop-breakdown">
+            <span class="breakdown-label">Case Types:</span>
+            {% for ct in ty_sop.case_types[:3] %}
+            <span class="breakdown-item">{{ ct.type }} ({{ ct.count }})</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
 
     <!-- Attorney Productivity Summary Widget -->
     <a href="/attorneys" class="sop-widget-link">
