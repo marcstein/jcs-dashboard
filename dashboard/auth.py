@@ -10,6 +10,19 @@ import dashboard.config as config
 from db.connection import get_connection
 
 
+def _row_to_dict(row, keys):
+    """Convert a row (tuple or dict) to a dict using the given keys."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return {k: row.get(k) for k in keys}
+    return {k: row[i] for i, k in enumerate(keys)}
+
+
+USER_KEYS = ["id", "firm_id", "username", "password_hash", "email", "role", "is_active", "created_at", "last_login"]
+USER_LIST_KEYS = ["id", "firm_id", "username", "email", "role", "is_active", "created_at", "last_login"]
+
+
 def init_users_table():
     """Create users table if it doesn't exist."""
     with get_connection() as conn:
@@ -62,11 +75,15 @@ def create_user(username: str, password: str, email: str = None, role: str = "us
                 cur.execute("""
                     INSERT INTO dashboard_users (firm_id, username, password_hash, email, role)
                     VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (firm_id, username) DO UPDATE SET
+                        password_hash = EXCLUDED.password_hash,
+                        email = EXCLUDED.email,
+                        role = EXCLUDED.role,
+                        is_active = TRUE
                 """, (firm_id, username, password_hash, email, role))
             conn.commit()
         return True
     except Exception:
-        # Username already exists or other error
         return False
 
 
@@ -84,19 +101,7 @@ def get_user(username: str, firm_id: str = "default") -> dict | None:
 
             row = cur.fetchone()
 
-    if row:
-        return {
-            "id": row[0],
-            "firm_id": row[1],
-            "username": row[2],
-            "password_hash": row[3],
-            "email": row[4],
-            "role": row[5],
-            "is_active": row[6],
-            "created_at": row[7],
-            "last_login": row[8],
-        }
-    return None
+    return _row_to_dict(row, USER_KEYS)
 
 
 def list_users(firm_id: str = "default") -> list:
@@ -114,19 +119,7 @@ def list_users(firm_id: str = "default") -> list:
 
             rows = cur.fetchall()
 
-    users = []
-    for row in rows:
-        users.append({
-            "id": row[0],
-            "firm_id": row[1],
-            "username": row[2],
-            "email": row[3],
-            "role": row[4],
-            "is_active": row[5],
-            "created_at": row[6],
-            "last_login": row[7],
-        })
-    return users
+    return [_row_to_dict(row, USER_LIST_KEYS) for row in rows]
 
 
 def update_user_password(username: str, new_password: str, firm_id: str = "default") -> bool:
