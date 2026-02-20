@@ -2,7 +2,7 @@
 Main dashboard routes: Home page, staff pages, login/logout
 """
 from datetime import datetime
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -113,8 +113,8 @@ async def login_page(request: Request):
 @router.post("/login")
 async def login_submit(
     request: Request,
-    username: str = ...,
-    password: str = ...,
+    username: str = Form(...),
+    password: str = Form(...),
 ):
     """Handle login form submission."""
     print(f"Login attempt: {username}")
