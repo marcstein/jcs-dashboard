@@ -789,6 +789,7 @@ def get_staff(firm_id: str, active_only: bool = True) -> List[Dict]:
 
 def get_excluded_staff_ids(firm_id: str) -> set:
     """Return set of staff IDs that should be skipped during sync."""
+    _ensure_exclusions_table()
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -798,8 +799,25 @@ def get_excluded_staff_ids(firm_id: str) -> set:
         return {row[0] if isinstance(row, tuple) else row['staff_id'] for row in cur.fetchall()}
 
 
+def _ensure_exclusions_table():
+    """Create staff_exclusions table if it doesn't exist."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS staff_exclusions (
+                firm_id VARCHAR(36) NOT NULL,
+                staff_id INTEGER NOT NULL,
+                staff_name TEXT,
+                excluded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reason TEXT,
+                PRIMARY KEY (firm_id, staff_id)
+            )
+        """)
+
+
 def exclude_staff(firm_id: str, staff_id: int, staff_name: str = None, reason: str = None):
     """Mark a staff member as excluded from sync. They won't be re-added."""
+    _ensure_exclusions_table()
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
