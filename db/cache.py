@@ -222,6 +222,23 @@ CREATE TABLE IF NOT EXISTS cached_time_entries (
 CREATE INDEX IF NOT EXISTS idx_cte_date ON cached_time_entries(firm_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_cte_staff ON cached_time_entries(firm_id, staff_id);
 
+CREATE TABLE IF NOT EXISTS cached_documents (
+    firm_id VARCHAR(36) NOT NULL,
+    id INTEGER NOT NULL,
+    name TEXT,
+    description TEXT,
+    content_type TEXT,
+    file_size INTEGER,
+    case_id INTEGER,
+    contact_id INTEGER,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    data_json TEXT,
+    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (firm_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_cdoc_case ON cached_documents(firm_id, case_id);
+
 CREATE TABLE IF NOT EXISTS staff_exclusions (
     firm_id VARCHAR(36) NOT NULL,
     staff_id INTEGER NOT NULL,
@@ -297,6 +314,59 @@ def update_sync_status(
                 """,
                 (firm_id, entity_type, now, total_records, sync_duration, error),
             )
+
+
+# ============================================================
+# Cache Query Helpers
+# ============================================================
+
+# Maps entity type names to their cached table names
+_ENTITY_TABLE_MAP = {
+    'cases': 'cached_cases',
+    'contacts': 'cached_contacts',
+    'clients': 'cached_clients',
+    'invoices': 'cached_invoices',
+    'events': 'cached_events',
+    'tasks': 'cached_tasks',
+    'staff': 'cached_staff',
+    'payments': 'cached_payments',
+    'time_entries': 'cached_time_entries',
+    'documents': 'cached_documents',
+}
+
+
+def get_cached_count(firm_id: str, entity_type: str) -> int:
+    """Return the number of cached records for a given entity type."""
+    table = _ENTITY_TABLE_MAP.get(entity_type)
+    if not table:
+        return 0
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE firm_id = %s", (firm_id,))
+            row = cur.fetchone()
+            return (row[0] if isinstance(row, tuple) else row['count']) if row else 0
+    except Exception:
+        return 0
+
+
+def get_cached_updated_at(firm_id: str, entity_type: str) -> Dict[int, str]:
+    """Return a dict mapping record ID → updated_at timestamp for change detection."""
+    table = _ENTITY_TABLE_MAP.get(entity_type)
+    if not table:
+        return {}
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT id, updated_at FROM {table} WHERE firm_id = %s", (firm_id,))
+            result = {}
+            for row in cur.fetchall():
+                rid = row[0] if isinstance(row, tuple) else row['id']
+                upd = row[1] if isinstance(row, tuple) else row['updated_at']
+                result[rid] = str(upd) if upd else None
+            return result
+    except Exception:
+        return {}
 
 
 # ============================================================
@@ -381,6 +451,44 @@ def batch_upsert_contacts(firm_id: str, contacts: List[Dict]):
         cur = conn.cursor()
         execute_values(cur, sql, rows, page_size=500)
     logger.info("Upserted %d contacts for firm %s", len(rows), firm_id)
+
+
+def batch_upsert_clients(firm_id: str, clients: List[Dict]):
+    if not clients:
+        return
+    rows = []
+    for cl in clients:
+        address = cl.get('address', {}) or {}
+        rows.append((
+            firm_id, cl.get("id"), cl.get("first_name"), cl.get("last_name"),
+            cl.get("email"), cl.get("cell_phone_number"),
+            cl.get("work_phone_number"), cl.get("home_phone_number"),
+            address.get("address1"), address.get("address2"),
+            address.get("city"), address.get("state"), address.get("zip_code"),
+            address.get("country"), cl.get("birthdate"), cl.get("archived", False),
+            cl.get("created_at"), cl.get("updated_at"), json.dumps(cl),
+        ))
+    sql = """
+        INSERT INTO cached_clients
+            (firm_id, id, first_name, last_name, email, cell_phone, work_phone,
+             home_phone, address1, address2, city, state, zip_code, country,
+             birthdate, archived, created_at, updated_at, data_json)
+        VALUES %s
+        ON CONFLICT (firm_id, id) DO UPDATE SET
+            first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name,
+            email = EXCLUDED.email, cell_phone = EXCLUDED.cell_phone,
+            work_phone = EXCLUDED.work_phone, home_phone = EXCLUDED.home_phone,
+            address1 = EXCLUDED.address1, address2 = EXCLUDED.address2,
+            city = EXCLUDED.city, state = EXCLUDED.state, zip_code = EXCLUDED.zip_code,
+            country = EXCLUDED.country, birthdate = EXCLUDED.birthdate,
+            archived = EXCLUDED.archived,
+            updated_at = EXCLUDED.updated_at, data_json = EXCLUDED.data_json,
+            cached_at = CURRENT_TIMESTAMP
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        execute_values(cur, sql, rows, page_size=500)
+    logger.info("Upserted %d clients for firm %s", len(rows), firm_id)
 
 
 def batch_upsert_invoices(firm_id: str, invoices: List[Dict]):
@@ -569,6 +677,35 @@ def batch_upsert_time_entries(firm_id: str, entries: List[Dict]):
         cur = conn.cursor()
         execute_values(cur, sql, rows, page_size=500)
     logger.info("Upserted %d time entries for firm %s", len(rows), firm_id)
+
+
+def batch_upsert_documents(firm_id: str, documents: List[Dict]):
+    if not documents:
+        return
+    rows = []
+    for d in documents:
+        rows.append((
+            firm_id, d.get("id"), d.get("name"), d.get("description"),
+            d.get("content_type"), d.get("file_size"),
+            d.get("case_id"), d.get("contact_id"),
+            d.get("created_at"), d.get("updated_at"), json.dumps(d),
+        ))
+    sql = """
+        INSERT INTO cached_documents
+            (firm_id, id, name, description, content_type, file_size,
+             case_id, contact_id, created_at, updated_at, data_json)
+        VALUES %s
+        ON CONFLICT (firm_id, id) DO UPDATE SET
+            name = EXCLUDED.name, description = EXCLUDED.description,
+            content_type = EXCLUDED.content_type, file_size = EXCLUDED.file_size,
+            case_id = EXCLUDED.case_id, contact_id = EXCLUDED.contact_id,
+            updated_at = EXCLUDED.updated_at, data_json = EXCLUDED.data_json,
+            cached_at = CURRENT_TIMESTAMP
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        execute_values(cur, sql, rows, page_size=500)
+    logger.info("Upserted %d documents for firm %s", len(rows), firm_id)
 
 
 # ============================================================
