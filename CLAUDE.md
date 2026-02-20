@@ -76,6 +76,12 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 │   └── test_dashboard.py
 ├── templates/             # Email/notification templates
 ├── reports/               # Generated SOP compliance reports
+├── data/templates/        # Templated .docx files with {{placeholders}}
+│   ├── Filing_Fee_Memo_Unified.docx
+│   ├── Bond_Assignment_Templated.docx
+│   └── Waiver_of_Arraignment_Generic.docx
+├── import_filing_fee_memo.py   # Template import script (Filing Fee Memo)
+├── reimport_bond_template.py   # Template import script (Bond Assignment)
 ├── agent.py               # CLI entry point (thin — registers command groups)
 ├── api_client.py          # MyCase API client with OAuth, rate limiting
 ├── config.py              # Configuration (DATABASE_URL, env vars)
@@ -465,6 +471,15 @@ The system has predefined document types in `DOCUMENT_TYPES` registry:
 | Statute of Limitations | `motion_to_dismiss_sol` | Time-barred claims |
 | Failure to Prosecute | `motion_to_dismiss_failure_to_prosecute` | Rule 67.02 |
 
+#### Filing Fee Memo
+| Type | Key | Variables Asked | Auto-Filled from Attorney Profile |
+|------|-----|-----------------|-----------------------------------|
+| Filing Fee Memorandum | `filing_fee_memo` | petitioner_name, case_number, county, respondent_name, filing_fee | firm_name, attorney_name, attorney_bar, firm_address, firm_city_state_zip, firm_phone, firm_fax, attorney_email |
+
+Optional variables (with defaults): signing_attorney, signing_attorney_bar, signing_attorney_email, party_role (default: "Petitioner"), service_signatory
+
+**Template consolidation:** 4 variants (ATM, DCC, Memo.docx, Memo.doc) were consolidated into a single unified template (`data/templates/Filing_Fee_Memo_Unified.docx`) with 18 `{{placeholder}}` variables. Old templates deactivated in database.
+
 #### Bond Documents
 | Type | Key | Variables Asked | Auto-Filled from Attorney Profile |
 |------|-----|-----------------|-----------------------------------|
@@ -669,6 +684,68 @@ All env vars stored in `.env` file in the project root.
     - Uses structural regex patterns to find values (e.g., case number after "Case No.:")
     - Exports the filled .docx directly instead of regenerating from text
     - Signature lines, Name:/Address: alignment, and notary sections preserved
+11. **Fixed `replace_in_paragraph` two-pass strategy** - System now:
+    - Pass 1: Run-level replacement (preserves tabs & formatting across runs)
+    - Pass 2: Cross-run placeholder handling with safe prefix preservation
+    - County uppercase detection uses full paragraph context, not just the run text
+12. **Added Filing Fee Memo document type** - System now:
+    - Consolidated 4 template variants (ATM, DCC, Memo.docx, Memo.doc) into 1 unified template
+    - Recognizes "filing fee" in template names → `filing_fee_memo` type
+    - 8 variables auto-filled from attorney profile, 5 required + 5 optional from user
+    - Template stored at `data/templates/Filing_Fee_Memo_Unified.docx`
+    - Import script: `import_filing_fee_memo.py` (uses upsert for idempotent re-runs)
+13. **Added Bond Assignment properly-templated version** - System now:
+    - Template stored at `data/templates/Bond_Assignment_Templated.docx` with correct `{{placeholder}}` positions
+    - Import script: `reimport_bond_template.py`
+    - Preserves title "ASSIGNMENT OF CASH BOND", signature labels, all formatting
+
+### Template Import Scripts
+
+Standalone scripts to import/update specific templates in the database. These use upsert logic (`ON CONFLICT DO UPDATE`) so they are safe to re-run.
+
+| Script | Template | Purpose |
+|--------|----------|---------|
+| `import_filing_fee_memo.py` | `data/templates/Filing_Fee_Memo_Unified.docx` | Deactivates old variants, imports unified template |
+| `reimport_bond_template.py` | `data/templates/Bond_Assignment_Templated.docx` | Updates Bond Assignment with proper `{{placeholder}}` patterns |
+
+**Usage (on production server):**
+```bash
+cd /opt/jcs-mycase
+export $(grep -v '^#' .env | xargs)
+.venv/bin/python import_filing_fee_memo.py
+```
+
+**Note:** Production uses `RealDictCursor` (returns dicts, not tuples). Import scripts handle both formats with `row['id'] if isinstance(row, dict) else row[0]`.
+
+### Template Consolidation Strategy
+
+When multiple template variants exist for the same document type (e.g., per-attorney or per-county variants), consolidate into a single template with `{{placeholder}}` variables:
+
+1. Compare all variants to identify differences (county, attorney, party names, fees, etc.)
+2. Choose the most complete variant as the base (e.g., the one with Certificate of Service)
+3. Unpack the .docx XML, replace case-specific values with `{{placeholders}}`
+4. Repack using the docx skill's `pack.py` script
+5. Add a `DOCUMENT_TYPES` entry in `document_chat.py` with required/optional vars
+6. Add template name detection in the `_select_template` method
+7. Create an import script (follow `import_filing_fee_memo.py` pattern)
+8. Commit, push, `git pull` on server, run import script
+
+### Deployment Workflow
+
+Both local and production (`/opt/jcs-mycase`) are git repos on the same `main` branch:
+
+```bash
+# Local: commit and push
+git add <files> && git commit -m "message" && git push origin main
+
+# Production: pull and run
+cd /opt/jcs-mycase
+git pull
+export $(grep -v '^#' .env | xargs)
+.venv/bin/python <import_script>.py    # If importing templates
+# Restart dashboard if code changed:
+# (dashboard auto-reloads on file change if running with --reload)
+```
 
 ### Template Search Behavior
 The template search uses PostgreSQL full-text search (`tsvector`/`tsquery`) with these enhancements:
