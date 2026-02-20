@@ -260,6 +260,19 @@ DOCUMENT_TYPES = {
     # ==========================================================================
     # BOND DOCUMENTS
     # ==========================================================================
+    "filing_fee_memo": {
+        "name": "Filing Fee Memorandum",
+        "description": "Memorandum submitting filing fee to the court - firm/attorney info comes from attorney profile",
+        "required_vars": ["petitioner_name", "case_number", "county", "respondent_name", "filing_fee"],
+        "optional_vars": ["signing_attorney", "signing_attorney_bar", "signing_attorney_email", "party_role", "service_signatory"],
+        "defaults": {"party_role": "Petitioner"},
+        "party_terminology": "petitioner_respondent",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_address", "firm_city_state_zip",
+            "firm_phone", "firm_fax", "attorney_email"
+        ]
+    },
     "bond_assignment": {
         "name": "Assignment of Cash Bond",
         "description": "Assignment of cash bond to attorney/firm - assignee info comes from attorney profile",
@@ -621,7 +634,9 @@ class DocumentChatEngine:
             document_type_key = None
 
             # Map template names to DOCUMENT_TYPES keys
-            if 'bond assignment' in template_name_lower or 'cash bond' in template_name_lower:
+            if 'filing fee' in template_name_lower:
+                document_type_key = 'filing_fee_memo'
+            elif 'bond assignment' in template_name_lower or 'cash bond' in template_name_lower:
                 document_type_key = 'bond_assignment'
             elif 'motion to dismiss' in template_name_lower:
                 if 'failure to state' in template_name_lower:
@@ -1183,10 +1198,13 @@ Email: {ap.email}"""
             if 'date' not in replacements:
                 replacements['date'] = today_formatted
 
-            def replace_placeholders(text: str) -> str:
+            def replace_placeholders(text: str, paragraph_text: str = None) -> str:
                 """Replace all {{placeholder}} and [Bracket Placeholder] patterns with values."""
                 if not text:
                     return text
+
+                # Use paragraph_text for context if available (for case detection)
+                context = paragraph_text or text
 
                 # First: replace {{variable_name}} patterns
                 pattern = r'\{\{([^}]+)\}\}'
@@ -1200,7 +1218,8 @@ Email: {ap.email}"""
                             # If in ALL CAPS context, keep uppercase
                             return value.upper() if match.group(0) == match.group(0).upper() else value.title()
                         if placeholder == 'county':
-                            return value.upper() if 'COUNTY' in text else value.title()
+                            # Check full paragraph context for COUNTY (not just this run)
+                            return value.upper() if 'COUNTY' in context else value.title()
                         return value
                     # Leave unmatched placeholders as-is for visibility
                     return match.group(0)
@@ -1227,26 +1246,71 @@ Email: {ap.email}"""
                 return text
 
             def replace_in_paragraph(paragraph):
-                """Replace placeholders in a paragraph while preserving formatting."""
+                """Replace placeholders in a paragraph while preserving formatting.
+
+                Strategy: try run-level replacement first (preserves tabs & formatting
+                across runs). Only fall back to full-paragraph replacement if a
+                placeholder spans multiple runs.
+                """
                 full_text = paragraph.text
                 if not full_text or '{{' not in full_text:
                     return
 
-                new_text = replace_placeholders(full_text)
+                # --- Pass 1: try replacing within individual runs ---
+                runs_changed = False
+                for run in paragraph.runs:
+                    if '{{' in run.text:
+                        new_run_text = replace_placeholders(run.text, full_text)
+                        if new_run_text != run.text:
+                            run.text = new_run_text
+                            runs_changed = True
 
-                # Only update if text changed
-                if new_text != full_text:
-                    # Replace text in runs while preserving formatting
-                    if len(paragraph.runs) == 1:
-                        paragraph.runs[0].text = new_text
-                    elif len(paragraph.runs) > 1:
-                        # Preserve first run's formatting, clear others
-                        paragraph.runs[0].text = new_text
-                        for run in paragraph.runs[1:]:
-                            run.text = ''
+                # Check if all placeholders are resolved after run-level replacement
+                remaining_text = paragraph.text
+                if '{{' not in remaining_text:
+                    return  # All done — formatting fully preserved
+
+                # --- Pass 2: placeholder spans multiple runs ---
+                # Build a map of character positions → (run_index, offset_in_run)
+                # so we can surgically replace only the affected runs.
+                new_full_text = replace_placeholders(remaining_text, full_text)
+                if new_full_text == remaining_text:
+                    return  # Nothing more to replace
+
+                # Fallback: redistribute text across runs.
+                # Preserve leading runs that don't contain '{{' (keeps tabs/format).
+                runs = paragraph.runs
+                if not runs:
+                    paragraph.text = new_full_text
+                    return
+
+                # Find which runs are "before" the first placeholder
+                char_offset = 0
+                first_placeholder_pos = remaining_text.find('{{')
+                safe_prefix_runs = []
+                prefix_chars = 0
+
+                for i, run in enumerate(runs):
+                    run_end = char_offset + len(run.text)
+                    if run_end <= first_placeholder_pos:
+                        safe_prefix_runs.append(i)
+                        prefix_chars += len(run.text)
                     else:
-                        # No runs, just set paragraph text
-                        paragraph.text = new_text
+                        break
+                    char_offset = run_end
+
+                if safe_prefix_runs:
+                    # Keep prefix runs unchanged, put the rest into the next run
+                    first_affected = safe_prefix_runs[-1] + 1
+                    if first_affected < len(runs):
+                        runs[first_affected].text = new_full_text[prefix_chars:]
+                        for j in range(first_affected + 1, len(runs)):
+                            runs[j].text = ''
+                else:
+                    # No safe prefix — put everything in first run, clear rest
+                    runs[0].text = new_full_text
+                    for run in runs[1:]:
+                        run.text = ''
 
             # Process all paragraphs
             for paragraph in doc.paragraphs:

@@ -73,6 +73,7 @@ data/reports/
 *.pdf
 *.docx
 !templates_processed/*.docx
+!data/templates/*.docx
 *.xlsx
 *.csv
 
