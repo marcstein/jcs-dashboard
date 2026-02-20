@@ -139,7 +139,8 @@ def import_template():
             file_hash,
             len(new_content),
         ))
-        new_id = cur.fetchone()[0]
+        row = cur.fetchone()
+        new_id = row['id'] if isinstance(row, dict) else row[0]
         conn.commit()
 
         print(f"\n✓ Imported unified Filing Fee Memo as template ID: {new_id}")
