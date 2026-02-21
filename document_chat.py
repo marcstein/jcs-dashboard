@@ -202,59 +202,164 @@ DOCUMENT_TYPES = {
         "required_vars": ["defendant_name", "case_number", "county"],
         "optional_vars": []
     },
+    # ==========================================================================
+    # CONSOLIDATED TEMPLATES (unified from ~989 variant files)
+    # ==========================================================================
+    "entry_of_appearance_state": {
+        "name": "Entry of Appearance (State)",
+        "description": "Notice that attorney is appearing for defendant in circuit court - firm info from attorney profile",
+        "required_vars": ["county", "plaintiff_name", "defendant_name", "case_number"],
+        "optional_vars": ["attorney_names", "signing_attorney",
+                          "second_attorney_name", "second_attorney_bar", "second_attorney_email",
+                          "service_date", "service_signatory"],
+        "defaults": {"plaintiff_name": "State of Missouri"},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "entry_of_appearance_muni": {
+        "name": "Entry of Appearance (Municipal)",
+        "description": "Notice that attorney is appearing for defendant in municipal court - includes prosecutor mailing info",
+        "required_vars": ["city", "defendant_name", "case_number"],
+        "optional_vars": ["attorney_names", "signing_attorney",
+                          "second_attorney_name", "second_attorney_bar", "second_attorney_email",
+                          "prosecutor_name", "prosecutor_address", "prosecutor_city_state_zip",
+                          "service_date", "service_signatory"],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
     "entry_of_appearance": {
         "name": "Entry of Appearance",
-        "description": "Notice that attorney is appearing for defendant",
-        "required_vars": ["defendant_name", "case_number", "county", "court", "prosecuting_attorney", "prosecuting_attorney_address"],
-        "optional_vars": []
+        "description": "Notice that attorney is appearing for defendant (alias - routes to state or muni based on context)",
+        "required_vars": ["defendant_name", "case_number", "county"],
+        "optional_vars": ["city"],
+        "defaults": {}
+    },
+    "motion_for_continuance": {
+        "name": "Motion for Continuance",
+        "description": "Request to postpone a hearing or trial date - unified template for all counties",
+        "required_vars": ["county", "defendant_name", "case_number", "hearing_date", "continuance_reason"],
+        "optional_vars": ["attorney_names", "signing_attorney",
+                          "second_attorney_name", "second_attorney_bar", "second_attorney_email",
+                          "service_date", "service_signatory"],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
     },
     "motion_to_continue": {
-        "name": "Motion to Continue",
-        "description": "Request to postpone a hearing or trial date",
-        "required_vars": ["defendant_name", "case_number", "original_date"],
-        "optional_vars": ["city", "county", "conflict_details", "respondent"]
+        "name": "Motion for Continuance",
+        "description": "Alias for motion_for_continuance",
+        "required_vars": ["county", "defendant_name", "case_number", "hearing_date", "continuance_reason"],
+        "optional_vars": [],
+        "defaults": {}
     },
-    "motion_to_continue_municipal": {
-        "name": "Motion for Continuance - Municipal",
-        "description": "Request to postpone a municipal court hearing",
-        "required_vars": ["defendant_name", "case_number", "city", "original_date"],
-        "optional_vars": []
+    "request_for_discovery": {
+        "name": "Request for Discovery",
+        "description": "Standard discovery request - unified template with boilerplate discovery items for all counties",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": ["signing_attorney",
+                          "second_attorney_name", "second_attorney_bar", "second_attorney_email",
+                          "service_date", "service_signatory"],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
     },
-    "motion_to_continue_circuit": {
-        "name": "Motion for Continuance - Circuit",
-        "description": "Request to postpone a circuit court hearing",
-        "required_vars": ["defendant_name", "case_number", "county", "original_date", "conflict_details", "respondent"],
-        "optional_vars": []
+    "preservation_supplemental_letter": {
+        "name": "Preservation/Supplemental Discovery Letter",
+        "description": "Letter to police/agency requesting preservation of evidence AND supplemental discovery (video, audio, booking photos)",
+        "required_vars": ["agency_name", "agency_attention", "agency_address", "agency_city_state_zip",
+                          "defendant_name", "defendant_dob", "charges", "arrest_date",
+                          "ticket_number", "arresting_officer"],
+        "optional_vars": ["letter_date", "defendant_honorific", "defendant_last_name", "defendant_pronoun",
+                          "initials"],
+        "defaults": {"letter_date": "auto", "defendant_honorific": "Mr.", "defendant_pronoun": "he"},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "second_attorney_name", "second_attorney_bar", "second_attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone"
+        ]
     },
     "preservation_letter": {
         "name": "Preservation Letter",
-        "description": "Letter requesting preservation of evidence",
-        "required_vars": ["defendant_name", "police_department", "address_police_department", "city_state_zip_police_department", "dob", "charges", "arrest_date", "ticket_number", "arresting_officer"],
-        "optional_vars": []
+        "description": "Letter to police/agency requesting preservation of evidence only (shorter, no supplemental discovery)",
+        "required_vars": ["agency_name", "agency_attention", "agency_address", "agency_city_state_zip",
+                          "defendant_name", "defendant_dob", "charges", "arrest_date",
+                          "ticket_number", "arresting_officer"],
+        "optional_vars": ["letter_date", "initials"],
+        "defaults": {"letter_date": "auto"},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "second_attorney_name", "second_attorney_bar", "second_attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone"
+        ]
     },
     "potential_prosecution_letter": {
         "name": "Potential Prosecution Letter",
-        "description": "Letter to prosecutor notifying of representation and requesting communication",
-        "required_vars": ["defendant_name", "prosecuting_attorney", "office_prosecuting_attorney", "address_prosecuting_attorney", "city_state_zip_prosecuting_attorney"],
-        "optional_vars": []
+        "description": "Letter to prosecutor notifying of representation - firm info from attorney profile",
+        "required_vars": ["client_name", "prosecutor_name", "prosecutor_title", "court_name",
+                          "prosecutor_address_line1", "prosecutor_city_state_zip",
+                          "prosecutor_salutation"],
+        "optional_vars": ["letter_date", "prosecutor_address_line2", "initials"],
+        "defaults": {"letter_date": "auto"},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address_line1", "firm_address_line2",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
     },
-    "request_for_discovery_municipal": {
-        "name": "Request for Discovery - Municipal",
-        "description": "Discovery request in municipal court case",
-        "required_vars": ["defendant_name", "case_number", "city", "prosecuting_attorney", "prosecuting_attorney_address", "prosecuting_attorney_city_state_zip", "requested_evidence", "drafted_by"],
-        "optional_vars": []
+    "motion_to_recall_warrant": {
+        "name": "Motion to Recall Warrant",
+        "description": "Motion to recall an outstanding warrant and reset case on docket - municipal court",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": ["signing_attorney",
+                          "second_attorney_name", "second_attorney_bar", "second_attorney_email",
+                          "service_date", "service_signatory"],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
     },
-    "request_for_discovery_circuit": {
-        "name": "Request for Discovery - Circuit",
-        "description": "Discovery request in circuit court case",
-        "required_vars": ["defendant_name", "case_number", "county", "drafted_by"],
-        "optional_vars": []
+    "proposed_stay_order": {
+        "name": "Proposed Stay Order",
+        "description": "Court order staying revocation of driving privileges pending Petition for Review (DWI/Refusal cases)",
+        "required_vars": ["county", "petitioner_name", "dln", "dob", "arrest_date"],
+        "optional_vars": ["case_number", "respondent_attorney_name", "respondent_attorney_bar",
+                          "judge_name", "judge_title", "division",
+                          "order_month", "order_year"],
+        "defaults": {"judge_title": "Associate Circuit Judge"},
+        "party_terminology": "petitioner_respondent",
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_full_name", "attorney_bar"
+        ]
     },
     "disposition_letter": {
-        "name": "Disposition Letter",
-        "description": "Letter to client informing them of case outcome",
-        "required_vars": ["client_name", "case_number", "court_name", "outcome"],
-        "optional_vars": ["fine_amount", "payment_deadline", "court_address"]
+        "name": "Disposition Letter to Client",
+        "description": "Letter to client informing them of case result, fine amount, and payment instructions",
+        "required_vars": ["client_name", "client_first_name",
+                          "client_address", "client_city_state_zip",
+                          "disposition_paragraph", "court_name",
+                          "court_address", "court_city_state_zip",
+                          "payment_instructions", "payment_deadline"],
+        "optional_vars": ["letter_date", "initials"],
+        "defaults": {"letter_date": "auto"},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone"
+        ]
     },
 
     # ==========================================================================
@@ -650,29 +755,30 @@ class DocumentChatEngine:
                 else:
                     document_type_key = 'motion_to_dismiss_general'
             elif 'arraignment' in template_name_lower and 'waiver' in template_name_lower:
-                # Matches: "Waiver of Arraignment", "Entry of Appearance, Waiver of Arraignment..."
                 document_type_key = 'waiver_of_arraignment'
             elif 'entry of appearance' in template_name_lower and 'arraignment' not in template_name_lower:
-                # Only match Entry of Appearance if NOT also an arraignment waiver
-                document_type_key = 'entry_of_appearance'
-            elif 'motion' in template_name_lower and 'continu' in template_name_lower:
-                if 'municipal' in template_name_lower:
-                    document_type_key = 'motion_to_continue_municipal'
-                elif 'circuit' in template_name_lower:
-                    document_type_key = 'motion_to_continue_circuit'
+                if 'muni' in template_name_lower:
+                    document_type_key = 'entry_of_appearance_muni'
+                elif 'state' in template_name_lower:
+                    document_type_key = 'entry_of_appearance_state'
                 else:
-                    document_type_key = 'motion_to_continue'
+                    document_type_key = 'entry_of_appearance_state'  # Default to state
+            elif 'motion' in template_name_lower and 'continu' in template_name_lower:
+                document_type_key = 'motion_for_continuance'
+            elif 'recall warrant' in template_name_lower or 'motion to recall' in template_name_lower:
+                document_type_key = 'motion_to_recall_warrant'
+            elif 'stay order' in template_name_lower or 'proposed stay' in template_name_lower:
+                document_type_key = 'proposed_stay_order'
+            elif 'preservation' in template_name_lower and 'supplemental' in template_name_lower:
+                document_type_key = 'preservation_supplemental_letter'
             elif 'preservation' in template_name_lower:
                 document_type_key = 'preservation_letter'
             elif 'potential prosecution' in template_name_lower or 'prosecution letter' in template_name_lower:
                 document_type_key = 'potential_prosecution_letter'
             elif 'request for discovery' in template_name_lower or 'discovery request' in template_name_lower:
-                if 'municipal' in template_name_lower:
-                    document_type_key = 'request_for_discovery_municipal'
-                elif 'circuit' in template_name_lower:
-                    document_type_key = 'request_for_discovery_circuit'
-                else:
-                    document_type_key = 'request_for_discovery_circuit'  # Default to circuit
+                document_type_key = 'request_for_discovery'
+            elif 'disposition' in template_name_lower or 'dispo' in template_name_lower:
+                document_type_key = 'disposition_letter'
 
             return {
                 "found": True,
