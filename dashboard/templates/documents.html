@@ -165,12 +165,37 @@
         padding: 20px;
     }
 
+    .doc-sidebar {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+
     .doc-panel h3 {
         font-size: 0.9rem;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         color: #6b7280;
         margin-bottom: 12px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        user-select: none;
+    }
+
+    .doc-panel h3::after {
+        content: '\25B2';
+        font-size: 0.6rem;
+        transition: transform 0.2s;
+    }
+
+    .doc-panel h3.collapsed::after {
+        transform: rotate(180deg);
+    }
+
+    .doc-panel .example-prompts.collapsed,
+    .doc-panel .recent-docs.collapsed {
+        display: none;
     }
 
     .example-prompts {
@@ -374,28 +399,75 @@
 
         <div class="doc-sidebar">
             <div class="doc-panel">
-                <h3>Quick Generate</h3>
+                <h3>Pleadings &amp; Appearances</h3>
                 <div class="example-prompts">
                     <button class="example-prompt" data-prompt="I need an entry of appearance for Jefferson County">Entry of Appearance (State)</button>
                     <button class="example-prompt" data-prompt="Entry of appearance for Bridgeton Municipal Court">Entry of Appearance (Muni)</button>
-                    <button class="example-prompt" data-prompt="I need a motion for continuance for St. Louis County">Motion for Continuance</button>
-                    <button class="example-prompt" data-prompt="Request for discovery for Franklin County">Request for Discovery</button>
-                    <button class="example-prompt" data-prompt="I need a preservation letter for Arnold Police Department">Preservation Letter</button>
-                    <button class="example-prompt" data-prompt="Preservation and supplemental discovery letter for MSHP">Preservation + Supplemental</button>
-                    <button class="example-prompt" data-prompt="Motion to recall warrant for Jeffco Municipal Court">Motion to Recall Warrant</button>
-                    <button class="example-prompt" data-prompt="I need a proposed stay order for Jefferson County DWI refusal">Proposed Stay Order</button>
-                    <button class="example-prompt" data-prompt="Disposition letter to client for O'Fallon Municipal case">Disposition Letter</button>
-                    <button class="example-prompt" data-prompt="Potential prosecution letter for Cole County">Prosecution Letter</button>
+                    <button class="example-prompt" data-prompt="Generate a waiver of arraignment for Jefferson County">Waiver of Arraignment</button>
+                    <button class="example-prompt" data-prompt="I need a petition for review for Jefferson County DWI refusal">Petition for Review (PFR)</button>
+                    <button class="example-prompt" data-prompt="Request for jury trial for Franklin County">Request for Jury Trial</button>
                 </div>
             </div>
 
             <div class="doc-panel">
-                <h3>More Documents</h3>
+                <h3>Motions</h3>
                 <div class="example-prompts">
+                    <button class="example-prompt" data-prompt="I need a motion for continuance for St. Louis County">Motion for Continuance</button>
                     <button class="example-prompt" data-prompt="I need a motion to dismiss for Jefferson County">Motion to Dismiss</button>
+                    <button class="example-prompt" data-prompt="DOR motion to dismiss for Jefferson County">DOR Motion to Dismiss</button>
+                    <button class="example-prompt" data-prompt="Motion for change of judge for Franklin County">Change of Judge</button>
+                    <button class="example-prompt" data-prompt="Motion to recall warrant for Jeffco Municipal Court">Recall Warrant</button>
+                    <button class="example-prompt" data-prompt="Motion for bond reduction for St. Louis County">Bond Reduction</button>
+                    <button class="example-prompt" data-prompt="Motion to amend bond conditions for Jefferson County">Amend Bond Conditions</button>
+                    <button class="example-prompt" data-prompt="Motion to certify for jury trial for Bridgeton Municipal">Certify for Jury Trial</button>
+                    <button class="example-prompt" data-prompt="Motion to shorten time for Jefferson County">Shorten Time</button>
+                    <button class="example-prompt" data-prompt="Motion to appear via WebEx for Jefferson County DOR">Appear via WebEx</button>
+                    <button class="example-prompt" data-prompt="Motion to place on docket for Franklin County">Place on Docket</button>
+                    <button class="example-prompt" data-prompt="Motion to compel discovery for Jefferson County">Compel Discovery</button>
+                    <button class="example-prompt" data-prompt="Motion to terminate probation for St. Louis County">Terminate Probation</button>
+                </div>
+            </div>
+
+            <div class="doc-panel">
+                <h3>Discovery</h3>
+                <div class="example-prompts">
+                    <button class="example-prompt" data-prompt="Request for discovery for Franklin County">Request for Discovery</button>
+                    <button class="example-prompt" data-prompt="Request for supplemental discovery for Jefferson County">Supplemental Discovery</button>
+                    <button class="example-prompt" data-prompt="Notice to take deposition for Jefferson County">Notice to Take Deposition</button>
+                </div>
+            </div>
+
+            <div class="doc-panel">
+                <h3>Letters</h3>
+                <div class="example-prompts">
+                    <button class="example-prompt" data-prompt="I need a preservation letter for Arnold Police Department">Preservation Letter</button>
+                    <button class="example-prompt" data-prompt="Preservation and supplemental discovery letter for MSHP">Preservation + Supplemental</button>
+                    <button class="example-prompt" data-prompt="Potential prosecution letter for Cole County">Prosecution Letter</button>
+                    <button class="example-prompt" data-prompt="After supplemental disclosure letter for Jefferson County prosecutor">After Supp. Disclosure</button>
+                    <button class="example-prompt" data-prompt="Letter to client with discovery for Jefferson County case">Client Discovery Cover</button>
+                    <button class="example-prompt" data-prompt="Disposition letter to client for O'Fallon Municipal case">Disposition Letter</button>
+                    <button class="example-prompt" data-prompt="DL reinstatement letter to client">DL Reinstatement Letter</button>
+                    <button class="example-prompt" data-prompt="Letter to DOR with petition for review">Ltr to DOR w/ PFR</button>
+                    <button class="example-prompt" data-prompt="Letter to DOR with stay order">Ltr to DOR w/ Stay Order</button>
+                    <button class="example-prompt" data-prompt="Letter to DOR with judgment">Ltr to DOR w/ Judgment</button>
+                </div>
+            </div>
+
+            <div class="doc-panel">
+                <h3>Notices &amp; Orders</h3>
+                <div class="example-prompts">
+                    <button class="example-prompt" data-prompt="Notice of hearing for Jefferson County">Notice of Hearing</button>
+                    <button class="example-prompt" data-prompt="Notice of hearing on motion to withdraw for Jefferson County">NOH - Motion to Withdraw</button>
+                    <button class="example-prompt" data-prompt="Notice of change of address for Jefferson County">Change of Address</button>
+                    <button class="example-prompt" data-prompt="I need a proposed stay order for Jefferson County DWI refusal">Proposed Stay Order</button>
+                </div>
+            </div>
+
+            <div class="doc-panel">
+                <h3>Bond &amp; Fees</h3>
+                <div class="example-prompts">
                     <button class="example-prompt" data-prompt="Generate a bond assignment document">Bond Assignment</button>
                     <button class="example-prompt" data-prompt="I need a filing fee memo for a DOR case">Filing Fee Memo</button>
-                    <button class="example-prompt" data-prompt="Generate a waiver of arraignment">Waiver of Arraignment</button>
                 </div>
             </div>
 
@@ -429,6 +501,25 @@ docInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
+    }
+});
+
+// Collapsible sidebar panels
+document.querySelectorAll('.doc-panel h3').forEach((h3, index) => {
+    h3.addEventListener('click', function() {
+        const content = this.nextElementSibling;
+        if (content) {
+            this.classList.toggle('collapsed');
+            content.classList.toggle('collapsed');
+        }
+    });
+    // Start all collapsed except first panel
+    if (index > 0) {
+        const content = h3.nextElementSibling;
+        if (content) {
+            h3.classList.add('collapsed');
+            content.classList.add('collapsed');
+        }
     }
 });
 
