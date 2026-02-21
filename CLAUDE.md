@@ -698,37 +698,103 @@ All env vars stored in `.env` file in the project root.
     - Template stored at `data/templates/Bond_Assignment_Templated.docx` with correct `{{placeholder}}` positions
     - Import script: `reimport_bond_template.py`
     - Preserves title "ASSIGNMENT OF CASH BOND", signature labels, all formatting
+14. **Batch template consolidation (10 templates replacing ~989 variants)** - System now:
+    - Batch 1: Entry of Appearance (State/Muni), Motion for Continuance, Request for Discovery, Potential Prosecution Letter
+    - Batch 2: Preservation/Supplemental Letter, Preservation Letter, Motion to Recall Warrant, Proposed Stay Order, Disposition Letter to Client
+    - Master import script: `import_consolidated_templates.py` with `deactivate_patterns` per template
+    - All consolidated templates stored in `data/templates/` with `{{placeholder}}` syntax
+15. **Fixed uppercase name placeholders in templates** - Changed `{{DEFENDANT_NAME}}` → `{{defendant_name}}`, `{{PETITIONER_NAME}}` → `{{petitioner_name}}`, `{{FIRM_NAME}}` → `{{firm_name}}` across 6 templates so names preserve user input casing. `{{COUNTY}}` remains uppercase (correct for court captions).
+16. **Wired consolidated templates into document generation UI** - System now:
+    - Updated `DOCUMENT_TYPES` registry with entries for all 13 consolidated templates
+    - Dashboard Quick Generate panel with 10 buttons + More Documents panel with 4 buttons
+    - Attorney profile auto-fill maps: `attorney_bar`, `attorney_email`, `firm_phone`, `firm_fax`, `attorney_full_name`, `firm_address_line1`
+    - Fallback `document_type_key` detection from user's original request text (not just template name)
+    - Import script deactivates old per-county/per-attorney variants on import
 
-### Template Import Scripts
+### Template Consolidation
 
-Standalone scripts to import/update specific templates in the database. These use upsert logic (`ON CONFLICT DO UPDATE`) so they are safe to re-run.
+The firm's original template folder had ~4,800 files — mostly per-county or per-attorney duplicates of the same document with only the county name, attorney signature block, or court address changed. These have been consolidated into universal templates with `{{placeholder}}` variables. Attorney profile fields (firm name, address, bar number, etc.) are auto-filled from the database.
 
-| Script | Template | Purpose |
-|--------|----------|---------|
-| `import_filing_fee_memo.py` | `data/templates/Filing_Fee_Memo_Unified.docx` | Deactivates old variants, imports unified template |
-| `reimport_bond_template.py` | `data/templates/Bond_Assignment_Templated.docx` | Updates Bond Assignment with proper `{{placeholder}}` patterns |
+#### Consolidated Templates (13 total)
 
-**Usage (on production server):**
+| # | Template | File | Replaces | Key Placeholders |
+|---|----------|------|----------|-----------------|
+| 1 | Entry of Appearance (State) | `Entry_of_Appearance_State.docx` | ~30 county variants | county, plaintiff_name, defendant_name, case_number |
+| 2 | Entry of Appearance (Muni) | `Entry_of_Appearance_Muni.docx` | ~76 muni variants | city, defendant_name, case_number, prosecutor_* |
+| 3 | Motion for Continuance | `Motion_for_Continuance.docx` | ~34 variants | county, defendant_name, case_number, hearing_date, continuance_reason |
+| 4 | Request for Discovery | `Request_for_Discovery.docx` | ~36 variants | county, defendant_name, case_number |
+| 5 | Potential Prosecution Letter | `Potential_Prosecution_Letter.docx` | ~21 variants | client_name, prosecutor_*, court_name |
+| 6 | Preservation/Supplemental Discovery Letter | `Preservation_Supplemental_Discovery_Letter.docx` | ~164 variants | agency_*, defendant_*, arrest_date, ticket_number |
+| 7 | Preservation Letter | `Preservation_Letter.docx` | ~105 variants | agency_*, defendant_*, arrest_date, ticket_number |
+| 8 | Motion to Recall Warrant | `Motion_to_Recall_Warrant.docx` | ~70 variants | county, defendant_name, case_number |
+| 9 | Proposed Stay Order | `Proposed_Stay_Order.docx` | ~54 variants | county, petitioner_name, dln, dob, arrest_date, judge_* |
+| 10 | Disposition Letter to Client | `Disposition_Letter_to_Client.docx` | ~399 variants | client_*, disposition_paragraph, court_*, payment_* |
+| 11 | Filing Fee Memo | `Filing_Fee_Memo_Unified.docx` | 4 variants | petitioner_name, case_number, county, filing_fee |
+| 12 | Bond Assignment | `Bond_Assignment_Templated.docx` | 3 variants | defendant_name, case_number, county, bond_amount |
+| 13 | Motion to Dismiss (General) | (AI-generated) | N/A | defendant_name, case_number, county |
+
+All consolidated templates stored in `data/templates/`. Each has a matching `DOCUMENT_TYPES` entry in `document_chat.py` that defines `required_vars` (user provides), `optional_vars`, and `uses_attorney_profile_for` (auto-filled from DB).
+
+#### Remaining Variant Groups (not yet consolidated)
+
+~850 templates remain active, of which ~68 groups have 2+ variants. Largest unconsolidated groups:
+
+| Group | Variants | Category |
+|-------|----------|----------|
+| Request for Rec- Letter to PA | ~130 | letter (per-municipality prosecutor) |
+| Motion for COJ | 15 | motion (per-county) |
+| Notice of Hearing | 15 | notice (per-county/attorney) |
+| PFR (Petition for Review) | 14 | pleading (per-county) |
+| Entry (misc city-specific) | 13 | pleading (per-city, not caught by current patterns) |
+| After Supplemental Disclosure Ltr | 12 | letter (per-county) |
+| Admin Continuance Request | 10 | motion (per-attorney) |
+| Admin Hearing Request | 8 | motion (per-attorney) |
+| Motion to Withdraw | 8 | motion (per-county/attorney) |
+| Ltr to DOR with PFR | 5+ | letter (per-county) |
+| Ltr to DOR with Stay Order | 5+ | letter (per-county) |
+| Waiver of Arraignment | 7 | pleading (per-county) |
+| Closing Letter | 20+ | letter (example-based, structural differences) |
+| DL Reinstatement Ltr | 12+ | letter (criteria-based variants) |
+
+#### Import Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `import_consolidated_templates.py` | Master import — all 10 batch-consolidated templates + deactivation of old variants |
+| `import_filing_fee_memo.py` | Filing Fee Memo (standalone, predates master script) |
+| `reimport_bond_template.py` | Bond Assignment (standalone, predates master script) |
+
+All use upsert logic (`ON CONFLICT DO UPDATE`) — safe to re-run.
+
+**Deploy on production:**
 ```bash
 cd /opt/jcs-mycase
+git pull
 export $(grep -v '^#' .env | xargs)
-.venv/bin/python import_filing_fee_memo.py
+.venv/bin/python import_consolidated_templates.py
 ```
 
 **Note:** Production uses `RealDictCursor` (returns dicts, not tuples). Import scripts handle both formats with `row['id'] if isinstance(row, dict) else row[0]`.
 
-### Template Consolidation Strategy
+#### Placeholder Naming Convention
 
-When multiple template variants exist for the same document type (e.g., per-attorney or per-county variants), consolidate into a single template with `{{placeholder}}` variables:
+- `{{COUNTY}}` — uppercase = displayed in ALL CAPS (court caption: "JEFFERSON COUNTY")
+- `{{defendant_name}}` — lowercase = preserves user's input casing
+- Profile variables (firm_name, attorney_bar, etc.) are never asked — auto-filled from attorney profile
 
-1. Compare all variants to identify differences (county, attorney, party names, fees, etc.)
-2. Choose the most complete variant as the base (e.g., the one with Certificate of Service)
-3. Unpack the .docx XML, replace case-specific values with `{{placeholders}}`
-4. Repack using the docx skill's `pack.py` script
-5. Add a `DOCUMENT_TYPES` entry in `document_chat.py` with required/optional vars
-6. Add template name detection in the `_select_template` method
-7. Create an import script (follow `import_filing_fee_memo.py` pattern)
-8. Commit, push, `git pull` on server, run import script
+#### Consolidation Workflow
+
+When consolidating a new template group:
+
+1. Extract a representative variant from DB or source folder
+2. Unpack the .docx XML with `unpack.py`
+3. Replace case-specific values with `{{placeholders}}` in `document.xml`
+4. Repack with `pack.py` → save to `data/templates/`
+5. Add entry to `TEMPLATES` list in `import_consolidated_templates.py` with `deactivate_patterns`
+6. Add `DOCUMENT_TYPES` entry in `document_chat.py` with required/optional vars and `uses_attorney_profile_for`
+7. Add template name detection in `_identify_template()` if/elif chain
+8. Add button to `dashboard/templates/documents.html` Quick Generate panel
+9. Commit, push, `git pull` on server, run `import_consolidated_templates.py`
 
 ### Deployment Workflow
 
