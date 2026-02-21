@@ -2004,7 +2004,8 @@ Email: {ap.email}"""
 
                 # Bond Assignment: assignee is the attorney/firm
                 replacements['assignee_name'] = ap.firm_name or ap.attorney_name
-                replacements['assignee_address'] = f"{ap.firm_address}\n{ap.firm_city}, {ap.firm_state} {ap.firm_zip}"
+                replacements['assignee_address'] = ap.firm_address
+                replacements['assignee_city_state_zip'] = f"{ap.firm_city}, {ap.firm_state} {ap.firm_zip}"
 
             # Auto-fill dates with today's date if not provided
             from datetime import datetime
@@ -2026,17 +2027,44 @@ Email: {ap.email}"""
                 # First: replace {{variable_name}} patterns
                 pattern = r'\{\{([^}]+)\}\}'
 
+                def _is_uppercase_context(match_obj, ctx: str) -> bool:
+                    """Detect if a placeholder appears in an ALL CAPS context.
+
+                    Checks the alpha characters in the ~40 chars before and after
+                    the placeholder in the full paragraph text. If those characters
+                    are all uppercase (and at least 4 chars), the value should be
+                    uppercased to match.
+
+                    Examples that return True:
+                      "IN THE CIRCUIT COURT OF {{county}} COUNTY"
+                      "CITY OF {{city}},"
+                      "STATE OF MISSOURI{{petitioner_name}},"
+                    Examples that return False:
+                      "I, {{defendant_name}}, Defendant, do hereby state"
+                      "Address: {{firm_address}}"
+                    """
+                    # Find placeholder position in paragraph context
+                    placeholder_text = match_obj.group(0)
+                    pos = ctx.find(placeholder_text)
+                    if pos == -1:
+                        return False
+                    before = ctx[max(0, pos - 40):pos]
+                    after = ctx[pos + len(placeholder_text):pos + len(placeholder_text) + 40]
+                    # Strip everything except letters
+                    nearby_alpha = re.sub(r'[^A-Za-z]', '', before + after)
+                    return len(nearby_alpha) >= 4 and nearby_alpha == nearby_alpha.upper()
+
                 def replacer(match):
                     placeholder = match.group(1).lower().strip()
                     if placeholder in replacements:
                         value = replacements[placeholder]
-                        # Handle case formatting for names
-                        if placeholder == 'defendant_name':
-                            # If in ALL CAPS context, keep uppercase
-                            return value.upper() if match.group(0) == match.group(0).upper() else value.title()
-                        if placeholder == 'county':
-                            # Check full paragraph context for COUNTY (not just this run)
-                            return value.upper() if 'COUNTY' in context else value.title()
+                        # If the placeholder itself is UPPERCASE (e.g. {{COUNTY}}),
+                        # always uppercase the value
+                        if match.group(1).strip() == match.group(1).strip().upper():
+                            return value.upper()
+                        # If surrounding paragraph text is ALL CAPS, uppercase the value
+                        if _is_uppercase_context(match, context):
+                            return value.upper()
                         return value
                     # Leave unmatched placeholders as-is for visibility
                     return match.group(0)
@@ -2140,10 +2168,79 @@ Email: {ap.email}"""
                         for paragraph in cell.paragraphs:
                             replace_in_paragraph(paragraph)
 
-            # Save to bytes
+            # Post-process: normalize /s/ signature lines
+            # After filling, /s/ lines may have excessive underscores that cause
+            # wrapping or ugly JUSTIFY stretching. Trim to a clean format.
+            def normalize_signature_lines(paragraph):
+                text = paragraph.text
+                if '/s/' not in text:
+                    return
+                # Paragraph-level: strip trailing underscores and excess spaces
+                # from ALL runs in a /s/ paragraph, since the /s/ prefix IS
+                # the electronic signature — underscore lines are unnecessary.
+                for run in paragraph.runs:
+                    rt = run.text
+                    # Remove blocks of 4+ underscores
+                    new_rt = re.sub(r'_{4,}', '', rt)
+                    # Collapse trailing whitespace (but keep leading tabs)
+                    new_rt = re.sub(r'  +$', '', new_rt)
+                    new_rt = re.sub(r'  +(?=[^ ])', ' ', new_rt)
+                    if new_rt != rt:
+                        run.text = new_rt
+
+            for paragraph in doc.paragraphs:
+                normalize_signature_lines(paragraph)
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            normalize_signature_lines(paragraph)
+
+            # Process hyperlink-enclosed placeholders (python-docx para.runs
+            # doesn't include runs inside <w:hyperlink> elements)
             output = io.BytesIO()
             doc.save(output)
-            return output.getvalue()
+            filled = output.getvalue()
+
+            # Do a final XML-level pass for any remaining {{placeholders}}
+            try:
+                import zipfile
+                buf = io.BytesIO(filled)
+                with zipfile.ZipFile(buf, 'r') as zin:
+                    parts = {}
+                    for item in zin.infolist():
+                        data = zin.read(item.filename)
+                        if item.filename == 'word/document.xml':
+                            xml_str = data.decode('utf-8')
+                            # Build tag-stripped version for context detection
+                            clean_xml = re.sub(r'<[^>]+>', '', xml_str)
+                            # Replace placeholders in raw XML text nodes
+                            def xml_replacer(m):
+                                key = m.group(1).strip().lower()
+                                if key not in replacements:
+                                    return m.group(0)
+                                value = replacements[key]
+                                # Uppercase detection: find placeholder in clean text
+                                ph_text = m.group(0)
+                                cpos = clean_xml.find(ph_text)
+                                if cpos >= 0:
+                                    before = clean_xml[max(0, cpos - 40):cpos]
+                                    after = clean_xml[cpos + len(ph_text):cpos + len(ph_text) + 40]
+                                    nearby = re.sub(r'[^A-Za-z]', '', before + after)
+                                    if len(nearby) >= 4 and nearby == nearby.upper():
+                                        return value.upper()
+                                return value
+                            xml_str = re.sub(r'\{\{([^}]+)\}\}', xml_replacer, xml_str)
+                            data = xml_str.encode('utf-8')
+                        parts[item.filename] = data
+                # Repack
+                out = io.BytesIO()
+                with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zout:
+                    for fname, data in parts.items():
+                        zout.writestr(fname, data)
+                return out.getvalue()
+            except Exception:
+                return filled
 
         except Exception as e:
             print(f"Error filling docx template: {e}")
