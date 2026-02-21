@@ -723,7 +723,7 @@ All env vars stored in `.env` file in the project root.
 
 The firm's original template folder had ~4,800 files — mostly per-county or per-attorney duplicates of the same document with only the county name, attorney signature block, or court address changed. These have been consolidated into universal templates with `{{placeholder}}` variables. Attorney profile fields (firm name, address, bar number, etc.) are auto-filled from the database.
 
-#### Consolidated Templates (50 total)
+#### Consolidated Templates (51 total)
 
 **Batch 1-2 (13 templates, ~989 variants replaced):**
 
@@ -791,12 +791,12 @@ All consolidated templates stored in `data/templates/`. Each has a matching `DOC
 | 48 | Available Court Dates for Trial | `Available_Court_Dates_for_Trial.docx` | ~3 variants | county, defendant_name, case_number, available_dates |
 | 49 | Requirements for Rec Letter to Client | `Requirements_for_Rec_Letter_to_Client.docx` | ~3 variants | client_name, case_number |
 | 50 | Motion to Withdraw | `Motion_to_Withdraw.docx` | ~25 variants | county, defendant_name, case_number, service_date |
+| 51 | Closing Letter | `Closing_Letter.docx` | ~28 variants | client_name, client_first_name, client_address, client_city_state_zip, case_reference, county, disposition_paragraph, closing_paragraph |
 
 #### Remaining Variant Groups (not yet consolidated)
 
 | Group | Variants | Format | Notes |
 |-------|----------|--------|-------|
-| Closing Letter | 20+ | .docx | structural differences between variants |
 | Admin Continuance Request | 10 | .doc (OLE) | needs LibreOffice conversion |
 | Admin Hearing Request | 18 | .doc (OLE) | needs LibreOffice conversion |
 | Petition for TDN | 5 | .doc (OLE) | needs LibreOffice conversion |
@@ -807,7 +807,7 @@ All consolidated templates stored in `data/templates/`. Each has a matching `DOC
 
 | Script | Purpose |
 |--------|---------|
-| `import_consolidated_templates.py` | Master import — all 50 consolidated templates + deactivation of old variants |
+| `import_consolidated_templates.py` | Master import — all 51 consolidated templates + deactivation of old variants |
 | `import_filing_fee_memo.py` | Filing Fee Memo (standalone, predates master script) |
 | `reimport_bond_template.py` | Bond Assignment (standalone, predates master script) |
 | `batch_consolidate.py` | Automated consolidation tool (extracts from DB, unpacks XML, applies replacements, repacks) |

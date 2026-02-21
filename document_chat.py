@@ -830,6 +830,15 @@ DOCUMENT_TYPES = {
             "firm_phone", "firm_fax"
         ]
     },
+    # Closing Letter
+    "closing_letter": {
+        "name": "Closing Letter",
+        "description": "Letter to client summarizing case disposition and closing the file",
+        "required_vars": ["client_name", "client_first_name", "client_address", "client_city_state_zip", "case_reference", "county", "disposition_paragraph"],
+        "optional_vars": ["closing_paragraph"],
+        "defaults": {"closing_paragraph": "Your balance to our office has been paid in full."},
+        "uses_attorney_profile_for": ["attorney_name"]
+    },
 }
 
 
@@ -1284,6 +1293,10 @@ class DocumentChatEngine:
                 document_type_key = 'requirements_for_rec_letter'
             elif 'motion to withdraw' in template_name_lower and 'guilty' not in template_name_lower:
                 document_type_key = 'motion_to_withdraw'
+            elif 'closing' in template_name_lower and 'letter' in template_name_lower:
+                document_type_key = 'closing_letter'
+            elif 'closing' in template_name_lower and 'ltr' in template_name_lower:
+                document_type_key = 'closing_letter'
 
             # If template name didn't match a DOCUMENT_TYPES key, try the user's original request
             if not document_type_key:
@@ -1383,6 +1396,8 @@ class DocumentChatEngine:
                     document_type_key = 'motion_to_withdraw'
                 elif 'motion to withdraw' in request_lower and 'guilty' not in request_lower:
                     document_type_key = 'motion_to_withdraw'
+                elif 'closing letter' in request_lower or 'closing ltr' in request_lower:
+                    document_type_key = 'closing_letter'
 
             return {
                 "found": True,

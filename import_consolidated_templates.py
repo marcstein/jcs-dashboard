@@ -612,6 +612,17 @@ TEMPLATES = [
         "case_variables": ["county", "defendant_name", "case_number", "service_date"],
         "profile_variables": ["attorney_name", "attorney_bar", "attorney_email", "firm_name", "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"],
     },
+    # Closing Letter (replaces 28 variants)
+    {
+        "name": "Closing Letter",
+        "filename": "Closing_Letter.docx",
+        "category": "letter",
+        "subcategory": "closing",
+        "tags": ["closing", "letter", "disposition", "case", "summary"],
+        "deactivate_patterns": ["Closing Letter%", "Closing Ltr%", "Closing letter%"],
+        "case_variables": ["client_name", "client_first_name", "client_address", "client_city_state_zip", "case_reference", "county", "disposition_paragraph", "closing_paragraph"],
+        "profile_variables": ["attorney_name"],
+    },
 ]
 
 
