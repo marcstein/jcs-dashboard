@@ -253,6 +253,11 @@ _SYNONYMS = {
     "nol pros": "nolle prosequi",
     "nolle pros": "nolle prosequi",
     "dor": "director of revenue",
+    "coj": "change of judge",
+    "pfr": "petition for review",
+    "webex": "appear via webex",
+    "dl reinstatement": "reinstatement letter",
+    "drivers license reinstatement": "reinstatement letter",
 }
 
 

@@ -191,16 +191,27 @@ DOCUMENT_TYPES = {
     },
     "waiver_of_arraignment": {
         "name": "Waiver of Arraignment",
-        "description": "Waiver of formal arraignment hearing with entry of not guilty plea",
-        "required_vars": ["defendant_name", "case_number", "court", "jurisdiction_city", "drafted_by"],
+        "description": "Waiver of formal arraignment hearing with entry of not guilty plea - consolidated template",
+        "required_vars": ["county", "defendant_name", "case_number"],
         "optional_vars": [],
-        "defaults": {}
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone"
+        ]
     },
     "request_for_jury_trial": {
         "name": "Request for Jury Trial",
-        "description": "Formal request for jury trial",
-        "required_vars": ["defendant_name", "case_number", "county"],
-        "optional_vars": []
+        "description": "Formal request for jury trial - consolidated template with attorney profile auto-fill",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
     },
     # ==========================================================================
     # CONSOLIDATED TEMPLATES (unified from ~989 variant files)
@@ -396,7 +407,272 @@ DOCUMENT_TYPES = {
         "defaults": {},
         "party_terminology": "plaintiff_defendant",
         "uses_attorney_profile_for": ["assignee_name", "assignee_address"]
-    }
+    },
+
+    # ==========================================================================
+    # BATCH 3 CONSOLIDATED TEMPLATES (automated consolidation - ~291 variants)
+    # ==========================================================================
+    "motion_for_coj": {
+        "name": "Motion for Change of Judge",
+        "description": "Motion requesting a change of judge - unified for all counties",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "notice_of_hearing": {
+        "name": "Notice of Hearing (General)",
+        "description": "Notice of hearing setting - unified for all counties, includes date/time/division",
+        "required_vars": ["county", "defendant_name", "case_number", "hearing_date", "hearing_time", "division", "motion_type"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "petition_for_review": {
+        "name": "Petition for Review (PFR)",
+        "description": "Petition for judicial review of DOR license revocation (refusal cases) - DOR/DWI",
+        "required_vars": ["county", "petitioner_name", "case_number", "dob"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "petitioner_respondent",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "after_supplemental_disclosure_letter": {
+        "name": "After Supplemental Disclosure Letter",
+        "description": "Letter to prosecutor after receiving supplemental disclosure/discovery materials (video, DVD, etc.)",
+        "required_vars": ["prosecutor_name", "prosecutor_title", "court_name",
+                          "prosecutor_address", "prosecutor_city_state_zip",
+                          "prosecutor_salutation", "defendant_name", "case_number", "disclosure_date"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "firm_city_state_zip", "firm_phone"
+        ]
+    },
+    "notice_to_take_deposition": {
+        "name": "Notice to Take Deposition",
+        "description": "Notice scheduling a deposition - includes deponent, date, time, location",
+        "required_vars": ["county", "defendant_name", "case_number",
+                          "prosecutor_name", "prosecutor_title",
+                          "prosecutor_address", "prosecutor_city_state_zip",
+                          "deponent_name", "deposition_date", "deposition_time", "deposition_location"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "motion_for_bond_reduction": {
+        "name": "Motion for Bond Reduction",
+        "description": "Motion requesting reduction of bond amount - includes current bond amount and division",
+        "required_vars": ["county", "defendant_name", "case_number", "division", "bond_amount"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "motion_to_certify": {
+        "name": "Motion to Certify for Jury Trial",
+        "description": "Motion to certify municipal case to circuit court for jury trial",
+        "required_vars": ["city", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "ltr_to_dor_with_pfr": {
+        "name": "Letter to DOR with PFR",
+        "description": "Cover letter to Department of Revenue transmitting filed Petition for Review",
+        "required_vars": ["petitioner_name"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "ltr_to_dor_with_stay_order": {
+        "name": "Letter to DOR with Stay Order",
+        "description": "Cover letter to Department of Revenue transmitting filed Stay Order",
+        "required_vars": ["petitioner_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "dor_motion_to_dismiss": {
+        "name": "DOR Motion to Dismiss",
+        "description": "Motion to dismiss in DOR/Petition for Review case - uses Petitioner/Respondent terminology",
+        "required_vars": ["county", "petitioner_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "petitioner_respondent",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "notice_of_hearing_mtw": {
+        "name": "Notice of Hearing - Motion to Withdraw",
+        "description": "Notice of hearing on a motion to withdraw as counsel",
+        "required_vars": ["county", "defendant_name", "case_number", "division", "hearing_date", "hearing_time"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "motion_to_shorten_time": {
+        "name": "Motion to Shorten Time",
+        "description": "Motion to shorten the notice period for a hearing or motion",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "ltr_to_dor_with_judgment": {
+        "name": "Letter to DOR with Judgment",
+        "description": "Cover letter to Department of Revenue transmitting final judgment/order",
+        "required_vars": ["petitioner_name", "dln"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "motion_to_appear_via_webex": {
+        "name": "Motion to Appear via WebEx",
+        "description": "Motion requesting permission to appear at hearing remotely via WebEx",
+        "required_vars": ["county", "petitioner_name", "respondent_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {"respondent_name": "DIRECTOR OF REVENUE"},
+        "party_terminology": "petitioner_respondent",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "motion_to_place_on_docket": {
+        "name": "Motion to Place on Docket",
+        "description": "Motion to place a case on the court docket for hearing",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "notice_of_change_of_address": {
+        "name": "Notice of Change of Address",
+        "description": "Notice to court of attorney/firm change of address",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "request_for_supplemental_discovery": {
+        "name": "Request for Supplemental Discovery",
+        "description": "Request for supplemental discovery materials (body cam, dash cam, etc.)",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "motion_to_amend_bond_conditions": {
+        "name": "Motion to Amend Bond Conditions",
+        "description": "Motion to modify conditions of bond (e.g., remove interlock, modify restrictions)",
+        "required_vars": ["county", "defendant_name", "case_number", "division", "bond_amount"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "ltr_to_client_with_discovery": {
+        "name": "Letter to Client with Discovery",
+        "description": "Cover letter to client enclosing discovery materials received from prosecution",
+        "required_vars": ["client_name", "client_salutation", "client_address", "client_city_state_zip", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "firm_city_state_zip", "firm_phone"
+        ]
+    },
+    "motion_to_compel": {
+        "name": "Motion to Compel Discovery",
+        "description": "Motion to compel opposing party to produce outstanding discovery",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "motion_to_terminate_probation": {
+        "name": "Motion to Terminate Probation",
+        "description": "Motion for early termination of probation",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "request_for_jury_trial_consolidated": {
+        "name": "Request for Jury Trial",
+        "description": "Formal request for jury trial - consolidated template with attorney profile auto-fill",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar",
+            "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "dl_reinstatement_letter": {
+        "name": "DL Reinstatement Letter",
+        "description": "Letter to client with instructions for reinstating their driver's license after case resolution",
+        "required_vars": ["client_name", "client_first_name", "client_email", "client_address", "client_city_state_zip"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": ["attorney_name"]
+    },
 }
 
 
@@ -779,6 +1055,53 @@ class DocumentChatEngine:
                 document_type_key = 'request_for_discovery'
             elif 'disposition' in template_name_lower or 'dispo' in template_name_lower:
                 document_type_key = 'disposition_letter'
+            # Batch 3 template name detection
+            elif 'change of judge' in template_name_lower or 'coj' in template_name_lower:
+                document_type_key = 'motion_for_coj'
+            elif 'notice of hearing' in template_name_lower and 'withdraw' in template_name_lower:
+                document_type_key = 'notice_of_hearing_mtw'
+            elif 'notice of hearing' in template_name_lower:
+                document_type_key = 'notice_of_hearing'
+            elif 'petition for review' in template_name_lower or template_name_lower.startswith('pfr'):
+                document_type_key = 'petition_for_review'
+            elif 'after supplemental' in template_name_lower or 'supplemental disclosure' in template_name_lower:
+                document_type_key = 'after_supplemental_disclosure_letter'
+            elif 'deposition' in template_name_lower:
+                document_type_key = 'notice_to_take_deposition'
+            elif 'bond reduction' in template_name_lower:
+                document_type_key = 'motion_for_bond_reduction'
+            elif 'certify' in template_name_lower and 'jury' in template_name_lower:
+                document_type_key = 'motion_to_certify'
+            elif 'ltr to dor' in template_name_lower and 'pfr' in template_name_lower:
+                document_type_key = 'ltr_to_dor_with_pfr'
+            elif 'ltr to dor' in template_name_lower and 'stay' in template_name_lower:
+                document_type_key = 'ltr_to_dor_with_stay_order'
+            elif 'ltr to dor' in template_name_lower and 'judgment' in template_name_lower:
+                document_type_key = 'ltr_to_dor_with_judgment'
+            elif 'dor' in template_name_lower and 'motion to dismiss' in template_name_lower:
+                document_type_key = 'dor_motion_to_dismiss'
+            elif 'shorten time' in template_name_lower:
+                document_type_key = 'motion_to_shorten_time'
+            elif 'webex' in template_name_lower or 'web ex' in template_name_lower:
+                document_type_key = 'motion_to_appear_via_webex'
+            elif 'place on docket' in template_name_lower:
+                document_type_key = 'motion_to_place_on_docket'
+            elif 'change of address' in template_name_lower:
+                document_type_key = 'notice_of_change_of_address'
+            elif 'supplemental discovery' in template_name_lower:
+                document_type_key = 'request_for_supplemental_discovery'
+            elif 'amend bond' in template_name_lower:
+                document_type_key = 'motion_to_amend_bond_conditions'
+            elif 'client with discovery' in template_name_lower or 'ltr to client' in template_name_lower:
+                document_type_key = 'ltr_to_client_with_discovery'
+            elif 'compel' in template_name_lower:
+                document_type_key = 'motion_to_compel'
+            elif 'terminate probation' in template_name_lower:
+                document_type_key = 'motion_to_terminate_probation'
+            elif 'jury trial' in template_name_lower:
+                document_type_key = 'request_for_jury_trial'
+            elif 'reinstatement' in template_name_lower and ('dl' in template_name_lower or 'license' in template_name_lower or 'driver' in template_name_lower):
+                document_type_key = 'dl_reinstatement_letter'
 
             # If template name didn't match a DOCUMENT_TYPES key, try the user's original request
             if not document_type_key:
@@ -790,7 +1113,9 @@ class DocumentChatEngine:
                         document_type_key = 'entry_of_appearance_state'
                 elif 'continu' in request_lower or 'mtc' in request_lower:
                     document_type_key = 'motion_for_continuance'
-                elif 'discovery' in request_lower or 'rfd' in request_lower:
+                elif 'supplemental discovery' in request_lower:
+                    document_type_key = 'request_for_supplemental_discovery'
+                elif 'request for discovery' in request_lower or 'rfd' in request_lower:
                     document_type_key = 'request_for_discovery'
                 elif 'preservation' in request_lower and 'supplemental' in request_lower:
                     document_type_key = 'preservation_supplemental_letter'
@@ -804,6 +1129,52 @@ class DocumentChatEngine:
                     document_type_key = 'proposed_stay_order'
                 elif 'dispo' in request_lower:
                     document_type_key = 'disposition_letter'
+                elif 'change of judge' in request_lower or 'coj' in request_lower:
+                    document_type_key = 'motion_for_coj'
+                elif 'notice of hearing' in request_lower and 'withdraw' in request_lower:
+                    document_type_key = 'notice_of_hearing_mtw'
+                elif 'notice of hearing' in request_lower or 'noh' in request_lower:
+                    document_type_key = 'notice_of_hearing'
+                elif 'petition for review' in request_lower or 'pfr' in request_lower:
+                    document_type_key = 'petition_for_review'
+                elif 'supplemental disclosure' in request_lower:
+                    document_type_key = 'after_supplemental_disclosure_letter'
+                elif 'deposition' in request_lower:
+                    document_type_key = 'notice_to_take_deposition'
+                elif 'bond reduction' in request_lower:
+                    document_type_key = 'motion_for_bond_reduction'
+                elif 'certify' in request_lower and 'jury' in request_lower:
+                    document_type_key = 'motion_to_certify'
+                elif 'dor' in request_lower and 'pfr' in request_lower:
+                    document_type_key = 'ltr_to_dor_with_pfr'
+                elif 'dor' in request_lower and 'stay' in request_lower:
+                    document_type_key = 'ltr_to_dor_with_stay_order'
+                elif 'dor' in request_lower and 'judgment' in request_lower:
+                    document_type_key = 'ltr_to_dor_with_judgment'
+                elif 'dor' in request_lower and 'dismiss' in request_lower:
+                    document_type_key = 'dor_motion_to_dismiss'
+                elif 'shorten time' in request_lower:
+                    document_type_key = 'motion_to_shorten_time'
+                elif 'webex' in request_lower:
+                    document_type_key = 'motion_to_appear_via_webex'
+                elif 'place on docket' in request_lower:
+                    document_type_key = 'motion_to_place_on_docket'
+                elif 'change of address' in request_lower:
+                    document_type_key = 'notice_of_change_of_address'
+                elif 'amend bond' in request_lower:
+                    document_type_key = 'motion_to_amend_bond_conditions'
+                elif 'client with discovery' in request_lower:
+                    document_type_key = 'ltr_to_client_with_discovery'
+                elif 'compel' in request_lower:
+                    document_type_key = 'motion_to_compel'
+                elif 'terminate probation' in request_lower:
+                    document_type_key = 'motion_to_terminate_probation'
+                elif 'jury trial' in request_lower:
+                    document_type_key = 'request_for_jury_trial'
+                elif 'reinstatement' in request_lower or 'reinstate' in request_lower:
+                    document_type_key = 'dl_reinstatement_letter'
+                elif 'arraignment' in request_lower and 'waiver' in request_lower:
+                    document_type_key = 'waiver_of_arraignment'
 
             return {
                 "found": True,
