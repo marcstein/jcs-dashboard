@@ -873,6 +873,29 @@ DOCUMENT_TYPES = {
             "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
         ]
     },
+    # BATCH 6 — Final cleanup consolidations
+    "noh_bond_reduction": {
+        "name": "Notice of Hearing - Bond Reduction",
+        "description": "Notice of hearing on defendant's motion to amend/reduce bond",
+        "required_vars": ["county", "case_number", "defendant_name", "service_date", "division", "hearing_time"],
+        "optional_vars": ["signing_attorney"],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_name", "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "oop_entry": {
+        "name": "OOP Entry of Appearance",
+        "description": "Out-of-pocket entry of appearance for defendant",
+        "required_vars": ["county", "case_number", "defendant_name"],
+        "optional_vars": ["service_date", "signing_attorney"],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_name", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
 }
 
 
@@ -1338,6 +1361,11 @@ class DocumentChatEngine:
                 document_type_key = 'admin_hearing_request'
             elif 'petition for tdn' in template_name_lower or 'trial de novo' in template_name_lower:
                 document_type_key = 'petition_for_tdn'
+            # Batch 6 — final cleanup
+            elif 'noh bond reduction' in template_name_lower or ('notice of hearing' in template_name_lower and 'bond' in template_name_lower):
+                document_type_key = 'noh_bond_reduction'
+            elif 'oop entry' in template_name_lower or 'oop' in template_name_lower:
+                document_type_key = 'oop_entry'
 
             # If template name didn't match a DOCUMENT_TYPES key, try the user's original request
             if not document_type_key:
@@ -1446,6 +1474,11 @@ class DocumentChatEngine:
                     document_type_key = 'admin_hearing_request'
                 elif 'trial de novo' in request_lower or 'tdn' in request_lower:
                     document_type_key = 'petition_for_tdn'
+                # Batch 6 — final cleanup
+                elif 'noh' in request_lower and 'bond' in request_lower:
+                    document_type_key = 'noh_bond_reduction'
+                elif 'oop' in request_lower and 'entry' in request_lower:
+                    document_type_key = 'oop_entry'
 
             return {
                 "found": True,

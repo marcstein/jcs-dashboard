@@ -719,12 +719,13 @@ All env vars stored in `.env` file in the project root.
 19. **Batch 4 consolidation (13 templates replacing ~221 variants)** - Request for Rec Letter to PA (130 variants, 84% corrupted), Entry (Generic), Plea of Guilty, Motion to Dismiss (County), Request for Stay Order, Waiver of Preliminary Hearing, Request for Transcripts, Motion to Withdraw Guilty Plea, PH Waiver, Answer for Request to Produce, Available Court Dates for Trial, Requirements for Rec Letter to Client, Motion to Withdraw. All have DOCUMENT_TYPES entries, `_identify_template()` detection, and dashboard buttons.
 20. **Investigated .doc-format templates** - 33 templates across 3 groups (Admin Continuance, Admin Hearing, Petition for TDN) use legacy OLE/Office 97-2003 format. Require LibreOffice conversion before consolidation. Motion to Withdraw partially consolidated using 4 available DOCX-format variants.
 21. **Batch 5 consolidation (3 templates replacing ~35 variants)** - Converted legacy .doc (OLE) templates to .docx via LibreOffice, then consolidated: Admin Continuance Request (10 variants), Admin Hearing Request (20 variants), Petition for Trial De Novo (5 variants). **Template consolidation is now complete — all variant groups processed.**
+22. **Batch 6 final cleanup (2 templates + deactivation of client-filled duplicates)** - NOH Bond Reduction (3 county variants), OOP Entry (2 variants). Added extra cleanup deactivation for client-filled 90 Day Letters, Client Status Updates, and duplicate Motion to Set Aside templates. **56 consolidated templates total.**
 
 ### Template Consolidation
 
 The firm's original template folder had ~4,800 files — mostly per-county or per-attorney duplicates of the same document with only the county name, attorney signature block, or court address changed. These have been consolidated into universal templates with `{{placeholder}}` variables. Attorney profile fields (firm name, address, bar number, etc.) are auto-filled from the database.
 
-#### Consolidated Templates (54 total)
+#### Consolidated Templates (56 total)
 
 **Batch 1-2 (13 templates, ~989 variants replaced):**
 
@@ -802,6 +803,13 @@ All consolidated templates stored in `data/templates/`. Each has a matching `DOC
 | 53 | Admin Hearing Request | `Admin_Hearing_Request.docx` | ~20 variants | petitioner_name, dob, drivers_license_number, arrest_county, arrest_date, case_number |
 | 54 | Petition for Trial De Novo | `Petition_for_TDN.docx` | ~5 variants | county, case_number, petitioner_name, arrest_date, officer_name, police_department, hearing_date |
 
+**Batch 6 (2 templates — final cleanup):**
+
+| # | Template | File | Replaces | Key Placeholders |
+|---|----------|------|----------|-----------------|
+| 55 | NOH Bond Reduction | `NOH_Bond_Reduction.docx` | ~3 variants | county, case_number, defendant_name, service_date, division, hearing_time |
+| 56 | OOP Entry | `OOP_Entry.docx` | ~2 variants | county, case_number, defendant_name |
+
 #### Remaining Variant Groups (not yet consolidated)
 
 No remaining groups — **all template consolidation is complete**.
@@ -810,7 +818,7 @@ No remaining groups — **all template consolidation is complete**.
 
 | Script | Purpose |
 |--------|---------|
-| `import_consolidated_templates.py` | Master import — all 54 consolidated templates + deactivation of old variants |
+| `import_consolidated_templates.py` | Master import — all 56 consolidated templates + deactivation of old variants + cleanup of client-filled duplicates |
 | `import_filing_fee_memo.py` | Filing Fee Memo (standalone, predates master script) |
 | `reimport_bond_template.py` | Bond Assignment (standalone, predates master script) |
 | `batch_consolidate.py` | Automated consolidation tool (extracts from DB, unpacks XML, applies replacements, repacks) |

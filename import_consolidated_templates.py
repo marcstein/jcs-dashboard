@@ -654,6 +654,27 @@ TEMPLATES = [
         "case_variables": ["county", "case_number", "petitioner_name", "arrest_date", "officer_name", "police_department", "hearing_date"],
         "profile_variables": ["attorney_name", "attorney_bar", "attorney_email", "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"],
     },
+    # Batch 6 — Final cleanup consolidations
+    {
+        "name": "NOH Bond Reduction",
+        "filename": "NOH_Bond_Reduction.docx",
+        "category": "notice",
+        "subcategory": "hearing",
+        "tags": ["notice", "hearing", "bond", "reduction", "amend"],
+        "deactivate_patterns": ["NOH Bond Reduction%"],
+        "case_variables": ["county", "case_number", "defendant_name", "service_date", "division", "hearing_time"],
+        "profile_variables": ["attorney_name", "attorney_bar", "attorney_email", "firm_name", "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"],
+    },
+    {
+        "name": "OOP Entry",
+        "filename": "OOP_Entry.docx",
+        "category": "pleading",
+        "subcategory": "entry",
+        "tags": ["oop", "entry", "appearance", "out of pocket"],
+        "deactivate_patterns": ["OOP Entry%"],
+        "case_variables": ["county", "case_number", "defendant_name"],
+        "profile_variables": ["attorney_name", "attorney_bar", "attorney_email", "firm_name", "firm_city_state_zip", "firm_phone", "firm_fax"],
+    },
 ]
 
 
@@ -760,7 +781,40 @@ def main():
                   f"Profile vars: {len(tmpl_def['profile_variables'])}")
         print()
 
-    print("Done! All templates imported.")
+    print("Done! All templates imported.\n")
+
+    # Additional cleanup: deactivate client-filled duplicates and stale variants
+    # These are templates where a master already exists but old variants persist
+    # under slightly different naming patterns
+    EXTRA_DEACTIVATIONS = [
+        # Client-filled 90 Day Letters (keep generic ID 1160)
+        ("90 Day Letter%No Prior%DCC%", "90 Day Letter with No Priors"),
+        # Client-filled Client Status Updates (keep generic ID 419)
+        ("Client Status Update%DCC%", "Client Status Update"),
+        # Duplicate Motion to Set Aside (keep IDs 758, 726)
+        ("Motion to Set Aside%DCC%", "Motion to Set Aside Dismissal"),
+    ]
+
+    if EXTRA_DEACTIVATIONS:
+        print("Running extra cleanup deactivations...")
+        with get_connection() as conn:
+            cur = conn.cursor()
+            for pattern, keep_name in EXTRA_DEACTIVATIONS:
+                cur.execute(
+                    """UPDATE templates SET is_active = FALSE
+                       WHERE firm_id = 'jcs_law' AND name ILIKE %s
+                         AND is_active = TRUE AND name != %s
+                       RETURNING id, name""",
+                    (pattern, keep_name)
+                )
+                deactivated = cur.fetchall()
+                for row in deactivated:
+                    old_name = row['name'] if isinstance(row, dict) else row[1]
+                    print(f"  Deactivated: {old_name}")
+            conn.commit()
+        print("Cleanup complete.\n")
+
+    print("All done!")
 
 
 if __name__ == "__main__":
