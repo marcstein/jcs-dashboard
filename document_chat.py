@@ -780,6 +780,31 @@ class DocumentChatEngine:
             elif 'disposition' in template_name_lower or 'dispo' in template_name_lower:
                 document_type_key = 'disposition_letter'
 
+            # If template name didn't match a DOCUMENT_TYPES key, try the user's original request
+            if not document_type_key:
+                request_lower = request.lower()
+                if 'entry of appearance' in request_lower or 'eoa' in request_lower:
+                    if 'muni' in request_lower:
+                        document_type_key = 'entry_of_appearance_muni'
+                    else:
+                        document_type_key = 'entry_of_appearance_state'
+                elif 'continu' in request_lower or 'mtc' in request_lower:
+                    document_type_key = 'motion_for_continuance'
+                elif 'discovery' in request_lower or 'rfd' in request_lower:
+                    document_type_key = 'request_for_discovery'
+                elif 'preservation' in request_lower and 'supplemental' in request_lower:
+                    document_type_key = 'preservation_supplemental_letter'
+                elif 'preservation' in request_lower:
+                    document_type_key = 'preservation_letter'
+                elif 'prosecution' in request_lower:
+                    document_type_key = 'potential_prosecution_letter'
+                elif 'recall warrant' in request_lower:
+                    document_type_key = 'motion_to_recall_warrant'
+                elif 'stay order' in request_lower:
+                    document_type_key = 'proposed_stay_order'
+                elif 'dispo' in request_lower:
+                    document_type_key = 'disposition_letter'
+
             return {
                 "found": True,
                 "template_id": template.id,
@@ -1275,6 +1300,17 @@ Only include variables where you found a clear value. If unsure, don't include i
                 replacements['email'] = ap.email
                 if ap.fax:
                     replacements['fax'] = ap.fax
+
+                # Map attorney profile fields to consolidated template placeholder names
+                replacements['attorney_bar'] = ap.bar_number
+                replacements['attorney_email'] = ap.email
+                replacements['firm_phone'] = ap.phone
+                if ap.fax:
+                    replacements['firm_fax'] = ap.fax
+                replacements['attorney_full_name'] = ap.attorney_name
+                # firm_address_line1 / firm_address_line2 for letter templates
+                replacements['firm_address_line1'] = ap.firm_address
+                replacements['firm_address_line2'] = ''  # single-line address default
 
                 # Auto-fill attorney signature block
                 sig_block = f"""{ap.attorney_name}

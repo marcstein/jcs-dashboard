@@ -40,7 +40,7 @@ TEMPLATES = [
         "category": "pleading",
         "subcategory": "entry_of_appearance",
         "tags": ["entry", "appearance", "state", "circuit court"],
-        "deactivate_pattern": None,  # Don't deactivate old ones yet
+        "deactivate_patterns": ["Entry - % County%", "Entry - % OOP%", "EOA - %County%", "EOA %County%"],
         "case_variables": [
             "county", "plaintiff_name", "defendant_name", "case_number",
             "attorney_names", "signing_attorney",
@@ -58,7 +58,7 @@ TEMPLATES = [
         "category": "pleading",
         "subcategory": "entry_of_appearance",
         "tags": ["entry", "appearance", "municipal", "muni"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Entry - % Muni%", "EOA - %Muni%", "EOA %Muni%"],
         "case_variables": [
             "city", "defendant_name", "case_number",
             "attorney_names", "signing_attorney",
@@ -77,7 +77,7 @@ TEMPLATES = [
         "category": "motion",
         "subcategory": "continuance",
         "tags": ["motion", "continuance", "continue", "mtc"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["MTC - %", "Motion to Continue%", "Motion for Continuance - %"],
         "case_variables": [
             "county", "defendant_name", "case_number",
             "hearing_date", "continuance_reason",
@@ -96,7 +96,7 @@ TEMPLATES = [
         "category": "discovery",
         "subcategory": "request",
         "tags": ["discovery", "request", "rog", "interrogatories"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Request for Discovery - %", "RFD - %", "Discovery Request - %"],
         "case_variables": [
             "county", "defendant_name", "case_number",
             "signing_attorney",
@@ -114,7 +114,7 @@ TEMPLATES = [
         "category": "letter",
         "subcategory": "prosecution",
         "tags": ["letter", "prosecution", "potential", "representation"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Potential Prosecution Ltr%", "Prosecution Letter - %", "Potential Pros%"],
         "case_variables": [
             "letter_date", "client_name",
             "prosecutor_name", "prosecutor_title", "court_name",
@@ -135,7 +135,7 @@ TEMPLATES = [
         "category": "letter",
         "subcategory": "preservation",
         "tags": ["preservation", "supplemental", "discovery", "evidence", "video"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Preservation%Supplemental%", "Pres%Supp%Disc%"],
         "case_variables": [
             "letter_date", "agency_name", "agency_attention",
             "agency_address", "agency_city_state_zip",
@@ -156,7 +156,7 @@ TEMPLATES = [
         "category": "letter",
         "subcategory": "preservation",
         "tags": ["preservation", "evidence", "video", "booking"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Preservation Ltr%", "Preservation Letter - %"],
         "case_variables": [
             "letter_date", "agency_name", "agency_attention",
             "agency_address", "agency_city_state_zip",
@@ -176,7 +176,7 @@ TEMPLATES = [
         "category": "motion",
         "subcategory": "recall_warrant",
         "tags": ["motion", "recall", "warrant", "muni"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Motion to Recall Warrant - %", "Recall Warrant - %", "Recall Warrant %"],
         "case_variables": [
             "county", "defendant_name", "case_number",
             "signing_attorney",
@@ -194,7 +194,7 @@ TEMPLATES = [
         "category": "motion",
         "subcategory": "stay_order",
         "tags": ["stay", "order", "dor", "pfr", "refusal", "driving"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Proposed Stay Order - %", "Stay Order - %", "Stay Order %"],
         "case_variables": [
             "county", "petitioner_name", "dln", "dob", "case_number",
             "arrest_date",
@@ -212,7 +212,7 @@ TEMPLATES = [
         "category": "letter",
         "subcategory": "disposition",
         "tags": ["disposition", "dispo", "letter", "client", "result", "plea"],
-        "deactivate_pattern": None,
+        "deactivate_patterns": ["Dispo Ltr%", "Disposition Ltr%", "Disposition Letter - %"],
         "case_variables": [
             "letter_date", "client_name", "client_first_name",
             "client_address", "client_city_state_zip",
@@ -253,17 +253,27 @@ def import_template(tmpl_def):
     with get_connection() as conn:
         cur = conn.cursor()
 
-        # Optionally deactivate old variants
+        # Deactivate old variant templates that this consolidated template replaces
+        patterns = tmpl_def.get("deactivate_patterns", [])
+        # Also support legacy single-pattern field
         if tmpl_def.get("deactivate_pattern"):
+            patterns.append(tmpl_def["deactivate_pattern"])
+        total_deactivated = 0
+        for pattern in patterns:
             cur.execute(
                 """UPDATE templates SET is_active = FALSE
-                   WHERE name ILIKE %s AND is_active = TRUE
+                   WHERE firm_id = %s AND name ILIKE %s AND is_active = TRUE
+                     AND name != %s
                    RETURNING id, name""",
-                (tmpl_def["deactivate_pattern"],)
+                ("jcs_law", pattern, tmpl_def["name"])
             )
             deactivated = cur.fetchall()
-            if deactivated:
-                print(f"  Deactivated {len(deactivated)} old template(s)")
+            total_deactivated += len(deactivated)
+            for row in deactivated:
+                old_name = row['name'] if isinstance(row, dict) else row[1]
+                print(f"    Deactivated: {old_name}")
+        if total_deactivated:
+            print(f"  Total deactivated: {total_deactivated} old variant(s)")
 
         cur.execute("""
             INSERT INTO templates (
