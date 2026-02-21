@@ -673,6 +673,163 @@ DOCUMENT_TYPES = {
         "defaults": {},
         "uses_attorney_profile_for": ["attorney_name"]
     },
+    "request_for_rec_letter": {
+        "name": "Request for Recommendation Letter to PA",
+        "description": "Letter to prosecutor/PA requesting a recommendation for disposition of a case",
+        "required_vars": [
+            "service_date", "defendant_name", "case_number",
+            "prosecutor_name", "court_name", "court_name_short",
+            "prosecutor_address", "prosecutor_city_state_zip", "prosecutor_email"
+        ],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+
+    # ==========================================================================
+    # BATCH 4 CONSOLIDATED TEMPLATES (remaining multi-variant groups)
+    # ==========================================================================
+    "entry_generic": {
+        "name": "Entry (Generic)",
+        "description": "Generic entry/appearance for municipal courts - city-based variant",
+        "required_vars": ["city", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "plea_of_guilty": {
+        "name": "Plea of Guilty",
+        "description": "Plea of guilty form for municipal or circuit court",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+        ]
+    },
+    "motion_to_dismiss_county": {
+        "name": "Motion to Dismiss (County)",
+        "description": "Motion to dismiss in criminal county/circuit court case - template-based with county placeholder",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "request_for_stay_order": {
+        "name": "Request for Stay Order",
+        "description": "Request for stay order in DOR case - stays license revocation pending review",
+        "required_vars": ["county", "petitioner_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "petitioner_respondent",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "waiver_of_preliminary_hearing": {
+        "name": "Waiver of Preliminary Hearing",
+        "description": "Waiver of right to preliminary hearing in criminal case",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "request_for_transcripts": {
+        "name": "Request for Transcripts",
+        "description": "Request to court reporter for trial/hearing transcripts",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "firm_city_state_zip", "firm_phone"
+        ]
+    },
+    "motion_to_withdraw_guilty_plea": {
+        "name": "Motion to Withdraw Guilty Plea",
+        "description": "Motion to withdraw a previously entered guilty plea",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "ph_waiver": {
+        "name": "PH Waiver",
+        "description": "Preliminary hearing waiver - alternative format",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "answer_for_request_to_produce": {
+        "name": "Answer for Request to Produce",
+        "description": "Answer/response to opposing party's request to produce documents",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "party_terminology": "plaintiff_defendant",
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "available_court_dates": {
+        "name": "Available Court Dates for Trial",
+        "description": "Letter providing available court dates for scheduling a trial",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "requirements_for_rec_letter": {
+        "name": "Requirements for Rec Letter to Client",
+        "description": "Letter to client listing requirements/steps needed for a recommendation letter",
+        "required_vars": ["client_name", "client_address", "client_city_state_zip"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "firm_city_state_zip", "firm_phone"
+        ]
+    },
+    # Motion to Withdraw
+    "motion_to_withdraw": {
+        "name": "Motion to Withdraw",
+        "description": "Motion to withdraw as counsel from a case",
+        "required_vars": ["county", "defendant_name", "case_number"],
+        "optional_vars": ["service_date"],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_name", "firm_address", "firm_city_state_zip",
+            "firm_phone", "firm_fax"
+        ]
+    },
 }
 
 
@@ -1102,6 +1259,31 @@ class DocumentChatEngine:
                 document_type_key = 'request_for_jury_trial'
             elif 'reinstatement' in template_name_lower and ('dl' in template_name_lower or 'license' in template_name_lower or 'driver' in template_name_lower):
                 document_type_key = 'dl_reinstatement_letter'
+            elif 'request for rec' in template_name_lower or 'recommendation' in template_name_lower and 'letter' in template_name_lower:
+                document_type_key = 'request_for_rec_letter'
+            # Batch 4 template name detection
+            elif 'entry (generic)' in template_name_lower or (template_name_lower.startswith('entry') and 'appearance' not in template_name_lower):
+                document_type_key = 'entry_generic'
+            elif 'plea of guilty' in template_name_lower:
+                document_type_key = 'plea_of_guilty'
+            elif 'request for stay order' in template_name_lower:
+                document_type_key = 'request_for_stay_order'
+            elif 'waiver of preliminary' in template_name_lower:
+                document_type_key = 'waiver_of_preliminary_hearing'
+            elif 'request for transcript' in template_name_lower:
+                document_type_key = 'request_for_transcripts'
+            elif 'withdraw guilty plea' in template_name_lower:
+                document_type_key = 'motion_to_withdraw_guilty_plea'
+            elif template_name_lower.startswith('ph waiver'):
+                document_type_key = 'ph_waiver'
+            elif 'answer for request to produce' in template_name_lower:
+                document_type_key = 'answer_for_request_to_produce'
+            elif 'available court dates' in template_name_lower:
+                document_type_key = 'available_court_dates'
+            elif 'requirements for' in template_name_lower and 'rec' in template_name_lower:
+                document_type_key = 'requirements_for_rec_letter'
+            elif 'motion to withdraw' in template_name_lower and 'guilty' not in template_name_lower:
+                document_type_key = 'motion_to_withdraw'
 
             # If template name didn't match a DOCUMENT_TYPES key, try the user's original request
             if not document_type_key:
@@ -1175,6 +1357,32 @@ class DocumentChatEngine:
                     document_type_key = 'dl_reinstatement_letter'
                 elif 'arraignment' in request_lower and 'waiver' in request_lower:
                     document_type_key = 'waiver_of_arraignment'
+                elif 'recommendation' in request_lower or ('request' in request_lower and 'rec' in request_lower and 'pa' in request_lower):
+                    document_type_key = 'request_for_rec_letter'
+                # Batch 4 fallback detection
+                elif 'plea of guilty' in request_lower or 'guilty plea' in request_lower:
+                    if 'withdraw' in request_lower:
+                        document_type_key = 'motion_to_withdraw_guilty_plea'
+                    else:
+                        document_type_key = 'plea_of_guilty'
+                elif 'preliminary hearing' in request_lower and 'waiver' in request_lower:
+                    document_type_key = 'waiver_of_preliminary_hearing'
+                elif 'ph waiver' in request_lower:
+                    document_type_key = 'ph_waiver'
+                elif 'request for stay' in request_lower:
+                    document_type_key = 'request_for_stay_order'
+                elif 'transcript' in request_lower:
+                    document_type_key = 'request_for_transcripts'
+                elif 'answer' in request_lower and 'request to produce' in request_lower:
+                    document_type_key = 'answer_for_request_to_produce'
+                elif 'court dates' in request_lower and 'trial' in request_lower:
+                    document_type_key = 'available_court_dates_for_trial'
+                elif 'requirements' in request_lower and 'rec' in request_lower:
+                    document_type_key = 'requirements_for_rec_letter'
+                elif 'withdraw' in request_lower and 'counsel' in request_lower:
+                    document_type_key = 'motion_to_withdraw'
+                elif 'motion to withdraw' in request_lower and 'guilty' not in request_lower:
+                    document_type_key = 'motion_to_withdraw'
 
             return {
                 "found": True,

@@ -710,12 +710,22 @@ All env vars stored in `.env` file in the project root.
     - Attorney profile auto-fill maps: `attorney_bar`, `attorney_email`, `firm_phone`, `firm_fax`, `attorney_full_name`, `firm_address_line1`
     - Fallback `document_type_key` detection from user's original request text (not just template name)
     - Import script deactivates old per-county/per-attorney variants on import
+17. **Batch 3 automated consolidation (24 templates replacing ~291 variants)** - System now:
+    - Built `batch_consolidate.py` automation tool for XML extraction, placeholder substitution, and repacking
+    - Templates: Motion for COJ, Notice of Hearing, PFR, After Supp. Disclosure Ltr, Waiver of Arraignment, Notice to Take Deposition, Motion for Bond Reduction, Motion to Certify, 3x Ltr to DOR, DOR Motion to Dismiss, NOH for MTW, Motion to Shorten Time, Motion to Appear via WebEx, Motion to Place on Docket, Notice of Change of Address, Request for Supplemental Discovery, Motion to Amend Bond Conditions, Ltr to Client with Discovery, Motion to Compel, Motion to Terminate Probation, Request for Jury Trial, DL Reinstatement Letter
+    - All 24 templates have DOCUMENT_TYPES entries with `uses_attorney_profile_for` and `_identify_template()` detection
+    - Added synonyms: coj, pfr, webex, dl reinstatement
+18. **Reorganized dashboard Quick Generate into 7 collapsible categories** - Pleadings & Appearances, Motions, Discovery, Letters, Notices & Orders, Bond & Fees, Recent Documents. All panels except first start collapsed.
+19. **Batch 4 consolidation (13 templates replacing ~221 variants)** - Request for Rec Letter to PA (130 variants, 84% corrupted), Entry (Generic), Plea of Guilty, Motion to Dismiss (County), Request for Stay Order, Waiver of Preliminary Hearing, Request for Transcripts, Motion to Withdraw Guilty Plea, PH Waiver, Answer for Request to Produce, Available Court Dates for Trial, Requirements for Rec Letter to Client, Motion to Withdraw. All have DOCUMENT_TYPES entries, `_identify_template()` detection, and dashboard buttons.
+20. **Investigated .doc-format templates** - 33 templates across 3 groups (Admin Continuance, Admin Hearing, Petition for TDN) use legacy OLE/Office 97-2003 format. Require LibreOffice conversion before consolidation. Motion to Withdraw partially consolidated using 4 available DOCX-format variants.
 
 ### Template Consolidation
 
 The firm's original template folder had ~4,800 files — mostly per-county or per-attorney duplicates of the same document with only the county name, attorney signature block, or court address changed. These have been consolidated into universal templates with `{{placeholder}}` variables. Attorney profile fields (firm name, address, bar number, etc.) are auto-filled from the database.
 
-#### Consolidated Templates (13 total)
+#### Consolidated Templates (50 total)
+
+**Batch 1-2 (13 templates, ~989 variants replaced):**
 
 | # | Template | File | Replaces | Key Placeholders |
 |---|----------|------|----------|-----------------|
@@ -733,36 +743,74 @@ The firm's original template folder had ~4,800 files — mostly per-county or pe
 | 12 | Bond Assignment | `Bond_Assignment_Templated.docx` | 3 variants | defendant_name, case_number, county, bond_amount |
 | 13 | Motion to Dismiss (General) | (AI-generated) | N/A | defendant_name, case_number, county |
 
-All consolidated templates stored in `data/templates/`. Each has a matching `DOCUMENT_TYPES` entry in `document_chat.py` that defines `required_vars` (user provides), `optional_vars`, and `uses_attorney_profile_for` (auto-filled from DB).
+**Batch 3 (24 templates, ~291 variants replaced — automated consolidation):**
+
+| # | Template | File | Key Placeholders |
+|---|----------|------|-----------------|
+| 14 | Motion for Change of Judge | `Motion_for_COJ.docx` | county, defendant_name, case_number |
+| 15 | Notice of Hearing (General) | `Notice_of_Hearing.docx` | county, defendant_name, case_number, hearing_date, hearing_time, division, motion_type |
+| 16 | Petition for Review (PFR) | `Petition_for_Review.docx` | county, petitioner_name, case_number, dob |
+| 17 | After Supplemental Disclosure Letter | `After_Supplemental_Disclosure_Ltr.docx` | prosecutor_*, defendant_name, case_number, disclosure_date |
+| 18 | Waiver of Arraignment | `Waiver_of_Arraignment.docx` | county, defendant_name, case_number |
+| 19 | Notice to Take Deposition | `Notice_to_Take_Deposition.docx` | county, defendant_name, case_number, deponent_*, deposition_* |
+| 20 | Motion for Bond Reduction | `Motion_for_Bond_Reduction.docx` | county, defendant_name, case_number, division, bond_amount |
+| 21 | Motion to Certify for Jury Trial | `Motion_to_Certify.docx` | city, defendant_name, case_number |
+| 22 | Letter to DOR with PFR | `Ltr_to_DOR_with_PFR.docx` | petitioner_name |
+| 23 | Letter to DOR with Stay Order | `Ltr_to_DOR_with_Stay_Order.docx` | petitioner_name, case_number |
+| 24 | DOR Motion to Dismiss | `DOR_Motion_to_Dismiss.docx` | county, petitioner_name, case_number |
+| 25 | Notice of Hearing - Motion to Withdraw | `Notice_of_Hearing_MTW.docx` | county, defendant_name, case_number, division, hearing_date, hearing_time |
+| 26 | Motion to Shorten Time | `Motion_to_Shorten_Time.docx` | county, defendant_name, case_number |
+| 27 | Letter to DOR with Judgment | `Ltr_to_DOR_with_Judgment.docx` | petitioner_name, dln |
+| 28 | Motion to Appear via WebEx | `Motion_to_Appear_via_WebEx.docx` | county, petitioner_name, respondent_name, case_number |
+| 29 | Motion to Place on Docket | `Motion_to_Place_on_Docket.docx` | county, defendant_name, case_number |
+| 30 | Notice of Change of Address | `Notice_of_Change_of_Address.docx` | county, defendant_name, case_number |
+| 31 | Request for Supplemental Discovery | `Request_for_Supplemental_Discovery.docx` | county, defendant_name, case_number |
+| 32 | Motion to Amend Bond Conditions | `Motion_to_Amend_Bond_Conditions.docx` | county, defendant_name, case_number, division, bond_amount |
+| 33 | Letter to Client with Discovery | `Ltr_to_Client_with_Discovery.docx` | client_name, client_salutation, client_address, client_city_state_zip, case_number |
+| 34 | Motion to Compel Discovery | `Motion_to_Compel.docx` | county, defendant_name, case_number |
+| 35 | Motion to Terminate Probation | `Motion_to_Terminate_Probation.docx` | county, defendant_name, case_number |
+| 36 | Request for Jury Trial | `Request_for_Jury_Trial.docx` | county, defendant_name, case_number |
+| 37 | DL Reinstatement Letter | `DL_Reinstatement_Ltr.docx` | client_name, client_first_name, client_email, client_address, client_city_state_zip |
+
+All consolidated templates stored in `data/templates/`. Each has a matching `DOCUMENT_TYPES` entry in `document_chat.py` that defines `required_vars` (user provides), `optional_vars`, and `uses_attorney_profile_for` (auto-filled from DB). Dashboard Quick Generate panel organized into 7 collapsible categories (Pleadings, Motions, Discovery, Letters, Notices, Bond/Fees, Recent).
+
+**Batch 4 (12 templates — Rec Letter to PA + 11 remaining groups):**
+
+| # | Template | File | Replaces | Key Placeholders |
+|---|----------|------|----------|-----------------|
+| 38 | Request for Rec Letter to PA | `Request_for_Recommendation_Letter_to_PA.docx` | ~130 variants | service_date, defendant_name, case_number, prosecutor_*, court_* |
+| 39 | Entry (Generic) | `Entry_Generic.docx` | ~13 variants | county, defendant_name, case_number |
+| 40 | Plea of Guilty | `Plea_of_Guilty.docx` | ~8 variants | county, defendant_name, case_number |
+| 41 | Motion to Dismiss (County) | `Motion_to_Dismiss_County.docx` | ~10 variants | county, defendant_name, case_number |
+| 42 | Request for Stay Order | `Request_for_Stay_Order.docx` | ~6 variants | county, petitioner_name, case_number |
+| 43 | Waiver of Preliminary Hearing | `Waiver_of_Preliminary_Hearing.docx` | ~5 variants | county, defendant_name, case_number |
+| 44 | Request for Transcripts | `Request_for_Transcripts.docx` | ~5 variants | county, defendant_name, case_number |
+| 45 | Motion to Withdraw Guilty Plea | `Motion_to_Withdraw_Guilty_Plea.docx` | ~5 variants | county, defendant_name, case_number |
+| 46 | PH Waiver | `PH_Waiver.docx` | ~4 variants | county, defendant_name, case_number |
+| 47 | Answer for Request to Produce | `Answer_for_Request_to_Produce.docx` | ~4 variants | county, defendant_name, case_number |
+| 48 | Available Court Dates for Trial | `Available_Court_Dates_for_Trial.docx` | ~3 variants | county, defendant_name, case_number, available_dates |
+| 49 | Requirements for Rec Letter to Client | `Requirements_for_Rec_Letter_to_Client.docx` | ~3 variants | client_name, case_number |
+| 50 | Motion to Withdraw | `Motion_to_Withdraw.docx` | ~25 variants | county, defendant_name, case_number, service_date |
 
 #### Remaining Variant Groups (not yet consolidated)
 
-~850 templates remain active, of which ~68 groups have 2+ variants. Largest unconsolidated groups:
+| Group | Variants | Format | Notes |
+|-------|----------|--------|-------|
+| Closing Letter | 20+ | .docx | structural differences between variants |
+| Admin Continuance Request | 10 | .doc (OLE) | needs LibreOffice conversion |
+| Admin Hearing Request | 18 | .doc (OLE) | needs LibreOffice conversion |
+| Petition for TDN | 5 | .doc (OLE) | needs LibreOffice conversion |
 
-| Group | Variants | Category |
-|-------|----------|----------|
-| Request for Rec- Letter to PA | ~130 | letter (per-municipality prosecutor) |
-| Motion for COJ | 15 | motion (per-county) |
-| Notice of Hearing | 15 | notice (per-county/attorney) |
-| PFR (Petition for Review) | 14 | pleading (per-county) |
-| Entry (misc city-specific) | 13 | pleading (per-city, not caught by current patterns) |
-| After Supplemental Disclosure Ltr | 12 | letter (per-county) |
-| Admin Continuance Request | 10 | motion (per-attorney) |
-| Admin Hearing Request | 8 | motion (per-attorney) |
-| Motion to Withdraw | 8 | motion (per-county/attorney) |
-| Ltr to DOR with PFR | 5+ | letter (per-county) |
-| Ltr to DOR with Stay Order | 5+ | letter (per-county) |
-| Waiver of Arraignment | 7 | pleading (per-county) |
-| Closing Letter | 20+ | letter (example-based, structural differences) |
-| DL Reinstatement Ltr | 12+ | letter (criteria-based variants) |
+**Note:** 33 templates use legacy .doc format (OLE/Office 97-2003) that cannot be unpacked as ZIP. These require LibreOffice to convert to .docx before consolidation. Motion to Withdraw was partially consolidated using the 4 DOCX-format variants that existed.
 
 #### Import Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `import_consolidated_templates.py` | Master import — all 10 batch-consolidated templates + deactivation of old variants |
+| `import_consolidated_templates.py` | Master import — all 50 consolidated templates + deactivation of old variants |
 | `import_filing_fee_memo.py` | Filing Fee Memo (standalone, predates master script) |
 | `reimport_bond_template.py` | Bond Assignment (standalone, predates master script) |
+| `batch_consolidate.py` | Automated consolidation tool (extracts from DB, unpacks XML, applies replacements, repacks) |
 
 All use upsert logic (`ON CONFLICT DO UPDATE`) — safe to re-run.
 
@@ -833,6 +881,10 @@ The template search uses PostgreSQL full-text search (`tsvector`/`tsquery`) with
 | rfa | request for admission |
 | nol pros, nolle pros | nolle prosequi |
 | dor | director of revenue |
+| coj | change of judge |
+| pfr | petition for review |
+| webex | appear via webex |
+| dl reinstatement, drivers license reinstatement | reinstatement letter |
 
 **Example transformations**:
 - "I need a bond assignment" → "bond OR assignment"

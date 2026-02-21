@@ -258,6 +258,8 @@ _SYNONYMS = {
     "webex": "appear via webex",
     "dl reinstatement": "reinstatement letter",
     "drivers license reinstatement": "reinstatement letter",
+    "request for rec": "recommendation letter",
+    "letter to pa": "recommendation letter",
 }
 
 
