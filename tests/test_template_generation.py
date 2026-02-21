@@ -147,7 +147,7 @@ DUMMY_DATA = {
     "order_month": "February",
     "order_year": "2026",
     "payment_deadline": "March 15, 2026",
-    "payment_instructions": "Please remit payment to our office at the address above.",
+    "payment_instructions": "Please remit payment to our office at the address above",
     "charges": "DWI - First Offense",
     "arresting_officer": "Officer John Smith",
 
