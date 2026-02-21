@@ -284,19 +284,24 @@ def fill_template(content: bytes, replacements: Dict[str, str]) -> Tuple[Optiona
         return re.sub(r'\{\{([^}]+)\}\}', replacer, text)
 
     # Process paragraphs
+    # IMPORTANT: paragraph.text includes text from <w:hyperlink> children,
+    # but paragraph.runs does NOT include hyperlink runs. We must only
+    # operate on runs-accessible text; hyperlink placeholders are handled
+    # by the XML-level post-processing pass below.
     for para in doc.paragraphs:
-        full_text = para.text
-        if '{{' not in full_text:
+        runs_text = ''.join(r.text for r in para.runs)
+        if '{{' not in runs_text:
             continue
+        full_text = para.text  # For uppercase context detection
         # Pass 1: run-level (use full paragraph as context)
         for run in para.runs:
             if '{{' in run.text:
                 run.text = replace_in_text(run.text, full_text)
         # Pass 2: cross-run (reconstruct and redistribute)
-        full_after = para.text
-        if '{{' in full_after:
-            new_text = replace_in_text(full_after, full_text)
-            if new_text != full_after:
+        remaining_runs_text = ''.join(r.text for r in para.runs)
+        if '{{' in remaining_runs_text:
+            new_text = replace_in_text(remaining_runs_text, full_text)
+            if new_text != remaining_runs_text:
                 # Simple approach: put all text in first run, clear rest
                 runs = para.runs
                 if runs:
@@ -309,16 +314,17 @@ def fill_template(content: bytes, replacements: Dict[str, str]) -> Tuple[Optiona
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    full_text = para.text
-                    if '{{' not in full_text:
+                    runs_text = ''.join(r.text for r in para.runs)
+                    if '{{' not in runs_text:
                         continue
+                    full_text = para.text
                     for run in para.runs:
                         if '{{' in run.text:
                             run.text = replace_in_text(run.text, full_text)
-                    full_after = para.text
-                    if '{{' in full_after:
-                        new_text = replace_in_text(full_after)
-                        if new_text != full_after:
+                    remaining_runs_text = ''.join(r.text for r in para.runs)
+                    if '{{' in remaining_runs_text:
+                        new_text = replace_in_text(remaining_runs_text, full_text)
+                        if new_text != remaining_runs_text:
                             runs = para.runs
                             if runs:
                                 runs[0].text = new_text

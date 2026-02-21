@@ -2096,10 +2096,20 @@ Email: {ap.email}"""
                 Strategy: try run-level replacement first (preserves tabs & formatting
                 across runs). Only fall back to full-paragraph replacement if a
                 placeholder spans multiple runs.
+
+                IMPORTANT: paragraph.text includes text from <w:hyperlink> children,
+                but paragraph.runs does NOT include hyperlink runs. We must only
+                operate on runs-accessible text here; hyperlink placeholders are
+                handled by the XML-level post-processing pass.
                 """
-                full_text = paragraph.text
-                if not full_text or '{{' not in full_text:
+                # Use runs-only text to avoid seeing hyperlink placeholders
+                # (paragraph.text includes hyperlink text, causing double replacement)
+                runs_text = ''.join(r.text for r in paragraph.runs)
+                if not runs_text or '{{' not in runs_text:
                     return
+
+                # Full paragraph text for uppercase context detection
+                full_text = paragraph.text
 
                 # --- Pass 1: try replacing within individual runs ---
                 runs_changed = False
@@ -2110,16 +2120,16 @@ Email: {ap.email}"""
                             run.text = new_run_text
                             runs_changed = True
 
-                # Check if all placeholders are resolved after run-level replacement
-                remaining_text = paragraph.text
-                if '{{' not in remaining_text:
+                # Check if all placeholders in runs are resolved
+                remaining_runs_text = ''.join(r.text for r in paragraph.runs)
+                if '{{' not in remaining_runs_text:
                     return  # All done — formatting fully preserved
 
                 # --- Pass 2: placeholder spans multiple runs ---
                 # Build a map of character positions → (run_index, offset_in_run)
                 # so we can surgically replace only the affected runs.
-                new_full_text = replace_placeholders(remaining_text, full_text)
-                if new_full_text == remaining_text:
+                new_full_text = replace_placeholders(remaining_runs_text, full_text)
+                if new_full_text == remaining_runs_text:
                     return  # Nothing more to replace
 
                 # Fallback: redistribute text across runs.
@@ -2131,7 +2141,7 @@ Email: {ap.email}"""
 
                 # Find which runs are "before" the first placeholder
                 char_offset = 0
-                first_placeholder_pos = remaining_text.find('{{')
+                first_placeholder_pos = remaining_runs_text.find('{{')
                 safe_prefix_runs = []
                 prefix_chars = 0
 
