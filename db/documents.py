@@ -260,6 +260,8 @@ _SYNONYMS = {
     "drivers license reinstatement": "reinstatement letter",
     "request for rec": "recommendation letter",
     "letter to pa": "recommendation letter",
+    "tdn": "trial de novo",
+    "trial de novo": "petition trial novo",
 }
 
 

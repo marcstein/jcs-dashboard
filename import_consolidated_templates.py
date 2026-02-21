@@ -623,6 +623,37 @@ TEMPLATES = [
         "case_variables": ["client_name", "client_first_name", "client_address", "client_city_state_zip", "case_reference", "county", "disposition_paragraph", "closing_paragraph"],
         "profile_variables": ["attorney_name"],
     },
+    # Batch 5 — former .doc (OLE) templates, converted via LibreOffice
+    {
+        "name": "Admin Continuance Request",
+        "filename": "Admin_Continuance_Request.docx",
+        "category": "motion",
+        "subcategory": "continuance",
+        "tags": ["admin", "continuance", "dor", "hearing", "administrative"],
+        "deactivate_patterns": ["Admin Continuance%", "Administrative Continuance%"],
+        "case_variables": ["petitioner_name", "docket_number", "case_number", "dln", "hearing_date"],
+        "profile_variables": ["attorney_name", "attorney_bar", "attorney_email", "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"],
+    },
+    {
+        "name": "Admin Hearing Request",
+        "filename": "Admin_Hearing_Request.docx",
+        "category": "motion",
+        "subcategory": "hearing",
+        "tags": ["admin", "hearing", "dor", "administrative", "telephonic", "entry of appearance"],
+        "deactivate_patterns": ["Admin Hearing%", "Administrative Hearing%"],
+        "case_variables": ["petitioner_name", "dob", "drivers_license_number", "arrest_county", "arrest_date", "case_number"],
+        "profile_variables": ["attorney_name", "attorney_bar", "attorney_email", "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"],
+    },
+    {
+        "name": "Petition for Trial De Novo",
+        "filename": "Petition_for_TDN.docx",
+        "category": "pleading",
+        "subcategory": "petition",
+        "tags": ["petition", "trial de novo", "tdn", "license", "suspension", "revocation", "dor"],
+        "deactivate_patterns": ["Petition for TDN%", "Petition for Trial De Novo%"],
+        "case_variables": ["county", "case_number", "petitioner_name", "arrest_date", "officer_name", "police_department", "hearing_date"],
+        "profile_variables": ["attorney_name", "attorney_bar", "attorney_email", "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"],
+    },
 ]
 
 

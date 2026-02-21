@@ -839,6 +839,40 @@ DOCUMENT_TYPES = {
         "defaults": {"closing_paragraph": "Your balance to our office has been paid in full."},
         "uses_attorney_profile_for": ["attorney_name"]
     },
+    # BATCH 5 — Former .doc (OLE) templates, converted via LibreOffice
+    "admin_continuance_request": {
+        "name": "Admin Continuance Request",
+        "description": "Request for continuance on a DOR administrative hearing",
+        "required_vars": ["petitioner_name", "docket_number", "case_number", "dln", "hearing_date"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "admin_hearing_request": {
+        "name": "Admin Hearing Request",
+        "description": "Entry of appearance and telephonic hearing request for DOR administrative hearing",
+        "required_vars": ["petitioner_name", "dob", "drivers_license_number", "arrest_county", "arrest_date", "case_number"],
+        "optional_vars": ["co_counsel_name", "co_counsel_bar", "co_counsel_email"],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
+    "petition_for_tdn": {
+        "name": "Petition for Trial De Novo",
+        "description": "Petition for trial de novo of license suspension/revocation",
+        "required_vars": ["county", "case_number", "petitioner_name", "arrest_date", "officer_name", "police_department", "hearing_date"],
+        "optional_vars": [],
+        "defaults": {},
+        "uses_attorney_profile_for": [
+            "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+        ]
+    },
 }
 
 
@@ -1297,6 +1331,13 @@ class DocumentChatEngine:
                 document_type_key = 'closing_letter'
             elif 'closing' in template_name_lower and 'ltr' in template_name_lower:
                 document_type_key = 'closing_letter'
+            # Batch 5 — former .doc templates
+            elif 'admin continuance' in template_name_lower:
+                document_type_key = 'admin_continuance_request'
+            elif 'admin hearing' in template_name_lower:
+                document_type_key = 'admin_hearing_request'
+            elif 'petition for tdn' in template_name_lower or 'trial de novo' in template_name_lower:
+                document_type_key = 'petition_for_tdn'
 
             # If template name didn't match a DOCUMENT_TYPES key, try the user's original request
             if not document_type_key:
@@ -1398,6 +1439,13 @@ class DocumentChatEngine:
                     document_type_key = 'motion_to_withdraw'
                 elif 'closing letter' in request_lower or 'closing ltr' in request_lower:
                     document_type_key = 'closing_letter'
+                # Batch 5 — former .doc templates
+                elif 'admin continuance' in request_lower or ('administrative' in request_lower and 'continuance' in request_lower):
+                    document_type_key = 'admin_continuance_request'
+                elif 'admin hearing' in request_lower or ('administrative' in request_lower and 'hearing' in request_lower):
+                    document_type_key = 'admin_hearing_request'
+                elif 'trial de novo' in request_lower or 'tdn' in request_lower:
+                    document_type_key = 'petition_for_tdn'
 
             return {
                 "found": True,
