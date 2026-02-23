@@ -20,8 +20,21 @@ async def promises_dashboard(request: Request, status: str = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    summary = data.get_promises_summary()
+    raw = data.get_promises_summary()
     promises = data.get_promises_list(status=status)
+
+    # Reshape model keys to match template expectations
+    summary = {
+        'total_pending': raw.get('pending_count', 0) or 0,
+        'due_today': raw.get('due_today', 0) or 0,
+        'overdue': raw.get('overdue_count', 0) or 0,
+        'upcoming_7_days': raw.get('upcoming_7_days', 0) or 0,
+        'kept_rate': raw.get('keep_rate', 0) or 0,
+        'kept_count': raw.get('kept_count', 0) or 0,
+        'broken_count': raw.get('broken_count', 0) or 0,
+        'total_promised': raw.get('pending_total', 0) or 0,
+        'total_collected': raw.get('kept_total', 0) or 0,
+    }
 
     return templates.TemplateResponse("promises.html", {
         "request": request,

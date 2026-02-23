@@ -27,10 +27,46 @@ async def payments_analytics(request: Request, year: int = None):
         year = current_year
     available_years = [2025, 2026]
 
-    summary = data.get_payment_analytics_summary(year=year)
-    by_attorney = data.get_time_to_payment_by_attorney(year=year)
-    by_case_type = data.get_time_to_payment_by_case_type(year=year)
+    raw = data.get_payment_analytics_summary(year=year)
+    raw_by_attorney = data.get_time_to_payment_by_attorney(year=year)
+    raw_by_case_type = data.get_time_to_payment_by_case_type(year=year)
     velocity_trend = data.get_payment_velocity_trend(year=year)
+
+    # Ensure all template-expected keys exist with safe defaults
+    total_billed = raw.get('total_billed', 0) or 0
+    total_collected = raw.get('total_collected', 0) or 0
+    summary = {
+        'total_billed': total_billed,
+        'total_collected': total_collected,
+        'collection_rate': raw.get('collection_rate', 0) or 0,
+        'avg_days_to_payment': raw.get('avg_days_to_payment', 0) or 0,
+        'total_invoices': raw.get('total_invoices', 0) or 0,
+        'paid_in_full_count': raw.get('paid_in_full_count', 0) or 0,
+        'total_outstanding': total_billed - total_collected,
+        'avg_dpd_outstanding': raw.get('avg_dpd_outstanding', 0) or 0,
+    }
+
+    # Enrich attorney rows with computed fields the template expects
+    by_attorney = []
+    for a in raw_by_attorney:
+        billed = a.get('total_billed', 0) or 0
+        collected = a.get('total_collected', 0) or 0
+        a['collection_rate'] = round(collected / billed * 100, 1) if billed > 0 else 0
+        a['avg_days_to_payment'] = a.get('avg_days', 0) or 0
+        a.setdefault('min_days', None)
+        a.setdefault('max_days', None)
+        by_attorney.append(a)
+
+    # Enrich case type rows
+    by_case_type = []
+    for c in raw_by_case_type:
+        billed = c.get('total_billed', 0) or 0
+        collected = c.get('total_collected', 0) or 0
+        c['collection_rate'] = round(collected / billed * 100, 1) if billed > 0 else 0
+        c['avg_days_to_payment'] = c.get('avg_days', 0) or 0
+        c.setdefault('min_days', None)
+        c.setdefault('max_days', None)
+        by_case_type.append(c)
 
     return templates.TemplateResponse("payments.html", {
         "request": request,

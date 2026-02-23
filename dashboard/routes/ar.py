@@ -66,9 +66,44 @@ async def dunning_preview(request: Request, stage: int = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    summary = data.get_dunning_summary()
-    queue = data.get_dunning_queue(stage=stage)
+    raw = data.get_dunning_summary()
+    raw_queue = data.get_dunning_queue(stage=stage)
     history = data.get_dunning_history(limit=20)
+
+    # Reshape summary keys to match template expectations
+    stage_names = {1: 'Friendly Reminder', 2: 'Past Due Notice',
+                   3: 'Final Warning', 4: 'Collections Referral'}
+    stage_days = {1: '5-14', 2: '15-29', 3: '30-44', 4: '45+'}
+    stages = {}
+    for s_num in [1, 2, 3, 4]:
+        s_data = raw.get('by_stage', {}).get(s_num, {})
+        stages[s_num] = {
+            'name': stage_names.get(s_num, f'Stage {s_num}'),
+            'days': stage_days.get(s_num, ''),
+            'count': s_data.get('count', 0) or 0,
+            'balance': s_data.get('total', 0) or 0,
+        }
+
+    summary = {
+        'total_count': raw.get('total_count', 0) or 0,
+        'total_balance': raw.get('total_amount', 0) or 0,
+        'stages': stages,
+    }
+
+    # Reshape queue items to match template field names
+    queue = []
+    for inv in raw_queue:
+        s = inv.get('stage', 1) or 1
+        queue.append({
+            'invoice_number': inv.get('invoice_id', ''),
+            'case_name': inv.get('case_name', ''),
+            'attorney': inv.get('attorney', inv.get('contact_name', '')),
+            'balance_due': inv.get('balance_due', 0) or 0,
+            'days_overdue': inv.get('days_delinquent', 0) or 0,
+            'dunning_stage': s,
+            'stage_name': stage_names.get(s, f'Stage {s}'),
+            'due_date': inv.get('last_notice_date', ''),
+        })
 
     return templates.TemplateResponse("dunning.html", {
         "request": request,
