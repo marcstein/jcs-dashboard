@@ -32,10 +32,33 @@ async def attorneys_dashboard(request: Request, year: int = None):
     productivity = data.get_attorney_productivity_data(year=year)
     aging = data.get_attorney_invoice_aging(year=year)
 
-    # Merge aging data into productivity
+    # Merge aging data into productivity and sanitize None→0
+    empty_aging = {
+        'paid_full': 0, 'dpd_1_30': 0, 'dpd_31_60': 0,
+        'dpd_61_90': 0, 'dpd_91_120': 0, 'dpd_121_180': 0,
+        'dpd_over_180': 0, 'needs_calls': 0,
+    }
+    numeric_fields = [
+        'active_cases', 'closed_mtd', 'closed_ytd',
+        'total_billed', 'total_collected', 'total_outstanding', 'collection_rate',
+    ]
     aging_by_id = {a['attorney_id']: a for a in aging}
     for p in productivity:
-        a = aging_by_id.get(p['attorney_id'], {})
+        # Sanitize None→0 on all numeric fields (Jinja2 sum filter can't add None)
+        for f in numeric_fields:
+            if p.get(f) is None:
+                p[f] = 0
+
+        a = aging_by_id.get(p['attorney_id'], dict(empty_aging))
+        # Compute needs_calls (61-180 DPD invoices requiring attorney follow-up)
+        a['needs_calls'] = (
+            (a.get('dpd_61_90') or 0)
+            + (a.get('dpd_91_120') or 0)
+            + (a.get('dpd_121_180') or 0)
+        )
+        # Ensure all expected keys exist to prevent template UndefinedError
+        for k, v in empty_aging.items():
+            a.setdefault(k, v)
         p['aging'] = a
 
     return templates.TemplateResponse("attorneys.html", {
@@ -90,6 +113,13 @@ async def attorneys_export_csv(request: Request, year: int = None):
     aging_by_id = {a['attorney_id']: a for a in aging}
     for p in productivity:
         a = aging_by_id.get(p['attorney_id'], {})
+        a.setdefault('paid_full', 0)
+        a.setdefault('dpd_1_30', 0)
+        a.setdefault('dpd_31_60', 0)
+        a.setdefault('dpd_61_90', 0)
+        a.setdefault('dpd_91_120', 0)
+        a.setdefault('dpd_121_180', 0)
+        a.setdefault('dpd_over_180', 0)
         p['aging'] = a
 
     # Create CSV in memory
