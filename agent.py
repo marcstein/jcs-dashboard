@@ -26,6 +26,7 @@ from commands.trends import trends
 from commands.reports import reports
 from commands.users import users
 from commands.phases import phases
+from commands.overrides import overrides
 from commands.dashboard import dashboard_cmd
 
 # AI and Document Generation Commands
@@ -70,6 +71,7 @@ cli.add_command(trends)
 cli.add_command(reports)
 cli.add_command(users)
 cli.add_command(phases)
+cli.add_command(overrides)
 cli.add_command(dashboard_cmd, name="dashboard")
 
 # ── Register AI / Document Generation groups ────────────────────────────

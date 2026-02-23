@@ -247,6 +247,19 @@ CREATE TABLE IF NOT EXISTS staff_exclusions (
     reason TEXT,
     PRIMARY KEY (firm_id, staff_id)
 );
+
+CREATE TABLE IF NOT EXISTS field_overrides (
+    firm_id VARCHAR(36) NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id INTEGER NOT NULL,
+    field_name VARCHAR(100) NOT NULL,
+    override_value TEXT NOT NULL,
+    original_value TEXT,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT,
+    PRIMARY KEY (firm_id, entity_type, entity_id, field_name)
+);
 """
 
 
@@ -256,6 +269,125 @@ def ensure_cache_tables():
         cursor = conn.cursor()
         cursor.execute(CACHE_SCHEMA)
     logger.info("Cache tables ensured")
+
+
+# ============================================================
+# Field Overrides — persist manual edits through cache syncs
+# ============================================================
+
+def get_field_overrides(firm_id: str, entity_type: str) -> Dict[int, Dict[str, str]]:
+    """Load all field overrides for an entity type.
+
+    Returns:
+        {entity_id: {field_name: override_value, ...}, ...}
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT entity_id, field_name, override_value
+               FROM field_overrides
+               WHERE firm_id = %s AND entity_type = %s""",
+            (firm_id, entity_type),
+        )
+        overrides: Dict[int, Dict[str, str]] = {}
+        for row in cur.fetchall():
+            eid = row[0] if not isinstance(row, dict) else row["entity_id"]
+            fname = row[1] if not isinstance(row, dict) else row["field_name"]
+            val = row[2] if not isinstance(row, dict) else row["override_value"]
+            overrides.setdefault(eid, {})[fname] = val
+        return overrides
+
+
+def set_field_override(firm_id: str, entity_type: str, entity_id: int,
+                       field_name: str, override_value: str,
+                       original_value: str = None, reason: str = None,
+                       updated_by: str = None):
+    """Record a manual field override that persists through cache syncs."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO field_overrides
+                   (firm_id, entity_type, entity_id, field_name,
+                    override_value, original_value, reason, updated_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (firm_id, entity_type, entity_id, field_name)
+               DO UPDATE SET
+                   override_value = EXCLUDED.override_value,
+                   original_value = COALESCE(EXCLUDED.original_value, field_overrides.original_value),
+                   reason = COALESCE(EXCLUDED.reason, field_overrides.reason),
+                   updated_by = EXCLUDED.updated_by,
+                   created_at = CURRENT_TIMESTAMP""",
+            (firm_id, entity_type, entity_id, field_name,
+             override_value, original_value, reason, updated_by),
+        )
+    logger.info("Override set: %s.%s[%d].%s = %s",
+                firm_id, entity_type, entity_id, field_name, override_value)
+
+
+def remove_field_override(firm_id: str, entity_type: str, entity_id: int,
+                          field_name: str) -> bool:
+    """Remove a field override (let API value flow through again)."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """DELETE FROM field_overrides
+               WHERE firm_id = %s AND entity_type = %s
+                 AND entity_id = %s AND field_name = %s""",
+            (firm_id, entity_type, entity_id, field_name),
+        )
+        removed = cur.rowcount > 0
+    if removed:
+        logger.info("Override removed: %s.%s[%d].%s",
+                     firm_id, entity_type, entity_id, field_name)
+    return removed
+
+
+def list_field_overrides(firm_id: str, entity_type: str = None) -> List[Dict]:
+    """List all overrides, optionally filtered by entity type."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if entity_type:
+            cur.execute(
+                """SELECT entity_type, entity_id, field_name,
+                          override_value, original_value, reason, created_at, updated_by
+                   FROM field_overrides
+                   WHERE firm_id = %s AND entity_type = %s
+                   ORDER BY entity_type, entity_id""",
+                (firm_id, entity_type),
+            )
+        else:
+            cur.execute(
+                """SELECT entity_type, entity_id, field_name,
+                          override_value, original_value, reason, created_at, updated_by
+                   FROM field_overrides
+                   WHERE firm_id = %s
+                   ORDER BY entity_type, entity_id""",
+                (firm_id,),
+            )
+        cols = ["entity_type", "entity_id", "field_name",
+                "override_value", "original_value", "reason", "created_at", "updated_by"]
+        results = []
+        for row in cur.fetchall():
+            if isinstance(row, dict):
+                results.append(row)
+            else:
+                results.append(dict(zip(cols, row)))
+        return results
+
+
+def _apply_overrides(records: List[Dict], overrides: Dict[int, Dict[str, str]]) -> List[Dict]:
+    """Apply field overrides to a list of API records before upsert.
+
+    Mutates the records in-place and also patches data_json if present.
+    """
+    if not overrides:
+        return records
+    for rec in records:
+        eid = rec.get("id")
+        if eid in overrides:
+            for field, value in overrides[eid].items():
+                rec[field] = value
+    return records
 
 
 # ============================================================
@@ -427,6 +559,10 @@ def batch_upsert_cases(firm_id: str, cases: List[Dict]):
 def batch_upsert_contacts(firm_id: str, contacts: List[Dict]):
     if not contacts:
         return
+    # Apply field overrides so manual edits persist through syncs
+    overrides = get_field_overrides(firm_id, "contacts")
+    _apply_overrides(contacts, overrides)
+
     rows = []
     for c in contacts:
         rows.append((
@@ -456,6 +592,10 @@ def batch_upsert_contacts(firm_id: str, contacts: List[Dict]):
 def batch_upsert_clients(firm_id: str, clients: List[Dict]):
     if not clients:
         return
+    # Apply field overrides so manual edits persist through syncs
+    overrides = get_field_overrides(firm_id, "clients")
+    _apply_overrides(clients, overrides)
+
     rows = []
     for cl in clients:
         address = cl.get('address', {}) or {}
@@ -590,6 +730,10 @@ def batch_upsert_events(firm_id: str, events: List[Dict]):
 def batch_upsert_staff(firm_id: str, staff: List[Dict]):
     if not staff:
         return
+    # Apply field overrides so manual edits persist through syncs
+    overrides = get_field_overrides(firm_id, "staff")
+    _apply_overrides(staff, overrides)
+
     rows = []
     for s in staff:
         rows.append((
