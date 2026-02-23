@@ -25,14 +25,14 @@ def trends_record():
 
     console.print("Recording daily KPI snapshot...")
 
-    # Get current KPIs
+    # Get current KPIs (returns a dataclass, access attributes directly)
     kpis = kpi_tracker.calculate_daily_collections_kpis()
 
     # Record key metrics
-    trend_tracker.record_snapshot("ar_over_60_pct", kpis.get("over_60_pct", 0))
-    trend_tracker.record_snapshot("payment_plan_compliance", kpis.get("payment_plan_compliance", 0))
-    trend_tracker.record_snapshot("total_ar", kpis.get("total_ar", 0))
-    trend_tracker.record_snapshot("overdue_tasks", kpis.get("overdue_tasks", 0))
+    trend_tracker.record_snapshot("ar_over_60_pct", getattr(kpis, 'aging_over_60_pct', 0) or 0)
+    trend_tracker.record_snapshot("payment_plan_compliance", getattr(kpis, 'promise_rate', 0) or 0)
+    trend_tracker.record_snapshot("total_ar", getattr(kpis, 'total_ar_balance', 0) or 0)
+    trend_tracker.record_snapshot("overdue_tasks", getattr(kpis, 'delinquent_accounts', 0) or 0)
 
     console.print("[green]KPI snapshot recorded[/green]")
 
