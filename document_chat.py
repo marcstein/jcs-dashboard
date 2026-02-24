@@ -437,12 +437,13 @@ DOCUMENT_TYPES = {
     "petition_for_review": {
         "name": "Petition for Review (PFR)",
         "description": "Petition for judicial review of DOR license revocation (refusal cases) - DOR/DWI",
-        "required_vars": ["county", "petitioner_name", "case_number", "dob"],
+        "required_vars": ["county", "petitioner_name", "case_number", "dob", "arrest_date", "arrest_county", "police_department"],
         "optional_vars": [],
         "defaults": {},
         "party_terminology": "petitioner_respondent",
         "uses_attorney_profile_for": [
-            "firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"
+            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone"
         ]
     },
     "after_supplemental_disclosure_letter": {
