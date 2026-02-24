@@ -234,15 +234,14 @@ DOCUMENT_TYPES = {
         "name": "Entry of Appearance (Municipal)",
         "description": "Notice that attorney is appearing for defendant in municipal court - includes prosecutor mailing info",
         "required_vars": ["city", "defendant_name", "case_number"],
-        "optional_vars": ["attorney_names", "signing_attorney",
-                          "second_attorney_name", "second_attorney_bar", "second_attorney_email",
-                          "prosecutor_name", "prosecutor_address", "prosecutor_city_state_zip",
-                          "service_date", "service_signatory"],
+        "optional_vars": ["second_attorney_name", "second_attorney_bar", "second_attorney_email",
+                          "prosecutor_name", "prosecutor_address", "prosecutor_city_state_zip"],
         "defaults": {},
         "party_terminology": "plaintiff_defendant",
         "uses_attorney_profile_for": [
-            "firm_name", "attorney_name", "attorney_bar", "attorney_email",
-            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
+            "firm_name", "attorney_name", "attorney_names", "attorney_bar", "attorney_email",
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax",
+            "signing_attorney", "service_date", "service_signatory"
         ]
     },
     "entry_of_appearance": {
@@ -1588,8 +1587,18 @@ Respond with JSON:
             doc_info = DOCUMENT_TYPES[document_type_key]
             variables = []
 
-            # Vars auto-filled from attorney profile — don't prompt for these
+            # Vars auto-filled from attorney profile or system — don't prompt for these
             auto_filled = set(doc_info.get("uses_attorney_profile_for", []))
+            # Also auto-fill common attorney/date fields across ALL templates
+            ALWAYS_AUTO_FILLED = {
+                "attorney_names", "signing_attorney", "signing_attorney_bar",
+                "signing_attorney_email", "service_signatory",
+                "service_date", "date",
+                "firm_name", "attorney_name", "attorney_bar", "attorney_email",
+                "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax",
+                "attorney_full_name", "firm_address_line1",
+            }
+            auto_filled.update(ALWAYS_AUTO_FILLED)
 
             # Create DetectedVariable for each required var (skip auto-filled)
             for var_name in doc_info.get("required_vars", []):
@@ -2022,6 +2031,13 @@ Email: {ap.email}"""
                 replacements['assignee_address'] = ap.firm_address
                 replacements['assignee_city_state_zip'] = f"{ap.firm_city}, {ap.firm_state} {ap.firm_zip}"
 
+                # Additional attorney-derived fields used across templates
+                replacements.setdefault('attorney_names', ap.attorney_name)
+                replacements.setdefault('signing_attorney', ap.attorney_name)
+                replacements.setdefault('signing_attorney_bar', ap.bar_number)
+                replacements.setdefault('signing_attorney_email', ap.email)
+                replacements.setdefault('service_signatory', ap.attorney_name)
+
             # Auto-fill dates with today's date if not provided
             from datetime import datetime
             today = datetime.now()
@@ -2308,6 +2324,14 @@ Email: {ap.email}"""
             replacements['email'] = ap.email
             if ap.fax:
                 replacements['fax'] = ap.fax
+            replacements.setdefault('attorney_names', ap.attorney_name)
+            replacements.setdefault('signing_attorney', ap.attorney_name)
+            replacements.setdefault('service_signatory', ap.attorney_name)
+            replacements.setdefault('attorney_bar', ap.bar_number)
+            replacements.setdefault('attorney_email', ap.email)
+            replacements.setdefault('firm_phone', ap.phone)
+            if ap.fax:
+                replacements.setdefault('firm_fax', ap.fax)
 
         # Auto-fill date with today's date if not provided
         from datetime import datetime
