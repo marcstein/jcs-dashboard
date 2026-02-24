@@ -508,7 +508,7 @@ TEMPLATES = [
         "subcategory": "plea",
         "tags": ["plea", "guilty", "municipal"],
         "deactivate_patterns": ["Plea of Guilty%"],
-        "case_variables": ["county", "defendant_name", "case_number"],
+        "case_variables": ["county", "defendant_name", "case_number", "charge", "fine_amount", "court_costs"],
         "profile_variables": ["firm_name", "attorney_name", "attorney_bar", "firm_city_state_zip"],
     },
     {
