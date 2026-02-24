@@ -1997,15 +1997,13 @@ Only include variables where you found a clear value. If unsure, don't include i
                 replacements['bar_number'] = ap.bar_number
                 replacements['phone'] = ap.phone
                 replacements['email'] = ap.email
-                if ap.fax:
-                    replacements['fax'] = ap.fax
+                replacements['fax'] = ap.fax or ''
+                replacements['firm_fax'] = ap.fax or ''
 
                 # Map attorney profile fields to consolidated template placeholder names
                 replacements['attorney_bar'] = ap.bar_number
                 replacements['attorney_email'] = ap.email
                 replacements['firm_phone'] = ap.phone
-                if ap.fax:
-                    replacements['firm_fax'] = ap.fax
                 replacements['attorney_full_name'] = ap.attorney_name
                 # firm_address_line1 / firm_address_line2 for letter templates
                 replacements['firm_address_line1'] = ap.firm_address
@@ -2248,6 +2246,31 @@ Email: {ap.email}"""
                         for paragraph in cell.paragraphs:
                             normalize_signature_lines(paragraph)
 
+            # Cleanup: remove paragraphs that are just a label with empty value
+            # e.g., "Facsimile: " when firm_fax is blank
+            EMPTY_LABEL_PATTERNS = [
+                re.compile(r'^\s*Facsimile:\s*$'),
+                re.compile(r'^\s*Fax:\s*$'),
+                re.compile(r'^\s*Second Attorney:\s*$'),
+            ]
+            def remove_empty_label_paragraphs(paragraphs_parent):
+                for paragraph in paragraphs_parent.paragraphs:
+                    full = ''.join(r.text for r in paragraph.runs)
+                    if not full:
+                        full = paragraph.text
+                    for pat in EMPTY_LABEL_PATTERNS:
+                        if pat.match(full):
+                            # Clear all runs so paragraph is empty
+                            for run in paragraph.runs:
+                                run.text = ''
+                            break
+
+            remove_empty_label_paragraphs(doc)
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        remove_empty_label_paragraphs(cell)
+
             # Process hyperlink-enclosed placeholders (python-docx para.runs
             # doesn't include runs inside <w:hyperlink> elements)
             output = io.BytesIO()
@@ -2343,8 +2366,8 @@ Email: {ap.email}"""
             replacements.setdefault('attorney_bar', ap.bar_number)
             replacements.setdefault('attorney_email', ap.email)
             replacements.setdefault('firm_phone', ap.phone)
-            if ap.fax:
-                replacements.setdefault('firm_fax', ap.fax)
+            replacements.setdefault('firm_fax', ap.fax or '')
+            replacements.setdefault('fax', ap.fax or '')
 
         # Optional fields that should be empty (omitted) if not provided
         for blank_field in [
