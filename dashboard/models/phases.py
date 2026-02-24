@@ -1,5 +1,11 @@
 """
 Case Phase Distribution and Stalled Cases Data Access
+
+Reads from PostgreSQL tables:
+  - case_phase_history (firm_id, case_id, case_name, case_type, phase_code,
+                        phase_name, entered_at, exited_at, duration_days)
+  - phases (firm_id, code, name, display_order, ...)
+  - cached_cases (for open/closed status join)
 """
 from typing import Dict, List
 
@@ -10,18 +16,23 @@ class PhasesDataMixin:
     """Mixin providing case phase distribution and stalled cases data methods."""
 
     def get_case_phases_distribution(self) -> Dict:
-        """Get distribution of cases across the 7 universal phases (2025 cases only)."""
+        """Get distribution of cases across the 7 universal phases."""
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
+                # Get latest phase per case, then count by phase
                 cursor.execute("""
-                    SELECT phase_name, COUNT(*) as count
-                    FROM case_phases
-                    WHERE firm_id = %s
-                      AND EXTRACT(YEAR FROM created_at) = 2025
-                    GROUP BY phase_name
-                    ORDER BY phase_number ASC
+                    WITH latest AS (
+                        SELECT DISTINCT ON (case_id) case_id, phase_code, phase_name
+                        FROM case_phase_history
+                        WHERE firm_id = %s
+                        ORDER BY case_id, entered_at DESC
+                    )
+                    SELECT lp.phase_name, COUNT(*) as count
+                    FROM latest lp
+                    GROUP BY lp.phase_name
+                    ORDER BY lp.phase_name
                 """, (self.firm_id,))
 
                 distribution = {}
@@ -38,15 +49,25 @@ class PhasesDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                # Phase distribution with counts
+                # Latest phase per case, joined with cached_cases for open status,
+                # and phases table for display_order
                 cursor.execute("""
-                    SELECT cp.phase_name, cp.phase_number, COUNT(*) as count
-                    FROM case_phases cp
-                    JOIN cached_cases c ON cp.case_id = c.id AND cp.firm_id = c.firm_id
-                    WHERE cp.firm_id = %s
-                      AND c.status = 'open'
-                    GROUP BY cp.phase_name, cp.phase_number
-                    ORDER BY cp.phase_number ASC
+                    WITH latest AS (
+                        SELECT DISTINCT ON (cph.case_id)
+                               cph.case_id, cph.phase_code, cph.phase_name, cph.firm_id
+                        FROM case_phase_history cph
+                        WHERE cph.firm_id = %s
+                        ORDER BY cph.case_id, cph.entered_at DESC
+                    )
+                    SELECT lp.phase_name,
+                           COALESCE(p.display_order, 0) as phase_number,
+                           COUNT(*) as count
+                    FROM latest lp
+                    JOIN cached_cases c ON lp.case_id = c.id AND lp.firm_id = c.firm_id
+                    LEFT JOIN phases p ON lp.phase_code = p.code AND lp.firm_id = p.firm_id
+                    WHERE c.status = 'open'
+                    GROUP BY lp.phase_name, p.display_order
+                    ORDER BY COALESCE(p.display_order, 0) ASC
                 """, (self.firm_id,))
 
                 phases = []
@@ -83,13 +104,21 @@ class PhasesDataMixin:
                 cursor = self._cursor(conn)
 
                 cursor.execute("""
-                    SELECT cp.case_id, c.name as case_name, cp.phase_name, cp.entered_phase_date,
-                           (CURRENT_DATE - cp.entered_phase_date::date) as days_in_phase
-                    FROM case_phases cp
-                    JOIN cached_cases c ON cp.case_id = c.id AND cp.firm_id = c.firm_id
-                    WHERE cp.firm_id = %s
-                      AND c.status = 'open'
-                      AND (CURRENT_DATE - cp.entered_phase_date::date) >= %s
+                    WITH latest AS (
+                        SELECT DISTINCT ON (cph.case_id)
+                               cph.case_id, cph.case_name, cph.phase_name,
+                               cph.entered_at, cph.firm_id
+                        FROM case_phase_history cph
+                        WHERE cph.firm_id = %s
+                        ORDER BY cph.case_id, cph.entered_at DESC
+                    )
+                    SELECT lp.case_id, c.name as case_name, lp.phase_name,
+                           lp.entered_at,
+                           EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - lp.entered_at)) / 86400.0 as days_in_phase
+                    FROM latest lp
+                    JOIN cached_cases c ON lp.case_id = c.id AND lp.firm_id = c.firm_id
+                    WHERE c.status = 'open'
+                      AND EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - lp.entered_at)) / 86400.0 >= %s
                     ORDER BY days_in_phase DESC
                     LIMIT 50
                 """, (self.firm_id, threshold))
@@ -101,21 +130,21 @@ class PhasesDataMixin:
             return []
 
     def get_phase_velocity(self) -> List[Dict]:
-        """Get average days spent in each phase (from phase_history)."""
+        """Get average days spent in each phase (from case_phase_history where exited)."""
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
                 cursor.execute("""
                     SELECT phase_name,
-                           ROUND(AVG(days_in_phase)::numeric, 1) as avg_days,
-                           MIN(days_in_phase) as min_days,
-                           MAX(days_in_phase) as max_days,
+                           ROUND(AVG(duration_days)::numeric, 1) as avg_days,
+                           MIN(duration_days)::int as min_days,
+                           MAX(duration_days)::int as max_days,
                            COUNT(*) as transitions
-                    FROM phase_history
+                    FROM case_phase_history
                     WHERE firm_id = %s
-                      AND days_in_phase IS NOT NULL
-                      AND days_in_phase > 0
+                      AND duration_days IS NOT NULL
+                      AND duration_days > 0
                     GROUP BY phase_name
                     ORDER BY phase_name
                 """, (self.firm_id,))
@@ -134,15 +163,21 @@ class PhasesDataMixin:
                 cursor = self._cursor(conn)
 
                 cursor.execute("""
-                    SELECT c.practice_area, cp.phase_name, COUNT(*) as count
-                    FROM case_phases cp
-                    JOIN cached_cases c ON cp.case_id = c.id AND cp.firm_id = c.firm_id
-                    WHERE cp.firm_id = %s
-                      AND c.status = 'open'
+                    WITH latest AS (
+                        SELECT DISTINCT ON (cph.case_id)
+                               cph.case_id, cph.phase_name, cph.firm_id
+                        FROM case_phase_history cph
+                        WHERE cph.firm_id = %s
+                        ORDER BY cph.case_id, cph.entered_at DESC
+                    )
+                    SELECT c.practice_area, lp.phase_name, COUNT(*) as count
+                    FROM latest lp
+                    JOIN cached_cases c ON lp.case_id = c.id AND lp.firm_id = c.firm_id
+                    WHERE c.status = 'open'
                       AND c.practice_area IS NOT NULL
                       AND c.practice_area != ''
-                    GROUP BY c.practice_area, cp.phase_name
-                    ORDER BY c.practice_area, cp.phase_name
+                    GROUP BY c.practice_area, lp.phase_name
+                    ORDER BY c.practice_area, lp.phase_name
                 """, (self.firm_id,))
 
                 results = []
@@ -163,16 +198,22 @@ class PhasesDataMixin:
                 cursor = self._cursor(conn)
 
                 cursor.execute("""
-                    SELECT cp.case_id, c.name as case_name, c.case_number,
+                    WITH latest AS (
+                        SELECT DISTINCT ON (cph.case_id)
+                               cph.case_id, cph.phase_name, cph.entered_at, cph.firm_id
+                        FROM case_phase_history cph
+                        WHERE cph.firm_id = %s
+                        ORDER BY cph.case_id, cph.entered_at DESC
+                    )
+                    SELECT lp.case_id, c.name as case_name, c.case_number,
                            c.practice_area, c.lead_attorney_name,
-                           cp.entered_phase_date,
-                           (CURRENT_DATE - cp.entered_phase_date::date) as days_in_phase
-                    FROM case_phases cp
-                    JOIN cached_cases c ON cp.case_id = c.id AND cp.firm_id = c.firm_id
-                    WHERE cp.firm_id = %s
-                      AND cp.phase_name ILIKE %s
+                           lp.entered_at,
+                           EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - lp.entered_at)) / 86400.0 as days_in_phase
+                    FROM latest lp
+                    JOIN cached_cases c ON lp.case_id = c.id AND lp.firm_id = c.firm_id
+                    WHERE lp.phase_name ILIKE %s
                       AND c.status = 'open'
-                    ORDER BY cp.entered_phase_date ASC
+                    ORDER BY lp.entered_at ASC
                     LIMIT %s
                 """, (self.firm_id, f'%{phase}%', limit))
 

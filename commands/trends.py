@@ -16,25 +16,31 @@ def trends():
 
 @trends.command("record")
 def trends_record():
-    """Record today's KPI snapshot."""
-    from trends import TrendTracker
+    """Record today's KPI snapshot to PostgreSQL."""
+    import db.trends as db_trends
     from kpi_tracker import KPITracker
 
-    trend_tracker = TrendTracker()
+    # Auto-detect firm_id from cached data (same as dashboard)
+    from case_phases import _detect_firm_id
+    firm_id = _detect_firm_id()
+
     kpi_tracker = KPITracker()
 
-    console.print("Recording daily KPI snapshot...")
+    console.print(f"Recording daily KPI snapshot (firm: {firm_id})...")
+
+    # Ensure tables exist
+    db_trends.ensure_trends_tables()
 
     # Get current KPIs (returns a dataclass, access attributes directly)
     kpis = kpi_tracker.calculate_daily_collections_kpis()
 
-    # Record key metrics
-    trend_tracker.record_snapshot("ar_over_60_pct", getattr(kpis, 'aging_over_60_pct', 0) or 0)
-    trend_tracker.record_snapshot("payment_plan_compliance", getattr(kpis, 'promise_rate', 0) or 0)
-    trend_tracker.record_snapshot("total_ar", getattr(kpis, 'total_ar_balance', 0) or 0)
-    trend_tracker.record_snapshot("overdue_tasks", getattr(kpis, 'delinquent_accounts', 0) or 0)
+    # Record key metrics to PostgreSQL
+    db_trends.record_snapshot(firm_id, "ar_over_60_pct", getattr(kpis, 'aging_over_60_pct', 0) or 0)
+    db_trends.record_snapshot(firm_id, "payment_plan_compliance", getattr(kpis, 'promise_rate', 0) or 0)
+    db_trends.record_snapshot(firm_id, "total_ar", getattr(kpis, 'total_ar_balance', 0) or 0)
+    db_trends.record_snapshot(firm_id, "overdue_tasks", getattr(kpis, 'delinquent_accounts', 0) or 0)
 
-    console.print("[green]KPI snapshot recorded[/green]")
+    console.print("[green]KPI snapshot recorded to PostgreSQL[/green]")
 
 
 @trends.command("report")

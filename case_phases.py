@@ -795,9 +795,25 @@ class CasePhaseManager:
 # Factory Functions
 # =============================================================================
 
+def _detect_firm_id() -> str:
+    """Auto-detect firm_id from cached_cases (same logic as dashboard)."""
+    try:
+        from db.connection import get_connection
+        import psycopg2.extensions
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extensions.cursor)
+            cur.execute("SELECT DISTINCT firm_id FROM cached_cases LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                return row[0]
+    except Exception:
+        pass
+    return "default"
+
+
 def get_phase_db(firm_id: str = None) -> CasePhaseDB:
     """Get database instance for a firm."""
-    return CasePhaseDB(firm_id=firm_id or "default")
+    return CasePhaseDB(firm_id=firm_id or _detect_firm_id())
 
 
 def get_phase_manager(cache=None, api_client=None, firm_id: str = None) -> CasePhaseManager:

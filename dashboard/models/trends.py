@@ -16,10 +16,10 @@ class TrendsDataMixin:
                 cursor = self._cursor(conn)
 
                 cursor.execute("""
-                    SELECT snapshot_date, kpi_value
+                    SELECT snapshot_date, metric_value
                     FROM kpi_snapshots
                     WHERE firm_id = %s
-                      AND kpi_name = %s
+                      AND metric_name = %s
                       AND snapshot_date >= CURRENT_DATE - INTERVAL %s
                     ORDER BY snapshot_date
                 """, (self.firm_id, metric_name, f'{days_back} days'))
@@ -36,11 +36,11 @@ class TrendsDataMixin:
 
                 # Get distinct metric names with their latest snapshot
                 cursor.execute("""
-                    SELECT DISTINCT ON (kpi_name)
-                           kpi_name, kpi_value, snapshot_date
+                    SELECT DISTINCT ON (metric_name)
+                           metric_name, metric_value, snapshot_date
                     FROM kpi_snapshots
                     WHERE firm_id = %s
-                    ORDER BY kpi_name, snapshot_date DESC
+                    ORDER BY metric_name, snapshot_date DESC
                 """, (self.firm_id,))
 
                 metrics = []
@@ -51,10 +51,10 @@ class TrendsDataMixin:
 
                     # Get the value from 7 days ago for trend direction
                     cursor.execute("""
-                        SELECT kpi_value
+                        SELECT metric_value
                         FROM kpi_snapshots
                         WHERE firm_id = %s
-                          AND kpi_name = %s
+                          AND metric_name = %s
                           AND snapshot_date <= CURRENT_DATE - INTERVAL '7 days'
                         ORDER BY snapshot_date DESC
                         LIMIT 1
@@ -92,9 +92,9 @@ class TrendsDataMixin:
 
                 # Latest value
                 cursor.execute("""
-                    SELECT kpi_value, snapshot_date
+                    SELECT metric_value, snapshot_date
                     FROM kpi_snapshots
-                    WHERE firm_id = %s AND kpi_name = %s
+                    WHERE firm_id = %s AND metric_name = %s
                     ORDER BY snapshot_date DESC LIMIT 1
                 """, (self.firm_id, metric))
                 latest = cursor.fetchone()
@@ -106,8 +106,8 @@ class TrendsDataMixin:
 
                 # 7 days ago
                 cursor.execute("""
-                    SELECT kpi_value FROM kpi_snapshots
-                    WHERE firm_id = %s AND kpi_name = %s
+                    SELECT metric_value FROM kpi_snapshots
+                    WHERE firm_id = %s AND metric_name = %s
                       AND snapshot_date <= CURRENT_DATE - INTERVAL '7 days'
                     ORDER BY snapshot_date DESC LIMIT 1
                 """, (self.firm_id, metric))
@@ -116,8 +116,8 @@ class TrendsDataMixin:
 
                 # 30 days ago
                 cursor.execute("""
-                    SELECT kpi_value FROM kpi_snapshots
-                    WHERE firm_id = %s AND kpi_name = %s
+                    SELECT metric_value FROM kpi_snapshots
+                    WHERE firm_id = %s AND metric_name = %s
                       AND snapshot_date <= CURRENT_DATE - INTERVAL '30 days'
                     ORDER BY snapshot_date DESC LIMIT 1
                 """, (self.firm_id, metric))
