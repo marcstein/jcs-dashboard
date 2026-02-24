@@ -2038,6 +2038,12 @@ Email: {ap.email}"""
                 replacements.setdefault('signing_attorney_email', ap.email)
                 replacements.setdefault('service_signatory', ap.attorney_name)
 
+            # Optional fields that should be empty (omitted) if not provided
+            for blank_field in [
+                'second_attorney_name', 'second_attorney_bar', 'second_attorney_email',
+            ]:
+                replacements.setdefault(blank_field, '')
+
             # Auto-fill dates with today's date if not provided
             from datetime import datetime
             today = datetime.now()
@@ -2101,6 +2107,11 @@ Email: {ap.email}"""
                     return match.group(0)
 
                 text = re.sub(pattern, replacer, text)
+
+                # Cleanup: remove orphaned "#" when bar number was blanked
+                # e.g., "#{{second_attorney_bar}}" → "#" after replacement → ""
+                text = re.sub(r'#\s*$', '', text)  # trailing "# " at end of run
+                text = re.sub(r'^\s*#\s*$', '', text)  # line that is just "#"
 
                 # Second: replace [Bracket Placeholder] patterns from signature blocks
                 # These are produced by _get_signature_block_template() when the attorney
@@ -2326,12 +2337,20 @@ Email: {ap.email}"""
                 replacements['fax'] = ap.fax
             replacements.setdefault('attorney_names', ap.attorney_name)
             replacements.setdefault('signing_attorney', ap.attorney_name)
+            replacements.setdefault('signing_attorney_bar', ap.bar_number)
+            replacements.setdefault('signing_attorney_email', ap.email)
             replacements.setdefault('service_signatory', ap.attorney_name)
             replacements.setdefault('attorney_bar', ap.bar_number)
             replacements.setdefault('attorney_email', ap.email)
             replacements.setdefault('firm_phone', ap.phone)
             if ap.fax:
                 replacements.setdefault('firm_fax', ap.fax)
+
+        # Optional fields that should be empty (omitted) if not provided
+        for blank_field in [
+            'second_attorney_name', 'second_attorney_bar', 'second_attorney_email',
+        ]:
+            replacements.setdefault(blank_field, '')
 
         # Auto-fill date with today's date if not provided
         from datetime import datetime
