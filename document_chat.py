@@ -1123,16 +1123,24 @@ class DocumentChatEngine:
 
         if required_missing:
             response += "I'll need the following information:\n\n"
-            for i, var in enumerate(missing[:5], 1):  # Ask for up to 5 at a time
+            for i, var in enumerate(required_missing[:5], 1):  # Ask for required vars first
                 response += f"{i}. **{var.display_name}**"
                 if var.description:
                     response += f" - {var.description}"
                 response += "\n"
 
-            if len(missing) > 5:
-                response += f"\n(Plus {len(missing) - 5} more fields after these)"
+            if len(required_missing) > 5:
+                response += f"\n(Plus {len(required_missing) - 5} more required fields after these)"
 
-            response += "\nProvide what you have, or say **'draft it'** to generate with placeholders."
+            # Mention optional vars if any remain
+            optional_missing = [v for v in missing if not v.required]
+            if optional_missing:
+                opt_names = ", ".join(v.display_name for v in optional_missing[:4])
+                if len(optional_missing) > 4:
+                    opt_names += f", +{len(optional_missing) - 4} more"
+                response += f"\n*Optional fields (will use defaults if skipped):* {opt_names}"
+
+            response += "\n\nProvide what you have, or say **'draft it'** to generate with placeholders."
         else:
             # Only optional variables missing - go ahead and generate
             return self._generate_draft(session, use_placeholders=True)
@@ -1580,8 +1588,13 @@ Respond with JSON:
             doc_info = DOCUMENT_TYPES[document_type_key]
             variables = []
 
-            # Create DetectedVariable for each required var
+            # Vars auto-filled from attorney profile — don't prompt for these
+            auto_filled = set(doc_info.get("uses_attorney_profile_for", []))
+
+            # Create DetectedVariable for each required var (skip auto-filled)
             for var_name in doc_info.get("required_vars", []):
+                if var_name in auto_filled:
+                    continue
                 variables.append(DetectedVariable(
                     name=var_name,
                     display_name=var_name.replace("_", " ").title(),
@@ -1591,8 +1604,10 @@ Respond with JSON:
                     required=True
                 ))
 
-            # Add optional vars
+            # Add optional vars (skip auto-filled ones entirely)
             for var_name in doc_info.get("optional_vars", []):
+                if var_name in auto_filled:
+                    continue
                 default = doc_info.get("defaults", {}).get(var_name, "")
                 variables.append(DetectedVariable(
                     name=var_name,
