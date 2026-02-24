@@ -509,9 +509,9 @@ def get_cached_updated_at(firm_id: str, entity_type: str) -> Dict[int, str]:
 def _extract_lead_attorney(case_data: Dict):
     """Extract lead attorney id and name from MyCase case data.
 
-    MyCase API returns a 'staff' array instead of a 'lead_attorney' field.
-    We pick the first staff member as the lead attorney.
-    If 'lead_attorney' exists (future API change), use that instead.
+    MyCase API returns a 'staff' array with IDs and lead_lawyer flags.
+    We find the staff member marked as lead_lawyer: true and resolve their name
+    from the cached_staff table (staff names are not in the case response).
     """
     # Check for explicit lead_attorney field first (future-proof)
     la = case_data.get("lead_attorney")
@@ -522,15 +522,25 @@ def _extract_lead_attorney(case_data: Dict):
         return la.get("id"), name or None
 
     # Extract from staff array (actual MyCase API format)
+    # Staff array contains IDs and flags, but NOT names.
+    # Names must be resolved from cached_staff table.
     staff_list = case_data.get("staff")
     if isinstance(staff_list, list) and staff_list:
-        first_staff = staff_list[0]
-        if isinstance(first_staff, dict):
-            sid = first_staff.get("id")
-            name = first_staff.get("name") or ""
-            if not name and (first_staff.get("first_name") or first_staff.get("last_name")):
-                name = f"{first_staff.get('first_name', '')} {first_staff.get('last_name', '')}".strip()
-            return sid, name or None
+        # Find staff member marked as lead_lawyer
+        lead_staff = None
+        for staff_member in staff_list:
+            if isinstance(staff_member, dict) and staff_member.get("lead_lawyer"):
+                lead_staff = staff_member
+                break
+        
+        # Fall back to first staff if no explicit lead_lawyer flag
+        if not lead_staff:
+            lead_staff = staff_list[0]
+        
+        if isinstance(lead_staff, dict) and lead_staff.get("id"):
+            staff_id = lead_staff.get("id")
+            # Names are NOT in the staff array — return ID only, will resolve from cached_staff
+            return staff_id, None
 
     # Fallback to flat fields
     return case_data.get("lead_attorney_id"), case_data.get("lead_attorney_name")
@@ -540,9 +550,23 @@ def batch_upsert_cases(firm_id: str, cases: List[Dict]):
     """Upsert a batch of cases. 10-50x faster than individual inserts."""
     if not cases:
         return
+    
+    # Pre-load all staff IDs to names for efficient lookup
+    staff_lookup = {}
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM cached_staff WHERE firm_id = %s", (firm_id,))
+        for row in cur.fetchall():
+            staff_id, name = row if isinstance(row, tuple) else (row['id'], row['name'])
+            staff_lookup[staff_id] = name
+    
     rows = []
     for c in cases:
         lead_id, lead_name = _extract_lead_attorney(c)
+        
+        # Resolve staff name from lookup table if we have an ID but no name
+        if lead_id and not lead_name and lead_id in staff_lookup:
+            lead_name = staff_lookup[lead_id]
 
         # MyCase API uses 'practice_area' (string) or 'practice_area_reference' (dict)
         practice_area = c.get("practice_area")
