@@ -2110,8 +2110,8 @@ Email: {ap.email}"""
 
                 # Cleanup: remove orphaned "#" when bar number was blanked
                 # e.g., "#{{second_attorney_bar}}" → "#" after replacement → ""
-                text = re.sub(r'#\s*$', '', text)  # trailing "# " at end of run
-                text = re.sub(r'^\s*#\s*$', '', text)  # line that is just "#"
+                text = re.sub(r'\s*#\s*$', '', text)  # trailing "#" at end of run
+                text = re.sub(r'^\s*#\s*$', '', text)  # run that is just "#"
 
                 # Second: replace [Bracket Placeholder] patterns from signature blocks
                 # These are produced by _get_signature_block_template() when the attorney
