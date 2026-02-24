@@ -249,17 +249,23 @@ DEFAULT_STAGE_MAPPINGS = [
 
     # Phase 4.x → Strategy
     {"stage_name": "Phase 4: Case Strategy & Negotiation", "phase_code": "strategy"},
+    {"stage_name": "Phase 4.1: Negotiations - Client FTA", "phase_code": "strategy"},
     {"stage_name": "Phase 4.2: Awaiting Client Program Complitions", "phase_code": "strategy"},
+    {"stage_name": "Phase 4.2: Awaiting Client Program Completions", "phase_code": "strategy"},
 
     # Phase 5.x → Trial Prep
     {"stage_name": "Phase 5: Trial Preparation", "phase_code": "trial_prep"},
+    {"stage_name": "Phase 5.1: Set for Trial - Client FTA", "phase_code": "trial_prep"},
 
     # Phase 6.x → Disposition
     {"stage_name": "Phase 6: Disposition & Sentencing", "phase_code": "disposition"},
+    {"stage_name": "Phase 6.1: Disposition - Ltr Sent to Client", "phase_code": "disposition"},
+    {"stage_name": "Phase 6.2: Disposition - Client FTA", "phase_code": "disposition"},
 
     # Phase 7.x → Post-Disposition/Closing
     {"stage_name": "Phase 7: Post Disposition & Case Closure", "phase_code": "post_disposition"},
     {"stage_name": "Phase 7.1: Awaiting DOR Case Being Finalized", "phase_code": "post_disposition"},
+    {"stage_name": "Phase 7.2: Awaiting TC Graduation", "phase_code": "post_disposition"},
 ]
 
 
