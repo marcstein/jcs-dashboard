@@ -705,7 +705,7 @@ DOCUMENT_TYPES = {
     "plea_of_guilty": {
         "name": "Plea of Guilty",
         "description": "Plea of guilty form for municipal or circuit court",
-        "required_vars": ["county", "defendant_name", "case_number"],
+        "required_vars": ["county", "defendant_name", "case_number", "charge", "fine_amount", "court_costs"],
         "optional_vars": [],
         "defaults": {},
         "party_terminology": "plaintiff_defendant",
