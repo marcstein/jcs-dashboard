@@ -30,7 +30,20 @@ async def payments_analytics(request: Request, year: int = None):
     raw = data.get_payment_analytics_summary(year=year)
     raw_by_attorney = data.get_time_to_payment_by_attorney(year=year)
     raw_by_case_type = data.get_time_to_payment_by_case_type(year=year)
-    velocity_trend = data.get_payment_velocity_trend(year=year)
+    raw_velocity = data.get_payment_velocity_trend(year=year)
+
+    # Reshape velocity trend: model returns 'billed'/'collected', template expects 'total_billed'/'total_collected'
+    velocity_trend = []
+    for v in raw_velocity:
+        billed = v.get('billed', 0) or v.get('total_billed', 0) or 0
+        collected = v.get('collected', 0) or v.get('total_collected', 0) or 0
+        velocity_trend.append({
+            'month': v.get('month', ''),
+            'total_billed': billed,
+            'total_collected': collected,
+            'collection_rate': round(collected / billed * 100, 1) if billed > 0 else 0,
+            'avg_days_to_payment': v.get('avg_days_to_payment', None),
+        })
 
     # Ensure all template-expected keys exist with safe defaults
     total_billed = raw.get('total_billed', 0) or 0
