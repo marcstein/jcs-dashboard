@@ -506,25 +506,74 @@ def get_cached_updated_at(firm_id: str, entity_type: str) -> Dict[int, str]:
 # Batch Upsert Functions (use execute_values for performance)
 # ============================================================
 
+def _extract_lead_attorney(case_data: Dict):
+    """Extract lead attorney id and name from MyCase case data.
+
+    MyCase API returns a 'staff' array instead of a 'lead_attorney' field.
+    We pick the first staff member as the lead attorney.
+    If 'lead_attorney' exists (future API change), use that instead.
+    """
+    # Check for explicit lead_attorney field first (future-proof)
+    la = case_data.get("lead_attorney")
+    if isinstance(la, dict) and la.get("id"):
+        name = la.get("name") or ""
+        if not name and (la.get("first_name") or la.get("last_name")):
+            name = f"{la.get('first_name', '')} {la.get('last_name', '')}".strip()
+        return la.get("id"), name or None
+
+    # Extract from staff array (actual MyCase API format)
+    staff_list = case_data.get("staff")
+    if isinstance(staff_list, list) and staff_list:
+        first_staff = staff_list[0]
+        if isinstance(first_staff, dict):
+            sid = first_staff.get("id")
+            name = first_staff.get("name") or ""
+            if not name and (first_staff.get("first_name") or first_staff.get("last_name")):
+                name = f"{first_staff.get('first_name', '')} {first_staff.get('last_name', '')}".strip()
+            return sid, name or None
+
+    # Fallback to flat fields
+    return case_data.get("lead_attorney_id"), case_data.get("lead_attorney_name")
+
+
 def batch_upsert_cases(firm_id: str, cases: List[Dict]):
     """Upsert a batch of cases. 10-50x faster than individual inserts."""
     if not cases:
         return
     rows = []
     for c in cases:
+        lead_id, lead_name = _extract_lead_attorney(c)
+
+        # MyCase API uses 'practice_area' (string) or 'practice_area_reference' (dict)
+        practice_area = c.get("practice_area")
+        if not practice_area:
+            pa_ref = c.get("practice_area_reference")
+            if isinstance(pa_ref, dict):
+                practice_area = pa_ref.get("name") or pa_ref.get("value")
+
+        # case_type: MyCase doesn't have a separate case_type — use practice_area
+        case_type = c.get("case_type") or practice_area
+
+        # stage: MyCase uses 'case_stage' not 'stage'
+        stage = c.get("stage") or c.get("case_stage")
+
+        # dates: MyCase uses 'opened_date'/'closed_date' not 'date_opened'/'date_closed'
+        date_opened = c.get("date_opened") or c.get("opened_date")
+        date_closed = c.get("date_closed") or c.get("closed_date")
+
         rows.append((
             firm_id,
             c.get("id"),
             c.get("name"),
             c.get("case_number"),
             c.get("status"),
-            c.get("case_type"),
-            c.get("practice_area"),
-            c.get("date_opened"),
-            c.get("date_closed"),
-            c.get("lead_attorney", {}).get("id") if isinstance(c.get("lead_attorney"), dict) else c.get("lead_attorney_id"),
-            c.get("lead_attorney", {}).get("name") if isinstance(c.get("lead_attorney"), dict) else c.get("lead_attorney_name"),
-            c.get("stage"),
+            case_type,
+            practice_area,
+            date_opened,
+            date_closed,
+            lead_id,
+            lead_name,
+            stage,
             c.get("created_at"),
             c.get("updated_at"),
             json.dumps(c) if isinstance(c, dict) else c,
@@ -749,9 +798,14 @@ def batch_upsert_staff(firm_id: str, staff: List[Dict]):
 
     rows = []
     for s in staff:
+        # MyCase API returns first_name/last_name but not 'name'
+        # Compose full name if not provided
+        name = s.get("name")
+        if not name and (s.get("first_name") or s.get("last_name")):
+            name = f"{s.get('first_name', '')} {s.get('last_name', '')}".strip()
         rows.append((
             firm_id, s.get("id"), s.get("first_name"), s.get("last_name"),
-            s.get("name"), s.get("email"), s.get("title"),
+            name, s.get("email"), s.get("title"),
             s.get("staff_type"), s.get("active"), s.get("hourly_rate"),
             s.get("created_at"), s.get("updated_at"), json.dumps(s),
         ))
