@@ -637,10 +637,22 @@ def batch_upsert_invoices(firm_id: str, invoices: List[Dict]):
         return
     rows = []
     for inv in invoices:
+        # Extract nested IDs - API returns {case: {id: ...}, ...}
+        case_obj = inv.get("case") or {}
+        case_id = inv.get("case_id") or (case_obj.get("id") if isinstance(case_obj, dict) else None)
+        contact_id = inv.get("contact_id")
+
+        total = inv.get("total_amount") or 0
+        paid = inv.get("paid_amount") or 0
+        # API doesn't return balance_due — compute it
+        balance_due = inv.get("balance_due")
+        if balance_due is None:
+            balance_due = round(float(total) - float(paid), 2)
+
         rows.append((
             firm_id, inv.get("id"), inv.get("invoice_number"),
-            inv.get("case_id"), inv.get("contact_id"), inv.get("status"),
-            inv.get("total_amount"), inv.get("paid_amount"), inv.get("balance_due"),
+            case_id, contact_id, inv.get("status"),
+            total, paid, balance_due,
             inv.get("invoice_date"), inv.get("due_date"),
             inv.get("created_at"), inv.get("updated_at"), json.dumps(inv),
         ))
