@@ -1140,7 +1140,7 @@ class DocumentChatEngine:
                     opt_names += f", +{len(optional_missing) - 4} more"
                 response += f"\n*Optional fields (will use defaults if skipped):* {opt_names}"
 
-            response += "\n\nProvide what you have, or say **'draft it'** to generate with placeholders."
+            response += "\n\nProvide what you have, or say **'draft'** to generate with placeholders."
         else:
             # Only optional variables missing - go ahead and generate
             return self._generate_draft(session, use_placeholders=True)
@@ -1186,7 +1186,7 @@ class DocumentChatEngine:
                 response += f" (example: {var.sample_value})"
             response += "\n"
 
-        response += "\nOr say **'draft it'** to generate with placeholders for missing info."
+        response += "\nOr say **'draft'** to generate with placeholders for missing info."
 
         return response
 
