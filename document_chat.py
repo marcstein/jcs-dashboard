@@ -1928,9 +1928,10 @@ Only include variables where you found a clear value. If unsure, don't include i
             import io
             from docx import Document
             doc = Document(io.BytesIO(template_content))
-            # Extract all paragraph text
+            # Extract all paragraph text, using double newlines so the
+            # chat preview renders visible paragraph breaks in Markdown.
             paragraphs = [p.text for p in doc.paragraphs]
-            return '\n'.join(paragraphs)
+            return '\n\n'.join(paragraphs)
         except Exception as e:
             return None
 
