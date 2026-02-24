@@ -257,16 +257,13 @@ class AttorneyDataMixin:
                     'case_number': r[3], 'status': r[4], 'date_opened': r[5]
                 } for r in cursor.fetchall()]
 
-                # Call list: 60-180 DPD invoices with contact info
+                # Call list: 60-180 DPD invoices
                 cursor.execute("""
                     SELECT i.id, i.invoice_number, c.name as case_name,
                            i.total_amount, i.balance_due, i.due_date,
-                           (CURRENT_DATE - i.due_date) as days_overdue,
-                           ct.name as contact_name, ct.phone as contact_phone,
-                           ct.email as contact_email
+                           (CURRENT_DATE - i.due_date) as days_overdue
                     FROM cached_invoices i
                     JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
-                    LEFT JOIN cached_contacts ct ON c.client_id = ct.id AND c.firm_id = ct.firm_id
                     WHERE i.firm_id = %s AND c.lead_attorney_name ILIKE %s
                       AND i.balance_due > 0
                       AND (CURRENT_DATE - i.due_date) BETWEEN 60 AND 180
@@ -276,8 +273,8 @@ class AttorneyDataMixin:
                 call_list = [{
                     'id': r[0], 'invoice_number': r[1], 'case_name': r[2] or 'Unknown',
                     'total_amount': r[3], 'balance_due': r[4], 'due_date': r[5],
-                    'days_overdue': r[6], 'contact_name': r[7],
-                    'contact_phone': r[8], 'contact_email': r[9],
+                    'days_overdue': r[6], 'contact_name': None,
+                    'contact_phone': None, 'contact_email': None,
                     'collectible': True,
                 } for r in cursor.fetchall()]
 
