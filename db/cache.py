@@ -401,7 +401,8 @@ def get_sync_status(firm_id: str, entity_type: str) -> Optional[Dict]:
             "SELECT * FROM sync_metadata WHERE firm_id = %s AND entity_type = %s",
             (firm_id, entity_type),
         )
-        return dict(cur.fetchone()) if cur.fetchone() is not None else None
+        row = cur.fetchone()
+        return dict(row) if row is not None else None
 
 
 def update_sync_status(

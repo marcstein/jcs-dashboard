@@ -72,10 +72,33 @@ class SyncManager:
 
         Args:
             client: MyCase API client (default: create new)
-            firm_id: Firm ID for multi-tenant isolation (default: 'default')
+            firm_id: Firm ID for multi-tenant isolation (default: auto-detect)
         """
         self.client = client or get_client()
-        self.firm_id = firm_id or "default"
+        self.firm_id = firm_id or self._detect_firm_id()
+
+    @staticmethod
+    def _detect_firm_id() -> str:
+        """Auto-detect firm_id from cached_cases or API."""
+        try:
+            from db.connection import get_connection
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT DISTINCT firm_id FROM cached_cases LIMIT 1")
+                row = cur.fetchone()
+                if row:
+                    return row[0] if isinstance(row, tuple) else row['firm_id']
+        except Exception:
+            pass
+        # Fallback: get from API
+        try:
+            client = get_client()
+            firm = client.get_firm()
+            if firm and isinstance(firm, dict):
+                return firm.get('firm_uuid') or firm.get('id') or 'default'
+        except Exception:
+            pass
+        return "default"
 
     def sync_all(
         self,
