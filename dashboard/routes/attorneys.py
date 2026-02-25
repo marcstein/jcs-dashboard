@@ -18,19 +18,28 @@ data = DashboardData()
 
 
 @router.get("/attorneys", response_class=HTMLResponse)
-async def attorneys_dashboard(request: Request, year: int = None):
+async def attorneys_dashboard(request: Request, year: int = None, view: str = None):
     """Attorney productivity dashboard."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    # Default to current year if not specified
     current_year = datetime.now().year
-    if year is None:
-        year = current_year
     available_years = [2025, 2026]
 
-    productivity = data.get_attorney_productivity_data(year=year)
-    aging = data.get_attorney_invoice_aging(year=year)
+    # View modes: None/year-based, "combined", "rolling6"
+    if view == "combined":
+        productivity = data.get_attorney_productivity_combined([2025, 2026])
+        aging = data.get_attorney_invoice_aging_combined([2025, 2026])
+        year = None
+    elif view == "rolling6":
+        productivity = data.get_attorney_productivity_rolling(months=6)
+        aging = data.get_attorney_invoice_aging_rolling(months=6)
+        year = None
+    else:
+        if year is None:
+            year = current_year
+        productivity = data.get_attorney_productivity_data(year=year)
+        aging = data.get_attorney_invoice_aging(year=year)
 
     # Merge aging data into productivity and sanitize None→0
     empty_aging = {
@@ -44,19 +53,16 @@ async def attorneys_dashboard(request: Request, year: int = None):
     ]
     aging_by_id = {a['attorney_id']: a for a in aging}
     for p in productivity:
-        # Sanitize None→0 on all numeric fields (Jinja2 sum filter can't add None)
         for f in numeric_fields:
             if p.get(f) is None:
                 p[f] = 0
 
         a = aging_by_id.get(p['attorney_id'], dict(empty_aging))
-        # Compute needs_calls (61-180 DPD invoices requiring attorney follow-up)
         a['needs_calls'] = (
             (a.get('dpd_61_90') or 0)
             + (a.get('dpd_91_120') or 0)
             + (a.get('dpd_121_180') or 0)
         )
-        # Ensure all expected keys exist to prevent template UndefinedError
         for k, v in empty_aging.items():
             a.setdefault(k, v)
         p['aging'] = a
@@ -64,6 +70,7 @@ async def attorneys_dashboard(request: Request, year: int = None):
     return templates.TemplateResponse("attorneys.html", {
         "request": request,
         "year": year,
+        "view": view,
         "current_year": current_year,
         "available_years": available_years,
         "attorneys": productivity,

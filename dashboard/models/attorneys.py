@@ -146,6 +146,234 @@ class AttorneyDataMixin:
             print(f"get_attorney_invoice_aging error: {e}")
             return []
 
+    def get_attorney_productivity_combined(self, years: list = None) -> List[Dict]:
+        """Get attorney productivity metrics combining multiple years."""
+        if years is None:
+            years = [2025, 2026]
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+
+                cursor.execute("""
+                    SELECT DISTINCT lead_attorney_name
+                    FROM cached_cases
+                    WHERE firm_id = %s
+                      AND lead_attorney_name IS NOT NULL
+                      AND lead_attorney_name != ''
+                    ORDER BY lead_attorney_name
+                """, (self.firm_id,))
+                attorneys = [row[0] for row in cursor.fetchall()]
+
+                year_placeholders = ','.join(['%s'] * len(years))
+                result = []
+                for attorney_name in attorneys:
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s AND status = 'open'
+                    """, (self.firm_id, attorney_name))
+                    active_cases = cursor.fetchone()[0] or 0
+
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s
+                          AND status = 'closed'
+                          AND DATE(updated_at) >= DATE_TRUNC('month', CURRENT_DATE)
+                    """, (self.firm_id, attorney_name))
+                    closed_mtd = cursor.fetchone()[0] or 0
+
+                    cursor.execute(f"""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s
+                          AND status = 'closed'
+                          AND EXTRACT(YEAR FROM updated_at) IN ({year_placeholders})
+                    """, (self.firm_id, attorney_name, *years))
+                    closed_ytd = cursor.fetchone()[0] or 0
+
+                    cursor.execute(f"""
+                        SELECT COALESCE(SUM(i.total_amount), 0),
+                               COALESCE(SUM(i.paid_amount), 0),
+                               COALESCE(SUM(i.balance_due), 0)
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s AND c.lead_attorney_name = %s
+                          AND EXTRACT(YEAR FROM i.invoice_date) IN ({year_placeholders})
+                    """, (self.firm_id, attorney_name, *years))
+                    brow = cursor.fetchone()
+                    total_billed = brow[0] or 0
+                    total_collected = brow[1] or 0
+                    total_outstanding = brow[2] or 0
+                    collection_rate = (total_collected / total_billed * 100) if total_billed > 0 else 0
+
+                    result.append({
+                        'attorney_id': attorney_name,
+                        'attorney_name': attorney_name,
+                        'active_cases': active_cases,
+                        'closed_mtd': closed_mtd,
+                        'closed_ytd': closed_ytd,
+                        'total_billed': total_billed,
+                        'total_collected': total_collected,
+                        'total_outstanding': total_outstanding,
+                        'collection_rate': collection_rate,
+                    })
+
+                return sorted(result, key=lambda x: x['active_cases'], reverse=True)
+        except Exception as e:
+            print(f"get_attorney_productivity_combined error: {e}")
+            return []
+
+    def get_attorney_invoice_aging_combined(self, years: list = None) -> List[Dict]:
+        """Get invoice aging breakdown by attorney combining multiple years."""
+        if years is None:
+            years = [2025, 2026]
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                year_placeholders = ','.join(['%s'] * len(years))
+
+                cursor.execute(f"""
+                    SELECT c.lead_attorney_name,
+                           SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_full,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 1 AND 30 THEN 1 ELSE 0 END) as dpd_1_30,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 31 AND 60 THEN 1 ELSE 0 END) as dpd_31_60,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 61 AND 90 THEN 1 ELSE 0 END) as dpd_61_90,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 91 AND 120 THEN 1 ELSE 0 END) as dpd_91_120,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 121 AND 180 THEN 1 ELSE 0 END) as dpd_121_180,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) > 180 THEN 1 ELSE 0 END) as dpd_over_180
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s
+                      AND EXTRACT(YEAR FROM i.invoice_date) IN ({year_placeholders})
+                      AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                    GROUP BY c.lead_attorney_name
+                    ORDER BY c.lead_attorney_name
+                """, (self.firm_id, *years))
+
+                return [{
+                    'attorney_id': r[0],
+                    'attorney_name': r[0],
+                    'paid_full': r[1] or 0,
+                    'dpd_1_30': r[2] or 0,
+                    'dpd_31_60': r[3] or 0,
+                    'dpd_61_90': r[4] or 0,
+                    'dpd_91_120': r[5] or 0,
+                    'dpd_121_180': r[6] or 0,
+                    'dpd_over_180': r[7] or 0,
+                } for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"get_attorney_invoice_aging_combined error: {e}")
+            return []
+
+    def get_attorney_productivity_rolling(self, months: int = 6) -> List[Dict]:
+        """Get attorney productivity for the rolling N-month window."""
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+
+                cursor.execute("""
+                    SELECT DISTINCT lead_attorney_name
+                    FROM cached_cases
+                    WHERE firm_id = %s
+                      AND lead_attorney_name IS NOT NULL
+                      AND lead_attorney_name != ''
+                    ORDER BY lead_attorney_name
+                """, (self.firm_id,))
+                attorneys = [row[0] for row in cursor.fetchall()]
+
+                result = []
+                for attorney_name in attorneys:
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s AND status = 'open'
+                    """, (self.firm_id, attorney_name))
+                    active_cases = cursor.fetchone()[0] or 0
+
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s
+                          AND status = 'closed'
+                          AND DATE(updated_at) >= DATE_TRUNC('month', CURRENT_DATE)
+                    """, (self.firm_id, attorney_name))
+                    closed_mtd = cursor.fetchone()[0] or 0
+
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s
+                          AND status = 'closed'
+                          AND updated_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '%s months'
+                    """, (self.firm_id, attorney_name, months))
+                    closed_period = cursor.fetchone()[0] or 0
+
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(i.total_amount), 0),
+                               COALESCE(SUM(i.paid_amount), 0),
+                               COALESCE(SUM(i.balance_due), 0)
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s AND c.lead_attorney_name = %s
+                          AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '%s months'
+                    """, (self.firm_id, attorney_name, months))
+                    brow = cursor.fetchone()
+                    total_billed = brow[0] or 0
+                    total_collected = brow[1] or 0
+                    total_outstanding = brow[2] or 0
+                    collection_rate = (total_collected / total_billed * 100) if total_billed > 0 else 0
+
+                    result.append({
+                        'attorney_id': attorney_name,
+                        'attorney_name': attorney_name,
+                        'active_cases': active_cases,
+                        'closed_mtd': closed_mtd,
+                        'closed_ytd': closed_period,
+                        'total_billed': total_billed,
+                        'total_collected': total_collected,
+                        'total_outstanding': total_outstanding,
+                        'collection_rate': collection_rate,
+                    })
+
+                return sorted(result, key=lambda x: x['active_cases'], reverse=True)
+        except Exception as e:
+            print(f"get_attorney_productivity_rolling error: {e}")
+            return []
+
+    def get_attorney_invoice_aging_rolling(self, months: int = 6) -> List[Dict]:
+        """Get invoice aging breakdown by attorney for rolling N-month window."""
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+
+                cursor.execute("""
+                    SELECT c.lead_attorney_name,
+                           SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_full,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 1 AND 30 THEN 1 ELSE 0 END) as dpd_1_30,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 31 AND 60 THEN 1 ELSE 0 END) as dpd_31_60,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 61 AND 90 THEN 1 ELSE 0 END) as dpd_61_90,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 91 AND 120 THEN 1 ELSE 0 END) as dpd_91_120,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 121 AND 180 THEN 1 ELSE 0 END) as dpd_121_180,
+                           SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) > 180 THEN 1 ELSE 0 END) as dpd_over_180
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s
+                      AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '%s months'
+                      AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                    GROUP BY c.lead_attorney_name
+                    ORDER BY c.lead_attorney_name
+                """, (self.firm_id, months))
+
+                return [{
+                    'attorney_id': r[0],
+                    'attorney_name': r[0],
+                    'paid_full': r[1] or 0,
+                    'dpd_1_30': r[2] or 0,
+                    'dpd_31_60': r[3] or 0,
+                    'dpd_61_90': r[4] or 0,
+                    'dpd_91_120': r[5] or 0,
+                    'dpd_121_180': r[6] or 0,
+                    'dpd_over_180': r[7] or 0,
+                } for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"get_attorney_invoice_aging_rolling error: {e}")
+            return []
+
     def get_attorney_detail(self, attorney_name: str, year: int = None) -> Dict:
         """Get detailed attorney info including case list and invoice breakdown.
 

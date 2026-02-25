@@ -6,21 +6,37 @@
 <div class="page-header">
     <div class="page-header-row">
         <div>
-            <h1>{{ year }} Attorney Productivity{% if year < current_year %} (Closed){% endif %}</h1>
+            <h1>
+                {% if view == 'combined' %}
+                    2025-2026 Combined Attorney Productivity
+                {% elif view == 'rolling6' %}
+                    Rolling 6-Month Attorney Productivity
+                {% else %}
+                    {{ year }} Attorney Productivity{% if year and year < current_year %} (Closed){% endif %}
+                {% endif %}
+            </h1>
             <p class="page-subtitle">Caseload, billing, and invoice aging by attorney</p>
         </div>
-        <a href="/attorneys/export?year={{ year }}" class="btn btn-export">Export to CSV</a>
+        <a href="/attorneys/export{% if year %}?year={{ year }}{% endif %}" class="btn btn-export">Export to CSV</a>
     </div>
 </div>
 
 <!-- Year Tabs -->
 <div class="year-tabs">
     {% for y in available_years %}
-    <a href="?year={{ y }}" class="year-tab {% if y == year %}active{% endif %}">
+    <a href="?year={{ y }}" class="year-tab {% if year is not none and year == y and not view %}active{% endif %}">
         <span class="year-label">{{ y }}</span>
-        <span class="year-status">{% if y < current_year %}(Closed){% else %}YTD{% endif %}</span>
+        <span class="year-status">{% if y|int < current_year %}(Closed){% else %}YTD{% endif %}</span>
     </a>
     {% endfor %}
+    <a href="?view=combined" class="year-tab {% if view == 'combined' %}active{% endif %}">
+        <span class="year-label">2025-2026</span>
+        <span class="year-status">Combined</span>
+    </a>
+    <a href="?view=rolling6" class="year-tab {% if view == 'rolling6' %}active{% endif %}">
+        <span class="year-label">6-Month</span>
+        <span class="year-status">Rolling Avg</span>
+    </a>
 </div>
 
 <div class="attorneys-container">
@@ -52,9 +68,9 @@
                     <th>Attorney</th>
                     <th class="text-center">Active Cases</th>
                     <th class="text-center">Closed MTD</th>
-                    <th class="text-center">Closed YTD</th>
-                    <th class="text-right" title="{{ year }} Billing">Billed '{{ (year|string)[2:] }}</th>
-                    <th class="text-right" title="{{ year }} Collections">Collected '{{ (year|string)[2:] }}</th>
+                    <th class="text-center">{% if view == 'rolling6' %}Closed 6mo{% else %}Closed YTD{% endif %}</th>
+                    <th class="text-right">{% if view == 'combined' %}Billed '25-'26{% elif view == 'rolling6' %}Billed 6mo{% else %}Billed '{{ (year|string)[2:] }}{% endif %}</th>
+                    <th class="text-right">{% if view == 'combined' %}Collected '25-'26{% elif view == 'rolling6' %}Collected 6mo{% else %}Collected '{{ (year|string)[2:] }}{% endif %}</th>
                     <th class="text-right">Outstanding</th>
                     <th class="text-center">Coll %</th>
                     <th class="text-center" title="Paid in Full">Paid</th>
@@ -70,7 +86,7 @@
                 {% for atty in attorneys if atty.active_cases > 0 %}
                 <tr class="{% if atty.aging.needs_calls > 10 %}row-warning{% endif %}">
                     <td>
-                        <a href="/attorney/{{ atty.attorney_name|urlencode }}?year={{ year }}" class="attorney-link">
+                        <a href="/attorney/{{ atty.attorney_name|urlencode }}{% if year %}?year={{ year }}{% endif %}" class="attorney-link">
                             {{ atty.attorney_name }}
                         </a>
                     </td>
