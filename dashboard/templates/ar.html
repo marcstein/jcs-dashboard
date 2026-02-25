@@ -201,7 +201,7 @@
     <p class="section-subtitle">
         {{ open_invoices|length }} invoices with balance due
         &bull; {{ past_due_invoices|length }} past due
-        &bull; Total: ${{ "{:,.0f}".format(total_open_balance) }}
+        &bull; Total: ${{ "{:,.0f}".format(total_open_balance|default(0)) }}
     </p>
 
     {% if open_invoices %}
