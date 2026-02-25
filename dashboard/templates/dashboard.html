@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - MyCase{% endblock %}
+{% block title %}Dashboard - ClientShield{% endblock %}
 
 {% block content %}
 <div class="page-title">
-    <span class="firm-name">JCS Law Firm</span>
+    <span class="firm-name">ClientShield.ai</span>
     <h1>Dashboard</h1>
 </div>
 
@@ -551,7 +551,7 @@ async function checkSyncStatus() {
         const data = await response.json();
 
         if (data.running) {
-            status.textContent = 'Syncing from MyCase API...';
+            status.textContent = 'Syncing data...';
         } else {
             clearInterval(syncCheckInterval);
             syncCheckInterval = null;

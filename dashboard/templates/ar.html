@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}A/R Dashboard - MyCase{% endblock %}
+{% block title %}A/R Dashboard - ClientShield{% endblock %}
 
 {% block content %}
 <h1>{{ year }} Accounts Receivable{% if year < current_year %} (Closed){% endif %}</h1>
@@ -102,4 +102,132 @@
         </div>
     </div>
 </section>
+
+<!-- Open Invoices - ALL years -->
+<section class="section">
+    <h2>All Open Invoices (All Years)</h2>
+    <p class="section-subtitle">
+        {{ open_invoices|length }} invoices with balance due
+        &bull; {{ past_due_invoices|length }} past due
+        &bull; Total: ${{ "{:,.0f}".format(total_open_balance) }}
+    </p>
+
+    {% if open_invoices %}
+    <div class="table-controls">
+        <input type="text" id="invoiceSearch" placeholder="Search by client, case, or attorney..." class="search-input" onkeyup="filterInvoices()">
+        <select id="agingFilter" onchange="filterInvoices()" class="filter-select">
+            <option value="all">All Invoices</option>
+            <option value="current">Current (not yet due)</option>
+            <option value="1-30">1-30 Days Past Due</option>
+            <option value="31-60">31-60 Days Past Due</option>
+            <option value="61-90">61-90 Days Past Due</option>
+            <option value="91-180">91-180 Days Past Due</option>
+            <option value="180+">180+ Days Past Due</option>
+        </select>
+    </div>
+
+    <table class="data-table" id="invoiceTable">
+        <thead>
+            <tr>
+                <th class="sortable" onclick="sortTable(0)">Client</th>
+                <th class="sortable" onclick="sortTable(1)">Case</th>
+                <th class="sortable" onclick="sortTable(2)">Attorney</th>
+                <th class="sortable" onclick="sortTable(3)">Billed</th>
+                <th class="sortable" onclick="sortTable(4)">Paid</th>
+                <th class="sortable" onclick="sortTable(5)">Balance</th>
+                <th class="sortable" onclick="sortTable(6)">Days Overdue</th>
+                <th>Due Date</th>
+                <th>Year</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inv in open_invoices %}
+            <tr class="invoice-row {% if inv.days_overdue >= 180 %}row-critical{% elif inv.days_overdue >= 90 %}row-danger{% elif inv.days_overdue >= 60 %}row-warning{% elif inv.days_overdue >= 30 %}row-notice{% endif %}"
+                data-days="{{ inv.days_overdue }}"
+                data-search="{{ inv.contact_name|lower }} {{ inv.case_name|lower }} {{ inv.attorney|lower }}">
+                <td>{{ inv.contact_name }}</td>
+                <td class="case-name" title="{{ inv.case_name }}">{{ inv.case_name[:40] }}{% if inv.case_name|length > 40 %}...{% endif %}</td>
+                <td>{{ inv.attorney }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(inv.total_amount) }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(inv.paid_amount) }}</td>
+                <td class="text-right font-bold">${{ "{:,.0f}".format(inv.balance_due) }}</td>
+                <td class="text-center {% if inv.days_overdue >= 180 %}text-critical{% elif inv.days_overdue >= 90 %}text-danger{% elif inv.days_overdue >= 60 %}text-warning{% endif %}">
+                    {% if inv.days_overdue > 0 %}{{ inv.days_overdue }}{% else %}<span class="text-success">Current</span>{% endif %}
+                </td>
+                <td>{{ inv.due_date }}</td>
+                <td class="text-center">{{ inv.invoice_year }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="table-footer" id="invoiceCount">
+        Showing {{ open_invoices|length }} of {{ open_invoices|length }} invoices
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No open invoices found.</p></div>
+    {% endif %}
+</section>
+
+<style>
+.section-subtitle { color: #586069; font-size: 0.9rem; margin: -0.5rem 0 1rem; }
+.table-controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.search-input { flex: 1; min-width: 200px; padding: 0.5rem 0.75rem; border: 1px solid #d1d5da; border-radius: 6px; font-size: 0.9rem; }
+.filter-select { padding: 0.5rem 0.75rem; border: 1px solid #d1d5da; border-radius: 6px; font-size: 0.9rem; background: #fff; }
+.sortable { cursor: pointer; user-select: none; }
+.sortable:hover { background: #f0f0f0; }
+.font-bold { font-weight: 600; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+.text-success { color: #22863a; }
+.text-warning { color: #b08800; }
+.text-danger { color: #e36209; }
+.text-critical { color: #cb2431; font-weight: 700; }
+.row-notice { background-color: #fffde7; }
+.row-warning { background-color: #fff8e1; }
+.row-danger { background-color: #fff3e0; }
+.row-critical { background-color: #ffebee; }
+.case-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.table-footer { margin-top: 0.5rem; font-size: 0.85rem; color: #586069; }
+.empty-state { padding: 2rem; text-align: center; color: #586069; }
+</style>
+
+<script>
+function filterInvoices() {
+    const search = document.getElementById('invoiceSearch').value.toLowerCase();
+    const aging = document.getElementById('agingFilter').value;
+    const rows = document.querySelectorAll('.invoice-row');
+    let visible = 0;
+    rows.forEach(row => {
+        const text = row.getAttribute('data-search');
+        const days = parseInt(row.getAttribute('data-days'));
+        let matchSearch = !search || text.includes(search);
+        let matchAging = true;
+        if (aging === 'current') matchAging = days <= 0;
+        else if (aging === '1-30') matchAging = days >= 1 && days <= 30;
+        else if (aging === '31-60') matchAging = days >= 31 && days <= 60;
+        else if (aging === '61-90') matchAging = days >= 61 && days <= 90;
+        else if (aging === '91-180') matchAging = days >= 91 && days <= 180;
+        else if (aging === '180+') matchAging = days > 180;
+        row.style.display = (matchSearch && matchAging) ? '' : 'none';
+        if (matchSearch && matchAging) visible++;
+    });
+    document.getElementById('invoiceCount').textContent = 'Showing ' + visible + ' of {{ open_invoices|length }} invoices';
+}
+
+function sortTable(colIndex) {
+    const table = document.getElementById('invoiceTable');
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const isNumeric = [3,4,5,6,8].includes(colIndex);
+    rows.sort((a, b) => {
+        let aVal = a.cells[colIndex].textContent.trim().replace(/[$,]/g, '');
+        let bVal = b.cells[colIndex].textContent.trim().replace(/[$,]/g, '');
+        if (aVal === 'Current') aVal = '0';
+        if (bVal === 'Current') bVal = '0';
+        if (isNumeric) return parseFloat(bVal || 0) - parseFloat(aVal || 0);
+        return aVal.localeCompare(bVal);
+    });
+    rows.forEach(row => tbody.appendChild(row));
+}
+</script>
 {% endblock %}

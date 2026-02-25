@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}NOIW Pipeline - MyCase{% endblock %}
+{% block title %}NOIW Pipeline - ClientShield{% endblock %}
 
 {% block content %}
 <h1>NOIW Pipeline</h1>
@@ -81,7 +81,78 @@
     </h2>
 </div>
 
+<!-- All Past Due Invoices (from cached_invoices, all years, 30+ days) -->
+{% if all_past_due %}
+<div class="section-header">
+    <h2>All Past Due Invoices (30+ Days, All Years)</h2>
+</div>
+<p class="section-subtitle">
+    {{ all_past_due|length }} invoices with balance due 30+ days
+    &bull; Total: ${{ "{:,.0f}".format(total_past_due_balance) }}
+</p>
+
+<div class="table-controls">
+    <input type="text" id="noiwSearch" placeholder="Search by client, case, or attorney..." class="search-input" onkeyup="filterNoiwInvoices()">
+    <select id="noiwAgingFilter" onchange="filterNoiwInvoices()" class="filter-select">
+        <option value="all">All 30+ Days</option>
+        <option value="30-60">30-60 Days</option>
+        <option value="60-90">60-90 Days</option>
+        <option value="90-180">90-180 Days</option>
+        <option value="180+">180+ Days</option>
+    </select>
+</div>
+
+<table class="data-table" id="noiwInvoiceTable">
+    <thead>
+        <tr>
+            <th class="sortable" onclick="sortNoiwTable(0)">Client</th>
+            <th class="sortable" onclick="sortNoiwTable(1)">Case</th>
+            <th class="sortable" onclick="sortNoiwTable(2)">Attorney</th>
+            <th class="sortable" onclick="sortNoiwTable(3)">Billed</th>
+            <th class="sortable" onclick="sortNoiwTable(4)">Paid</th>
+            <th class="sortable" onclick="sortNoiwTable(5)">Balance</th>
+            <th class="sortable" onclick="sortNoiwTable(6)">Days Overdue</th>
+            <th>Due Date</th>
+            <th>Year</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for inv in all_past_due %}
+        <tr class="noiw-invoice-row {% if inv.days_overdue >= 180 %}row-critical{% elif inv.days_overdue >= 90 %}row-danger{% elif inv.days_overdue >= 60 %}row-warning{% else %}row-notice{% endif %}"
+            data-days="{{ inv.days_overdue }}"
+            data-search="{{ inv.contact_name|lower }} {{ inv.case_name|lower }} {{ inv.attorney|lower }}">
+            <td>{{ inv.contact_name }}</td>
+            <td class="case-name" title="{{ inv.case_name }}">{{ inv.case_name[:40] }}{% if inv.case_name|length > 40 %}...{% endif %}</td>
+            <td>{{ inv.attorney }}</td>
+            <td class="text-right">${{ "{:,.0f}".format(inv.total_amount) }}</td>
+            <td class="text-right">${{ "{:,.0f}".format(inv.paid_amount) }}</td>
+            <td class="text-right font-bold">${{ "{:,.0f}".format(inv.balance_due) }}</td>
+            <td class="text-center {% if inv.days_overdue >= 180 %}text-critical{% elif inv.days_overdue >= 90 %}text-danger{% elif inv.days_overdue >= 60 %}text-warning{% endif %}">
+                {{ inv.days_overdue }}
+            </td>
+            <td>{{ inv.due_date }}</td>
+            <td class="text-center">{{ inv.invoice_year }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<div class="table-footer" id="noiwInvoiceCount">
+    Showing {{ all_past_due|length }} of {{ all_past_due|length }} invoices
+</div>
+{% endif %}
+
+<!-- Formal NOIW Tracking Pipeline -->
 {% if pipeline %}
+<div class="section-header">
+    <h2>
+        {% if current_filter %}
+            {{ current_filter.replace('_', ' ').title() }} Cases (NOIW Tracking)
+            <a href="/noiw" class="clear-filter">(clear filter)</a>
+        {% else %}
+            NOIW Tracking Pipeline
+        {% endif %}
+    </h2>
+</div>
 <table class="data-table">
     <thead>
         <tr>
@@ -116,17 +187,16 @@
         {% endfor %}
     </tbody>
 </table>
-
 <div class="table-footer">
     <span>Showing {{ pipeline|length }} cases</span>
 </div>
-{% else %}
+{% elif not all_past_due %}
 <div class="empty-state">
     <p>
         {% if current_filter %}
             No cases with status "{{ current_filter }}".
         {% else %}
-            No cases in NOIW pipeline. Run <code>plans noiw-sync</code> to populate.
+            No cases in NOIW pipeline.
         {% endif %}
     </p>
 </div>
@@ -305,5 +375,50 @@
     border-radius: 4px;
     font-size: 0.9rem;
 }
+
+.section-subtitle { color: #586069; font-size: 0.9rem; margin: -0.5rem 0 1rem; }
+.table-controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.search-input { flex: 1; min-width: 200px; padding: 0.5rem 0.75rem; border: 1px solid #d1d5da; border-radius: 6px; font-size: 0.9rem; }
+.filter-select { padding: 0.5rem 0.75rem; border: 1px solid #d1d5da; border-radius: 6px; font-size: 0.9rem; background: #fff; }
+.sortable { cursor: pointer; user-select: none; }
+.sortable:hover { background: #f0f0f0; }
+.font-bold { font-weight: 600; }
+.row-notice { background-color: #fffde7; }
 </style>
+
+<script>
+function filterNoiwInvoices() {
+    const search = document.getElementById('noiwSearch').value.toLowerCase();
+    const aging = document.getElementById('noiwAgingFilter').value;
+    const rows = document.querySelectorAll('.noiw-invoice-row');
+    let visible = 0;
+    rows.forEach(row => {
+        const text = row.getAttribute('data-search');
+        const days = parseInt(row.getAttribute('data-days'));
+        let matchSearch = !search || text.includes(search);
+        let matchAging = true;
+        if (aging === '30-60') matchAging = days >= 30 && days < 60;
+        else if (aging === '60-90') matchAging = days >= 60 && days < 90;
+        else if (aging === '90-180') matchAging = days >= 90 && days < 180;
+        else if (aging === '180+') matchAging = days >= 180;
+        row.style.display = (matchSearch && matchAging) ? '' : 'none';
+        if (matchSearch && matchAging) visible++;
+    });
+    document.getElementById('noiwInvoiceCount').textContent = 'Showing ' + visible + ' of {{ all_past_due|length }} invoices';
+}
+
+function sortNoiwTable(colIndex) {
+    const table = document.getElementById('noiwInvoiceTable');
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const isNumeric = [3,4,5,6,8].includes(colIndex);
+    rows.sort((a, b) => {
+        let aVal = a.cells[colIndex].textContent.trim().replace(/[$,]/g, '');
+        let bVal = b.cells[colIndex].textContent.trim().replace(/[$,]/g, '');
+        if (isNumeric) return parseFloat(bVal || 0) - parseFloat(aVal || 0);
+        return aVal.localeCompare(bVal);
+    });
+    rows.forEach(row => tbody.appendChild(row));
+}
+</script>
 {% endblock %}

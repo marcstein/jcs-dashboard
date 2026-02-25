@@ -575,3 +575,55 @@ class ARDataMixin:
                        for r in cursor.fetchall()]
         except Exception:
             return []
+
+    def get_open_invoices_list(self, min_days_overdue: int = 0) -> List[Dict]:
+        """Get all open invoices with balance due across ALL years.
+
+        Returns individual invoice rows with case, client, attorney, balance,
+        and aging info. No year filter — shows everything still unpaid.
+        """
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT
+                        i.id as invoice_id,
+                        i.invoice_number,
+                        i.case_name,
+                        c.lead_attorney_name,
+                        i.contact_name,
+                        i.total_amount,
+                        i.paid_amount,
+                        i.balance_due,
+                        i.due_date,
+                        i.invoice_date,
+                        (CURRENT_DATE - i.due_date) as days_overdue,
+                        EXTRACT(YEAR FROM i.invoice_date) as invoice_year,
+                        c.practice_area,
+                        c.status as case_status
+                    FROM cached_invoices i
+                    LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s
+                      AND i.balance_due > 0
+                      AND (CURRENT_DATE - i.due_date) >= %s
+                    ORDER BY (CURRENT_DATE - i.due_date) DESC, i.balance_due DESC
+                """, (self.firm_id, min_days_overdue))
+                rows = cursor.fetchall()
+                return [{
+                    'invoice_id': r[0],
+                    'invoice_number': r[1],
+                    'case_name': r[2],
+                    'attorney': r[3] or 'Unassigned',
+                    'contact_name': r[4] or 'Unknown',
+                    'total_amount': r[5] or 0,
+                    'paid_amount': r[6] or 0,
+                    'balance_due': r[7] or 0,
+                    'due_date': str(r[8]) if r[8] else '',
+                    'invoice_date': str(r[9]) if r[9] else '',
+                    'days_overdue': r[10] or 0,
+                    'invoice_year': int(r[11]) if r[11] else 0,
+                    'practice_area': r[12] or 'Unknown',
+                    'case_status': r[13] or 'Unknown',
+                } for r in rows]
+        except Exception:
+            return []

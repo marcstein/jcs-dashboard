@@ -32,6 +32,11 @@ async def ar_dashboard(request: Request, year: int = None):
     trend = data.get_collections_trend(days_back=30)
     plans = data.get_payment_plans_summary()
 
+    # All open invoices with balance due — across ALL years, no year filter
+    open_invoices = data.get_open_invoices_list(min_days_overdue=0)
+    total_open_balance = sum(inv['balance_due'] for inv in open_invoices)
+    past_due_invoices = [inv for inv in open_invoices if inv['days_overdue'] > 0]
+
     return templates.TemplateResponse("ar.html", {
         "request": request,
         "year": year,
@@ -41,6 +46,9 @@ async def ar_dashboard(request: Request, year: int = None):
         "ar_aging": ar_aging,
         "trend": trend,
         "plans": plans,
+        "open_invoices": open_invoices,
+        "past_due_invoices": past_due_invoices,
+        "total_open_balance": total_open_balance,
         "username": request.session.get("username"),
     })
 
