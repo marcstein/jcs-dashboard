@@ -744,9 +744,9 @@ class ARDataMixin:
                     SELECT
                         i.id as invoice_id,
                         i.invoice_number,
-                        i.case_name,
+                        c.name as case_name,
                         c.lead_attorney_name,
-                        i.contact_name,
+                        ct.name as contact_name,
                         i.total_amount,
                         i.paid_amount,
                         i.balance_due,
@@ -758,6 +758,7 @@ class ARDataMixin:
                         c.status as case_status
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    LEFT JOIN cached_contacts ct ON i.contact_id = ct.id AND i.firm_id = ct.firm_id
                     WHERE i.firm_id = %s
                       AND i.balance_due > 0
                       AND (CURRENT_DATE - i.due_date) >= %s
