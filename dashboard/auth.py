@@ -203,24 +203,39 @@ def login_user(request: Request, username: str, password: str, firm_id: str = No
     print(f"[auth] login_user: username={username}, firm_id={firm_id}")
 
     # Check database users first
-    user = get_user(username, firm_id)
-    if user and check_password_hash(user["password_hash"], password):
-        request.session["logged_in"] = True
-        request.session["username"] = username
-        request.session["firm_id"] = firm_id
-        request.session["role"] = user["role"]
-        update_last_login(username, firm_id)
-        return True
+    try:
+        user = get_user(username, firm_id)
+        if user and check_password_hash(user["password_hash"], password):
+            request.session["logged_in"] = True
+            request.session["username"] = username
+            request.session["firm_id"] = firm_id
+            request.session["role"] = user["role"]
+            update_last_login(username, firm_id)
+            print(f"[auth] login_user: SUCCESS via DB user")
+            return True
+        elif user:
+            print(f"[auth] login_user: DB user found but password mismatch")
+        else:
+            print(f"[auth] login_user: no DB user for ({username}, {firm_id})")
+    except Exception as e:
+        print(f"[auth] login_user: DB check error: {e}")
 
     # Fallback to env-based admin (for backwards compatibility)
+    print(f"[auth] login_user: trying env-based admin fallback (ADMIN_USERNAME={config.ADMIN_USERNAME})")
     if username == config.ADMIN_USERNAME:
         if check_password_hash(config.ADMIN_PASSWORD_HASH, password):
             request.session["logged_in"] = True
             request.session["username"] = username
             request.session["firm_id"] = firm_id
             request.session["role"] = "admin"
+            print(f"[auth] login_user: SUCCESS via env-based admin")
             return True
+        else:
+            print(f"[auth] login_user: env-based admin password mismatch")
+    else:
+        print(f"[auth] login_user: username '{username}' != ADMIN_USERNAME '{config.ADMIN_USERNAME}'")
 
+    print(f"[auth] login_user: FAILED — all checks exhausted")
     return False
 
 
