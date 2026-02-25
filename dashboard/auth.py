@@ -177,9 +177,11 @@ def _detect_firm_id() -> str:
             cur.execute("SELECT DISTINCT firm_id FROM cached_cases LIMIT 1")
             row = cur.fetchone()
             if row and row[0]:
+                print(f"[auth] Auto-detected firm_id: {row[0]}")
                 return row[0]
-    except Exception:
-        pass
+            print("[auth] _detect_firm_id: no rows in cached_cases")
+    except Exception as e:
+        print(f"[auth] _detect_firm_id error: {e}")
     return None
 
 
@@ -196,7 +198,9 @@ def login_user(request: Request, username: str, password: str, firm_id: str = No
     # Resolve firm_id: explicit param > env var > auto-detect from DB
     import os
     resolved_firm_id = firm_id or os.environ.get('DASHBOARD_FIRM_ID') or _detect_firm_id()
+    print(f"[auth] login_user: username={username}, resolved_firm_id={resolved_firm_id}")
     if not resolved_firm_id:
+        print("[auth] login_user: FAILED — could not resolve firm_id")
         return False  # Cannot determine firm — no data in DB
 
     # Check database users first
