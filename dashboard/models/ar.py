@@ -379,56 +379,102 @@ class ARDataMixin:
         except Exception:
             return []
 
+    def _compute_dunning_stage(self, days_overdue: int) -> int:
+        """Map days overdue to dunning stage (1-4)."""
+        if days_overdue >= 45:
+            return 4
+        elif days_overdue >= 30:
+            return 3
+        elif days_overdue >= 15:
+            return 2
+        elif days_overdue >= 5:
+            return 1
+        return 0  # Not yet in dunning
+
     def get_dunning_preview(self, stage: int = None) -> List[Dict]:
-        """Get preview of dunning notices by stage."""
-        try:
-            with get_connection() as conn:
-                cursor = self._cursor(conn)
+        """Get dunning queue computed live from cached_invoices.
 
-                if stage:
-                    cursor.execute("""
-                        SELECT invoice_id, case_name, contact_name, balance_due, days_delinquent,
-                               stage, last_notice_date
-                        FROM dunning_notices
-                        WHERE firm_id = %s
-                          AND stage = %s
-                          AND status = 'pending'
-                        ORDER BY days_delinquent DESC
-                    """, (self.firm_id, stage))
-                else:
-                    cursor.execute("""
-                        SELECT invoice_id, case_name, contact_name, balance_due, days_delinquent,
-                               stage, last_notice_date
-                        FROM dunning_notices
-                        WHERE firm_id = %s
-                          AND status = 'pending'
-                        ORDER BY stage ASC, days_delinquent DESC
-                    """, (self.firm_id,))
-
-                return [{'invoice_id': r[0], 'case_name': r[1], 'contact_name': r[2],
-                        'balance_due': r[3], 'days_delinquent': r[4], 'stage': r[5],
-                        'last_notice_date': r[6]} for r in cursor.fetchall()]
-        except Exception:
-            return []
-
-    def get_dunning_summary(self) -> Dict:
-        """Get dunning summary with counts per stage."""
+        All open invoices with balance > 0 and 5+ days overdue, across ALL years,
+        dynamically assigned to dunning stages based on days overdue.
+        """
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
                 cursor.execute("""
-                    SELECT stage, COUNT(*) as count, COALESCE(SUM(balance_due), 0) as total
-                    FROM dunning_notices
-                    WHERE firm_id = %s AND status = 'pending'
-                    GROUP BY stage ORDER BY stage
+                    SELECT
+                        i.id as invoice_id,
+                        i.invoice_number,
+                        c.name as case_name,
+                        c.lead_attorney_name,
+                        ct.name as contact_name,
+                        i.balance_due,
+                        (CURRENT_DATE - i.due_date) as days_overdue,
+                        i.due_date
+                    FROM cached_invoices i
+                    LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    LEFT JOIN cached_contacts ct ON i.contact_id = ct.id AND i.firm_id = ct.firm_id
+                    WHERE i.firm_id = %s
+                      AND i.balance_due > 0
+                      AND (CURRENT_DATE - i.due_date) >= 5
+                    ORDER BY (CURRENT_DATE - i.due_date) DESC, i.balance_due DESC
                 """, (self.firm_id,))
+
+                results = []
+                for r in cursor.fetchall():
+                    days = r[6] or 0
+                    s = self._compute_dunning_stage(days)
+                    if s == 0:
+                        continue
+                    if stage and s != stage:
+                        continue
+                    results.append({
+                        'invoice_id': r[1] or str(r[0]),
+                        'case_name': r[2] or '',
+                        'attorney': r[3] or 'Unassigned',
+                        'contact_name': r[4] or '',
+                        'balance_due': r[5] or 0,
+                        'days_delinquent': days,
+                        'stage': s,
+                        'last_notice_date': str(r[7]) if r[7] else '',
+                    })
+                return results
+        except Exception:
+            return []
+
+    def get_dunning_summary(self) -> Dict:
+        """Get dunning summary computed live from cached_invoices.
+
+        Dynamically computes stage counts from all open invoices across all years.
+        """
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT
+                        (CURRENT_DATE - i.due_date) as days_overdue,
+                        i.balance_due
+                    FROM cached_invoices i
+                    WHERE i.firm_id = %s
+                      AND i.balance_due > 0
+                      AND (CURRENT_DATE - i.due_date) >= 5
+                """, (self.firm_id,))
+
                 by_stage = {}
                 total_count = 0
                 total_amount = 0
                 for r in cursor.fetchall():
-                    by_stage[r[0]] = {'count': r[1], 'total': r[2]}
-                    total_count += r[1]
-                    total_amount += r[2]
+                    days = r[0] or 0
+                    balance = r[1] or 0
+                    s = self._compute_dunning_stage(days)
+                    if s == 0:
+                        continue
+                    if s not in by_stage:
+                        by_stage[s] = {'count': 0, 'total': 0}
+                    by_stage[s]['count'] += 1
+                    by_stage[s]['total'] += balance
+                    total_count += 1
+                    total_amount += balance
+
                 return {
                     'by_stage': by_stage,
                     'total_count': total_count,
