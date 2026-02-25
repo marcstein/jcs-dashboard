@@ -6,12 +6,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 
 @router.get("/promises", response_class=HTMLResponse)
@@ -20,6 +18,7 @@ async def promises_dashboard(request: Request, status: str = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     raw = data.get_promises_summary()
     promises = data.get_promises_list(status=status)
 

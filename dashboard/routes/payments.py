@@ -7,12 +7,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 
 @router.get("/payments", response_class=HTMLResponse)
@@ -27,6 +25,7 @@ async def payments_analytics(request: Request, year: int = None):
         year = current_year
     available_years = [2025, 2026]
 
+    data = get_data(request)
     raw = data.get_payment_analytics_summary(year=year)
     raw_by_attorney = data.get_time_to_payment_by_attorney(year=year)
     raw_by_case_type = data.get_time_to_payment_by_case_type(year=year)

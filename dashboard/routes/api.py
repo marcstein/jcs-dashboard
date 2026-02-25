@@ -13,13 +13,11 @@ from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 from db.connection import get_connection
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 # Track sync status
 _sync_status = {"running": False, "last_result": None, "error": None}
@@ -37,6 +35,7 @@ async def api_stats(request: Request, year: int = None):
     """API endpoint for dashboard stats."""
     if not is_authenticated(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = get_data(request)
     current_year = datetime.now().year
     if year is None:
         year = current_year
@@ -48,6 +47,7 @@ async def api_ar_aging(request: Request, year: int = None):
     """API endpoint for AR aging data."""
     if not is_authenticated(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = get_data(request)
     current_year = datetime.now().year
     if year is None:
         year = current_year
@@ -116,6 +116,76 @@ async def api_sync_status(request: Request):
         "last_result": _sync_status["last_result"],
         "error": _sync_status["error"],
     })
+
+
+# ============================================================================
+# Dunning Actions API
+# ============================================================================
+
+@router.post("/api/dunning/run")
+async def api_dunning_run(request: Request):
+    """Run dunning cycle in dry-run or execute mode."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+        mode = body.get("mode", "dry-run")
+
+        # Import the dunning module
+        try:
+            from commands.collections import _run_dunning_cycle
+        except ImportError:
+            # Fallback: use the data model to get queue info
+            data = get_data(request)
+            queue = data.get_dunning_queue()
+            if mode == "execute":
+                return JSONResponse({"error": "Email sending is not yet configured via dashboard. Please contact admin."})
+            return JSONResponse({"would_send": len(queue), "mode": "dry-run"})
+
+        execute = (mode == "execute")
+        result = _run_dunning_cycle(execute=execute)
+        return JSONResponse(result)
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+
+@router.get("/api/dunning/export")
+async def api_dunning_export(request: Request, stage: int = None):
+    """Export dunning queue to CSV."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    import csv as csv_mod
+
+    data = get_data(request)
+    queue = data.get_dunning_queue(stage=stage)
+
+    output = io.StringIO()
+    writer = csv_mod.writer(output)
+    writer.writerow(['Invoice', 'Case', 'Attorney', 'Balance Due', 'Days Overdue', 'Stage', 'Due Date'])
+
+    for inv in queue:
+        writer.writerow([
+            inv.get('invoice_id', ''),
+            inv.get('case_name', ''),
+            inv.get('attorney', inv.get('contact_name', '')),
+            inv.get('balance_due', 0),
+            inv.get('days_delinquent', 0),
+            inv.get('stage', ''),
+            inv.get('last_notice_date', ''),
+        ])
+
+    output.seek(0)
+    today = datetime.now().strftime('%Y-%m-%d')
+    filename = f"dunning_queue_{today}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 # ============================================================================

@@ -7,12 +7,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 # Map phase names to short names, codes, and sequence numbers
 PHASE_META = {
@@ -46,6 +44,7 @@ async def phases_dashboard(request: Request, phase: str = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     raw_summary = data.get_phases_summary()
     raw_stalled = data.get_stalled_cases(threshold_days=30)
     raw_velocity = data.get_phase_velocity()

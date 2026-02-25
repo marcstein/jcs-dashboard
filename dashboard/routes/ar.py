@@ -7,12 +7,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 
 @router.get("/ar", response_class=HTMLResponse)
@@ -21,6 +19,7 @@ async def ar_dashboard(request: Request, year: int = None, view: str = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     current_year = datetime.now().year
     available_years = [2025, 2026]
 
@@ -89,6 +88,7 @@ async def wonky_invoices(request: Request):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     invoices = data.get_wonky_invoices()
 
     return templates.TemplateResponse("wonky.html", {
@@ -104,6 +104,7 @@ async def dunning_preview(request: Request, stage: int = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     raw = data.get_dunning_summary()
     raw_queue = data.get_dunning_queue(stage=stage)
     history = data.get_dunning_history(limit=20)

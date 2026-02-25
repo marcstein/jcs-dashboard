@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}KPI Trends - ClientShield{% endblock %}
+{% block title %}KPI Trends - LawMetrics{% endblock %}
 
 {% block content %}
 <h1>KPI Trends</h1>
@@ -156,7 +156,7 @@
 </div>
 {% else %}
 <div class="empty-state">
-    <p>No trend data available yet. Run <code>uv run python agent.py trends record</code> to start tracking KPIs.</p>
+    <p>No trend data available yet. KPI snapshots are recorded automatically by the daily scheduler.</p>
 </div>
 {% endif %}
 

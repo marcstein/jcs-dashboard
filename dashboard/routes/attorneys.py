@@ -9,12 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 
 @router.get("/attorneys", response_class=HTMLResponse)
@@ -23,6 +21,7 @@ async def attorneys_dashboard(request: Request, year: int = None, view: str = No
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     current_year = datetime.now().year
     available_years = [2025, 2026]
 
@@ -90,6 +89,7 @@ async def attorney_detail_view(request: Request, attorney_name: str, year: int =
         year = current_year
     available_years = [2025, 2026]
 
+    data = get_data(request)
     detail = data.get_attorney_detail(attorney_name, year=year)
 
     return templates.TemplateResponse("attorney_detail.html", {
@@ -113,6 +113,7 @@ async def attorneys_export_csv(request: Request, year: int = None):
     if year is None:
         year = current_year
 
+    data = get_data(request)
     productivity = data.get_attorney_productivity_data(year=year)
     aging = data.get_attorney_invoice_aging(year=year)
 

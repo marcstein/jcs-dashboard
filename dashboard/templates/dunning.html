@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Dunning Preview - ClientShield{% endblock %}
+{% block title %}Dunning Preview - LawMetrics{% endblock %}
 
 {% block content %}
 <h1>Dunning Notices Preview</h1>
@@ -112,21 +112,24 @@
 </div>
 {% endif %}
 
-<!-- CLI Instructions -->
+<!-- Dunning Actions -->
 <div class="section-header">
-    <h2>How to Send Notices</h2>
+    <h2>Dunning Actions</h2>
 </div>
-<div class="instructions-box">
-    <p><strong>Preview what would be sent (safe):</strong></p>
-    <pre>uv run python agent.py collections dunning --dry-run</pre>
-
-    <p><strong>Preview specific stage only:</strong></p>
-    <pre>uv run python agent.py dunning preview --stage 1</pre>
-
-    <p><strong>Send notices for real (requires email config):</strong></p>
-    <pre>uv run python agent.py collections dunning --execute</pre>
-
-    <p class="warning-text">Notices are currently in <strong>dry-run mode</strong>. No emails will be sent until you change the scheduler to <code>--execute</code>.</p>
+<div class="dunning-actions-box">
+    <div class="action-buttons-row">
+        <button class="btn btn-secondary" id="btn-dry-run" onclick="runDunning('dry-run')">
+            <span class="btn-icon">&#128269;</span> Preview Notices (Dry Run)
+        </button>
+        <button class="btn btn-primary" id="btn-send-notices" onclick="runDunning('execute')">
+            <span class="btn-icon">&#9993;</span> Send Notices
+        </button>
+        <button class="btn btn-export" id="btn-export-queue" onclick="exportDunningQueue()">
+            <span class="btn-icon">&#128196;</span> Export Queue to CSV
+        </button>
+    </div>
+    <div id="dunning-action-status" class="action-status" style="display:none;"></div>
+    <p class="dunning-info-text">Preview will show exactly what would be sent without sending. Send Notices will email collection notices to clients.</p>
 </div>
 
 <!-- Recent History -->
@@ -338,8 +341,8 @@
     color: var(--text-secondary, #586069);
 }
 
-/* Instructions box */
-.instructions-box {
+/* Dunning actions box */
+.dunning-actions-box {
     background: var(--bg-secondary, #f6f8fa);
     border: 1px solid var(--border-color, #e1e4e8);
     border-radius: 8px;
@@ -347,32 +350,78 @@
     margin-bottom: 2rem;
 }
 
-.instructions-box p {
-    margin: 0 0 0.5rem 0;
+.action-buttons-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
 }
 
-.instructions-box pre {
-    background: #1e1e1e;
-    color: #d4d4d4;
+.action-buttons-row .btn {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.action-buttons-row .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.action-buttons-row .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: #fff;
+}
+
+.btn-primary {
+    background: #0366d6;
+    color: #fff;
+}
+
+.btn-icon {
+    margin-right: 0.25rem;
+}
+
+.action-status {
     padding: 0.75rem 1rem;
-    border-radius: 4px;
-    margin: 0 0 1rem 0;
-    overflow-x: auto;
+    border-radius: 6px;
+    margin-bottom: 1rem;
     font-size: 0.9rem;
 }
 
-.instructions-box .warning-text {
-    margin-top: 1rem;
-    padding: 0.75rem;
-    background: #fff3cd;
-    border-radius: 4px;
-    color: #856404;
+.action-status.status-running {
+    background: #e3f2fd;
+    color: #1565c0;
+    border: 1px solid #90caf9;
 }
 
-.instructions-box code {
-    background: #e1e4e8;
-    padding: 0.1rem 0.3rem;
-    border-radius: 3px;
+.action-status.status-success {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
+}
+
+.action-status.status-error {
+    background: #ffebee;
+    color: #c62828;
+    border: 1px solid #ef9a9a;
+}
+
+.dunning-info-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin: 0;
 }
 
 /* Table styles */
@@ -410,4 +459,53 @@
     }
 }
 </style>
+
+<script>
+function showStatus(msg, type) {
+    var el = document.getElementById('dunning-action-status');
+    el.style.display = 'block';
+    el.className = 'action-status status-' + type;
+    el.textContent = msg;
+}
+
+function runDunning(mode) {
+    var btn = mode === 'execute' ? document.getElementById('btn-send-notices') : document.getElementById('btn-dry-run');
+    var label = mode === 'execute' ? 'Sending notices...' : 'Running preview...';
+    btn.disabled = true;
+    showStatus(label, 'running');
+
+    fetch('/api/dunning/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: mode})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        if (data.error) {
+            showStatus('Error: ' + data.error, 'error');
+        } else {
+            var msg = mode === 'execute'
+                ? 'Notices sent: ' + (data.sent || 0) + ' emails dispatched.'
+                : 'Preview complete: ' + (data.would_send || 0) + ' notices would be sent.';
+            showStatus(msg, 'success');
+        }
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        showStatus('Error: ' + err.message, 'error');
+    });
+}
+
+function exportDunningQueue() {
+    var btn = document.getElementById('btn-export-queue');
+    btn.disabled = true;
+    showStatus('Generating CSV...', 'running');
+    window.location.href = '/api/dunning/export{% if current_stage %}?stage={{ current_stage }}{% endif %}';
+    setTimeout(function() {
+        btn.disabled = false;
+        showStatus('CSV download started.', 'success');
+    }, 1500);
+}
+</script>
 {% endblock %}

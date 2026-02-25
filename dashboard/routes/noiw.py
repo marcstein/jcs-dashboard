@@ -9,12 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 
 @router.get("/noiw", response_class=HTMLResponse)
@@ -26,6 +24,8 @@ async def noiw_pipeline(request: Request, status: str = None):
     """
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
+
+    data = get_data(request)
 
     # Get formal NOIW pipeline (for status tracking)
     pipeline = data.get_noiw_pipeline(status_filter=status)

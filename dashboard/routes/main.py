@@ -7,12 +7,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import login_user, logout_user, is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import login_user, logout_user, is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -27,6 +25,7 @@ async def index(request: Request, year: int = None):
         year = current_year
     available_years = [2025, 2026]
 
+    data = get_data(request)
     stats = data.get_dashboard_stats(year=year)
     ar_aging = data.get_ar_aging_breakdown(year=year)
     recent_reports = data.get_recent_reports(limit=5)
@@ -143,6 +142,7 @@ async def staff_tasks(request: Request, staff_name: str):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     staff = data.get_staff_tasks(staff_name, include_completed=False)
     active_cases = data.get_staff_active_cases_list(staff_name)
 
@@ -160,6 +160,7 @@ async def reports_list(request: Request):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     reports = data.get_recent_reports(limit=50)
 
     return templates.TemplateResponse("reports.html", {
@@ -175,6 +176,7 @@ async def view_report(request: Request, filename: str):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     content = data.get_report_content(filename)
 
     return templates.TemplateResponse("report_view.html", {

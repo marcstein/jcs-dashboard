@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Reports - ClientShield{% endblock %}
+{% block title %}Reports - LawMetrics{% endblock %}
 
 {% block content %}
 <h1>Reports</h1>
@@ -26,9 +26,7 @@
 </table>
 {% else %}
 <div class="empty-state">
-    <p>No reports generated yet.</p>
-    <p>Run CLI commands to generate reports:</p>
-    <code>uv run python agent.py sop melissa</code>
+    <p>No reports generated yet. Reports are generated automatically by the daily scheduler.</p>
 </div>
 {% endif %}
 {% endblock %}

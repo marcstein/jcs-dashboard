@@ -6,12 +6,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated
-from dashboard.models import DashboardData
+from dashboard.auth import is_authenticated, get_data
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
-data = DashboardData()
 
 # Display names and targets for known metrics
 METRIC_CONFIG = {
@@ -91,6 +89,7 @@ async def trends_dashboard(request: Request, metric: str = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    data = get_data(request)
     raw_summary = data.get_trends_summary()
 
     # Reshape metrics for template

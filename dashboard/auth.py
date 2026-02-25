@@ -223,6 +223,17 @@ def get_current_firm_id(request: Request) -> str:
     return "default"
 
 
+def get_data(request: Request):
+    """Create a per-request DashboardData instance scoped to the user's firm_id.
+
+    CRITICAL for multi-tenant isolation: never use a module-level DashboardData().
+    Each request must get its own instance with the correct firm_id from session.
+    """
+    from dashboard.models import DashboardData
+    firm_id = get_current_firm_id(request)
+    return DashboardData(firm_id=firm_id)
+
+
 def get_current_role(request: Request) -> str | None:
     """Get the current user's role."""
     if is_authenticated(request):
