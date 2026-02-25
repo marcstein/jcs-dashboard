@@ -299,7 +299,7 @@ class AttorneyDataMixin:
                         SELECT COUNT(*) FROM cached_cases
                         WHERE firm_id = %s AND lead_attorney_name = %s
                           AND status = 'closed'
-                          AND updated_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '%s months'
+                          AND updated_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' * %s
                     """, (self.firm_id, attorney_name, months))
                     closed_period = cursor.fetchone()[0] or 0
 
@@ -310,7 +310,7 @@ class AttorneyDataMixin:
                         FROM cached_invoices i
                         JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                         WHERE i.firm_id = %s AND c.lead_attorney_name = %s
-                          AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '%s months'
+                          AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' * %s
                     """, (self.firm_id, attorney_name, months))
                     brow = cursor.fetchone()
                     total_billed = brow[0] or 0
@@ -353,7 +353,7 @@ class AttorneyDataMixin:
                     FROM cached_invoices i
                     JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     WHERE i.firm_id = %s
-                      AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '%s months'
+                      AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' * %s
                       AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
                     GROUP BY c.lead_attorney_name
                     ORDER BY c.lead_attorney_name
