@@ -454,20 +454,10 @@ class ARDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                # Debug: check total eligible invoices
-                cursor.execute("""
-                    SELECT COUNT(*), MIN(EXTRACT(YEAR FROM due_date)), MAX(EXTRACT(YEAR FROM due_date))
-                    FROM cached_invoices
-                    WHERE firm_id = %s AND balance_due > 0
-                """, (self.firm_id,))
-                debug_row = cursor.fetchone()
-                print(f"[dunning] firm_id={self.firm_id}, open invoices={debug_row[0]}, years={debug_row[1]}-{debug_row[2]}")
-
                 cursor.execute("""
                     SELECT
                         (CURRENT_DATE - i.due_date::date) as days_overdue,
-                        i.balance_due,
-                        EXTRACT(YEAR FROM i.due_date) as yr
+                        i.balance_due
                     FROM cached_invoices i
                     WHERE i.firm_id = %s
                       AND i.balance_due > 0
@@ -477,12 +467,9 @@ class ARDataMixin:
                 by_stage = {}
                 total_count = 0
                 total_amount = 0
-                year_counts = {}
                 for r in cursor.fetchall():
                     days = r[0] if isinstance(r[0], int) else (r[0].days if hasattr(r[0], 'days') else int(r[0] or 0))
                     balance = r[1] or 0
-                    yr = int(r[2]) if r[2] else 0
-                    year_counts[yr] = year_counts.get(yr, 0) + 1
                     s = self._compute_dunning_stage(days)
                     if s == 0:
                         continue
@@ -493,7 +480,6 @@ class ARDataMixin:
                     total_count += 1
                     total_amount += balance
 
-                print(f"[dunning] by_year={year_counts}, total_dunning={total_count}, by_stage={by_stage}")
                 return {
                     'by_stage': by_stage,
                     'total_count': total_count,

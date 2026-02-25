@@ -79,7 +79,16 @@ class SyncManager:
 
     @staticmethod
     def _detect_firm_id() -> str:
-        """Auto-detect firm_id from cached_cases or API."""
+        """Detect firm_id: env var > cached data > API.
+
+        Priority: FIRM_ID env var (explicit) > existing cached_cases > MyCase API.
+        The API returns a UUID like 'd5AgNpGZZvZ9Lgpce7ri4Q' which is not
+        human-friendly, so prefer FIRM_ID env var (e.g. 'jcs_law').
+        """
+        import os
+        env_firm = os.environ.get('FIRM_ID')
+        if env_firm:
+            return env_firm
         try:
             from db.connection import get_connection
             with get_connection() as conn:
@@ -90,7 +99,7 @@ class SyncManager:
                     return row[0] if isinstance(row, tuple) else row['firm_id']
         except Exception:
             pass
-        # Fallback: get from API
+        # Fallback: get from API (returns UUID — not ideal)
         try:
             client = get_client()
             firm = client.get_firm()
