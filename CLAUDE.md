@@ -19,6 +19,9 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - `payment_plan_payments`, `outreach_log`, `collections_holds`, `noiw_tracking` — Collections
 - `firms`, `templates`, `generated_documents` — Document engine
 - `attorneys` — Attorney profiles
+- `jurisdictions`, `courts`, `document_type_taxonomy` — Multi-state jurisdiction layer
+- `jurisdiction_templates`, `court_forms`, `court_form_field_mappings` — Multi-state templates & PDF forms
+- `attorney_bar_admissions`, `firm_jurisdictions`, `firm_office_locations` — Multi-state attorney/firm profiles
 
 ### Project Structure
 ```
@@ -371,7 +374,8 @@ All configuration via environment variables (see Environment Variables section u
 ```bash
 uv run python agent.py dashboard --host 0.0.0.0 --port 3000
 ```
-Access at: http://127.0.0.1:3000 (login: admin/admin)
+Access at: http://127.0.0.1:3000 (login: firm_id=jcs_law, username=admin, password=admin)
+Production: https://jcs.lawmetrics.ai
 
 ### Dashboard Routes
 - `/` - Main dashboard with SOP widgets
@@ -388,10 +392,19 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 
 ### Dashboard Files
 - `dashboard/app.py` - FastAPI application
-- `dashboard/routes.py` - Route handlers
-- `dashboard/models.py` - Data methods for dashboard queries
+- `dashboard/auth.py` - Authentication (multi-tenant, firm_id from login form)
+- `dashboard/config.py` - Configuration (env vars, admin credentials)
+- `dashboard/routes/` - Route handlers split by domain (main, ar, attorneys, noiw, phases, trends, promises, payments, api, documents)
+- `dashboard/models/` - Data access split by domain (base, ar, attorneys, tasks, etc.)
 - `dashboard/templates/` - Jinja2 templates
 - `dashboard/static/` - CSS styles
+
+### Multi-Tenant Authentication
+- Login requires **firm_id**, username, and password
+- firm_id is stored in session and used by `get_data(request)` to create per-request `DashboardData(firm_id=X)`
+- Each route handler calls `data = get_data(request)` — NO module-level `DashboardData()` singletons
+- Env-based admin fallback: `DASHBOARD_ADMIN_USER`/`DASHBOARD_ADMIN_PASSWORD_HASH` (works with any valid firm_id)
+- DB users: `dashboard_users` table with `UNIQUE(firm_id, username)` constraint
 
 ### Key Metrics Displayed
 - **A/R Overview**: Total AR, 60-120 day, 180+ day (uncollectible)
@@ -401,7 +414,18 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 
 ## Change Log
 
-### v2.0 — PostgreSQL Migration (In Progress)
+### v3.0 — Multi-State Document Engine (Planned)
+- Architecture specification complete: `MULTI_STATE_ARCHITECTURE.md` and `.docx`
+- Phase 1 states: California, Iowa, Illinois, Minnesota, Kentucky, Oklahoma
+- 8 new database tables for jurisdiction layer (see architecture doc Section 3)
+- PDF form engine for mandatory court forms via `pypdf`
+- Multi-state attorney profiles with per-jurisdiction bar admissions and office addresses
+- Court registry with ~297 court entries across 6 states
+- ~130 new state-specific .docx templates + ~28 PDF form integrations
+- 16-week implementation roadmap across 8 work packages
+- Iowa first (proof-of-concept), California largest market target
+
+### v2.0 — PostgreSQL Migration & Multi-Tenant Isolation (In Progress)
 - Removing all SQLite — unified PostgreSQL multi-tenant database layer
 - Split `agent.py` (3,665 lines) into `commands/` package
 - Split `dashboard/models.py` (2,543 lines) into `dashboard/models/` package
@@ -409,6 +433,13 @@ Access at: http://127.0.0.1:3000 (login: admin/admin)
 - Added pytest test suite for business logic
 - Migrated FTS5 full-text search to PostgreSQL `tsvector`/`tsquery`
 - Removed legacy `.db` files and duplicate modules
+- **Multi-tenant firm_id isolation**: Removed all module-level `DashboardData()` singletons from route files; each handler uses `data = get_data(request)` for per-request scoping
+- **Login with firm_id**: Added firm_id field to login screen; firm_id stored in session for all subsequent data queries
+- **Removed "default" firm_id**: No fallback to "default" — only real firm_ids are valid
+- **Dunning computed live**: Dunning queue now computed from `cached_invoices` (all years, all open cases with balance > 0 and 5+ days overdue) instead of `dunning_notices` table
+- **Dashboard buttons replace CLI**: Dunning page has Preview/Send/Export buttons; removed CLI command references from dashboard, promises, trends, and reports templates
+- **Rebranded to LawMetrics**: Removed all ClientShield references; branding is now LawMetrics.ai across all templates and navigation
+- **Production deployment**: `jcs.lawmetrics.ai` on port 3000, service `jcs-dashboard`
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
@@ -450,6 +481,11 @@ Multi-tenant, AI-powered document generation platform for law firms. Lawyers can
 - `document_engine.py` - Multi-tenant template database and generation
 - `attorney_profiles.py` - Attorney/firm signature block management
 - `courts_db.py` - Missouri courts and agencies registry
+
+#### Multi-State Expansion
+- `MULTI_STATE_ARCHITECTURE.md` - Full architecture spec (10 sections, SQL DDL, pipeline diagrams)
+- `MULTI_STATE_ARCHITECTURE.docx` - Same content, formatted Word document
+- `Multi_State_Expansion_Analysis.xlsx` - State comparison spreadsheet (3 tabs: State Overview, Document Type Mapping, Expansion Phases)
 
 #### Configuration
 - `docs/TEMPLATE_FOLDER_STRUCTURE.md` - Recommended folder structure for firms
@@ -720,6 +756,12 @@ All env vars stored in `.env` file in the project root.
 20. **Investigated .doc-format templates** - 33 templates across 3 groups (Admin Continuance, Admin Hearing, Petition for TDN) use legacy OLE/Office 97-2003 format. Require LibreOffice conversion before consolidation. Motion to Withdraw partially consolidated using 4 available DOCX-format variants.
 21. **Batch 5 consolidation (3 templates replacing ~35 variants)** - Converted legacy .doc (OLE) templates to .docx via LibreOffice, then consolidated: Admin Continuance Request (10 variants), Admin Hearing Request (20 variants), Petition for Trial De Novo (5 variants). **Template consolidation is now complete — all variant groups processed.**
 22. **Batch 6 final cleanup (2 templates + deactivation of client-filled duplicates)** - NOH Bond Reduction (3 county variants), OOP Entry (2 variants). Added extra cleanup deactivation for client-filled 90 Day Letters, Client Status Updates, and duplicate Motion to Set Aside templates. **56 consolidated templates total.**
+23. **Fixed XML repack document corruption** - Using stale `ZipInfo` objects when repacking .docx after hyperlink placeholder substitution caused CRC/file size mismatches. Fixed by passing filename strings to `writestr()` instead of `ZipInfo` objects in both `document_chat.py` and `tests/test_template_generation.py`.
+24. **Fixed doubled email in 16 templates** - `paragraph.text` includes `<w:hyperlink>` text but `paragraph.runs` does not. Pass 2 (cross-run replacement) was seeing `{{attorney_email}}` from the hyperlink in `paragraph.text`, writing it into regular runs, then XML pass also replaced the hyperlink copy. Fixed by using `''.join(r.text for r in para.runs)` instead of `paragraph.text` for remaining-placeholder detection.
+25. **Fixed Disposition Letter payment text** - `{{payment_instructions}}{{payment_deadline}}` were adjacent with no separator. Changed to `{{payment_instructions}} by {{payment_deadline}}` so output reads "...above by March 15, 2026."
+26. **Fixed `attorney_names` typo** - Entry_of_Appearance_Muni.docx and Entry_of_Appearance_State.docx both had `{{attorney_names}}` (plural) instead of `{{attorney_name}}`. Fixed in template XML and database.
+27. **Purged 1,307 inactive templates** - Deleted old per-county/per-attorney variants from database (42 MB freed). 400 active templates remain. All 55 test templates pass.
+28. **Multi-state architecture specification** - Created `MULTI_STATE_ARCHITECTURE.md` and `.docx` covering jurisdiction layer, PDF form engine, court registry, attorney profile expansion, and 16-week implementation roadmap for 6 Phase 1 states.
 
 ### Template Consolidation
 
@@ -863,13 +905,13 @@ Both local and production (`/opt/jcs-mycase`) are git repos on the same `main` b
 # Local: commit and push
 git add <files> && git commit -m "message" && git push origin main
 
-# Production: pull and run
+# Production: pull and restart
 cd /opt/jcs-mycase
 git pull
+sudo systemctl restart jcs-dashboard
+# If importing templates:
 export $(grep -v '^#' .env | xargs)
-.venv/bin/python <import_script>.py    # If importing templates
-# Restart dashboard if code changed:
-# (dashboard auto-reloads on file change if running with --reload)
+.venv/bin/python import_consolidated_templates.py
 ```
 
 ### Template Search Behavior
@@ -901,6 +943,65 @@ The template search uses PostgreSQL full-text search (`tsvector`/`tsquery`) with
 - "I need a bond assignment" → "bond OR assignment"
 - "assignment of cash bond" → "bond OR assignment" (synonym expanded)
 - "mtd for Jefferson County" → "motion OR dismiss OR jefferson OR county"
+
+---
+
+## Multi-State Document Engine Expansion
+
+### Overview
+Architecture specification for expanding the document generation engine from Missouri-only to multi-state operation. Full spec in `MULTI_STATE_ARCHITECTURE.md` (and `.docx`).
+
+### Phase 1 States
+
+| State | Court System | Custom .docx | PDF Forms | Court Entries | Priority |
+|-------|-------------|-------------|-----------|---------------|----------|
+| Iowa | District Court (unified) | ~15 | ~4 | 8 | First (proof-of-concept) |
+| California | 58 Superior Courts | ~30 | ~7 | 58 | Largest market |
+| Illinois | Circuit Court (unified) | ~20 | TBD | 24 | Adjacent to MO |
+| Minnesota | District Court (unified) | ~20 | ~5 | 10 | Word-format forms |
+| Kentucky | Court of Justice (unified) | ~20 | TBD | 120 | Unified since 1975 |
+| Oklahoma | District Court + CCA | ~25 | ~12 | 77 | Rule 13 mandatory forms |
+
+### New Database Tables (Multi-State)
+
+| Table | Purpose |
+|-------|---------|
+| `jurisdictions` | State-level config: caption templates, party terminology, pleading format (JSONB), admin agency |
+| `courts` | Individual courts with addresses, divisions, local rules, local form flags |
+| `document_type_taxonomy` | Universal document types spanning jurisdictions (e.g., "motion_for_continuance") |
+| `jurisdiction_templates` | Maps document type + jurisdiction → state-specific template (.docx or PDF) |
+| `court_forms` | Official fillable PDF forms from state judiciaries (stored as BYTEA) |
+| `court_form_field_mappings` | Maps PDF form field names → universal placeholder keys with optional transforms |
+| `attorney_bar_admissions` | Per-attorney, per-state bar numbers and status |
+| `firm_jurisdictions` | Which states a firm is licensed in; controls template provisioning |
+| `firm_office_locations` | Per-jurisdiction office addresses for signature block auto-fill |
+
+### Key Architecture Decisions
+
+1. **Missouri engine unchanged** — New `multi_state_engine.py` entry point runs alongside existing `document_chat.py`
+2. **Dual output formats** — .docx for free-form filings, filled PDF for mandatory court forms (via `pypdf`)
+3. **Jurisdiction resolution** — Court-level resolution: explicit court → county+state → state only → inferred from case data
+4. **California formatting** — 28-line numbered pleading paper stored as JSONB in `jurisdictions.pleading_format`
+5. **Attorney auto-fill per state** — Bar number and office address resolve per `jurisdiction_id`
+6. **Additive migration** — New tables alongside existing; `templates` gets `jurisdiction_id DEFAULT 'MO'` column; rollback = drop new tables
+
+### Implementation Roadmap (16 Weeks)
+
+| WP | Description | Weeks | Dependencies |
+|----|-------------|-------|-------------|
+| 1 | Data Model & Foundation | 1–3 | None |
+| 2 | PDF Form Engine | 2–4 | WP1 |
+| 3 | Iowa (first state) | 3–6 | WP1, WP2 |
+| 4 | California | 5–10 | WP1–3 |
+| 5 | Illinois | 7–10 | WP1, WP2 |
+| 6 | Minnesota, Kentucky, Oklahoma | 8–12 | WP1, WP2 |
+| 7 | Dashboard & Onboarding | 10–14 | WP3–6 |
+| 8 | Testing & QA | 12–16 | All |
+
+### Reference Documents
+- `MULTI_STATE_ARCHITECTURE.md` — Full architecture spec (10 sections, SQL DDL, pipeline diagrams)
+- `MULTI_STATE_ARCHITECTURE.docx` — Same content, formatted Word document
+- `Multi_State_Expansion_Analysis.xlsx` — State comparison spreadsheet (3 tabs)
 
 ---
 
