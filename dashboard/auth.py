@@ -228,9 +228,14 @@ def get_data(request: Request):
 
     CRITICAL for multi-tenant isolation: never use a module-level DashboardData().
     Each request must get its own instance with the correct firm_id from session.
+
+    If the session firm_id is 'default' (legacy login), we pass None so
+    DashboardData auto-detects the actual firm_id from the database.
     """
     from dashboard.models import DashboardData
     firm_id = get_current_firm_id(request)
+    if firm_id == "default":
+        firm_id = None  # Let DashboardData auto-detect from cached data
     return DashboardData(firm_id=firm_id)
 
 
