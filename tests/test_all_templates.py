@@ -863,7 +863,7 @@ class TemplateTestResult:
 # Main test function
 # ---------------------------------------------------------------------------
 
-def test_template(template_name: str, config: dict) -> TemplateTestResult:
+def _test_template(template_name: str, config: dict) -> TemplateTestResult:
     """Run all checks for a single template."""
     doc_type_key = config["doc_type_key"]
     result = TemplateTestResult(template_name=template_name, doc_type_key=doc_type_key)
@@ -1036,7 +1036,7 @@ def run_category(category_name: str, templates: dict) -> Tuple[int, int, int, bo
     all_pass = True
 
     for template_name, config in templates.items():
-        result = test_template(template_name, config)
+        result = _test_template(template_name, config)
         total_checks += result.tests_run
         total_passed += result.tests_passed
 
@@ -1126,7 +1126,7 @@ def db_available():
 )
 def test_template_full(template_name, config, db_available):
     """Pytest parametrized test for each template."""
-    result = test_template(template_name, config)
+    result = _test_template(template_name, config)
     if not result.passed:
         failure_details = "\n".join(result.failures)
         pytest.fail(f"{template_name} failed {len(result.failures)} check(s):\n{failure_details}")

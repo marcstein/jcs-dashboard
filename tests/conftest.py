@@ -65,16 +65,32 @@ def mock_get_connection(mock_connection):
     """
     Fixture that patches db.connection.get_connection to return mock connection.
 
-    Returns a context manager that yields the mock connection.
-    Patches the module-level get_connection function.
+    Patches get_connection in all modules that import it (db.phases, db.promises, etc.)
+    The patch remains active for the duration of the test.
     """
     @contextmanager
     def get_connection_mock(autocommit=False):
         mock_connection.autocommit = autocommit
         yield mock_connection
 
-    with patch('db.connection.get_connection', side_effect=get_connection_mock):
-        yield get_connection_mock
+    # Patch in the modules where it's imported, not just where it's defined
+    patches = [
+        patch('db.phases.get_connection', side_effect=get_connection_mock),
+        patch('db.promises.get_connection', side_effect=get_connection_mock),
+        patch('db.cache.get_connection', side_effect=get_connection_mock),
+        patch('db.tracking.get_connection', side_effect=get_connection_mock),
+        patch('db.connection.get_connection', side_effect=get_connection_mock),
+        patch('db.attorneys.get_connection', side_effect=get_connection_mock),
+        patch('db.collections.get_connection', side_effect=get_connection_mock),
+    ]
+
+    for patcher in patches:
+        patcher.start()
+
+    yield get_connection_mock
+
+    for patcher in patches:
+        patcher.stop()
 
 
 @pytest.fixture
