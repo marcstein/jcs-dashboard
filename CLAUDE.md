@@ -406,6 +406,12 @@ Production: https://jcs.lawmetrics.ai
 - Env-based admin fallback: `DASHBOARD_ADMIN_USER`/`DASHBOARD_ADMIN_PASSWORD_HASH` (works with any valid firm_id)
 - DB users: `dashboard_users` table with `UNIQUE(firm_id, username)` constraint
 
+### Dashboard Users
+- Login: `dashboard_users` table checked first, then env-based admin fallback
+- DB-created users: `firm_id` must match what user enters on login form (e.g. `jcs_law`)
+- Env admin: `DASHBOARD_ADMIN_USER`/`DASHBOARD_ADMIN_PASSWORD_HASH` in `.env`; if hash not set, defaults to password `admin`
+- Generate password hash: `python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your_password'))"`
+
 ### Key Metrics Displayed
 - **A/R Overview**: Total AR, 60-120 day, 180+ day (uncollectible)
 - **Attorney Productivity**: Active cases, invoice aging by DPD buckets
@@ -440,6 +446,9 @@ Production: https://jcs.lawmetrics.ai
 - **Dashboard buttons replace CLI**: Dunning page has Preview/Send/Export buttons; removed CLI command references from dashboard, promises, trends, and reports templates
 - **Rebranded to LawMetrics**: Removed all ClientShield references; branding is now LawMetrics.ai across all templates and navigation
 - **Production deployment**: `jcs.lawmetrics.ai` on port 3000, service `jcs-dashboard`
+- **FIRM_ID env var**: SyncManager reads `FIRM_ID` env var first (e.g. `jcs_law`), avoiding the MyCase API UUID (`d5AgNpGZZvZ9Lgpce7ri4Q`) as firm_id
+- **Fixed INTERVAL parameterization**: Rolling 6-month attorney queries used `INTERVAL '%s months'` which psycopg2 doesn't substitute inside quotes; changed to `INTERVAL '1 month' * %s`
+- **Fixed dunning due_date casting**: Added `::date` cast in dunning queries to handle timestamp columns; handle both int and timedelta returns from date subtraction
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
@@ -681,9 +690,12 @@ See `docs/API_COST_ANALYSIS.md` for detailed projections.
 
 ```bash
 DATABASE_URL=postgresql://user:pass@host:5432/mycase  # Required - PostgreSQL connection
+FIRM_ID=jcs_law               # Human-friendly firm identifier (used by sync, dashboard)
 ANTHROPIC_API_KEY=sk-ant-...  # Required for AI document generation
 MYCASE_CLIENT_ID=...          # MyCase OAuth
 MYCASE_CLIENT_SECRET=...      # MyCase OAuth
+DASHBOARD_ADMIN_USER=admin    # Dashboard admin username
+DASHBOARD_ADMIN_PASSWORD_HASH=...  # Werkzeug scrypt hash of admin password
 SLACK_WEBHOOK_URL=...         # Slack notifications
 SENDGRID_API_KEY=...          # Email notifications
 TWILIO_ACCOUNT_SID=...        # SMS notifications
