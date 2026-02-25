@@ -26,17 +26,21 @@ class DashboardData:
 
     @staticmethod
     def _detect_firm_id() -> str:
-        """Auto-detect the firm_id from cached data."""
+        """Auto-detect the firm_id from cached data.
+
+        Returns the actual firm_id from the database.
+        There is no 'default' firm — only real firm_ids are valid.
+        """
         try:
             with get_connection() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extensions.cursor)
                 cur.execute("SELECT DISTINCT firm_id FROM cached_cases LIMIT 1")
                 row = cur.fetchone()
-                if row:
+                if row and row[0]:
                     return row[0]
         except Exception:
             pass
-        return 'default'
+        return None
 
     @staticmethod
     def _cursor(conn):

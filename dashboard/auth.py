@@ -30,7 +30,7 @@ def init_users_table():
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS dashboard_users (
                     id SERIAL PRIMARY KEY,
-                    firm_id TEXT NOT NULL DEFAULT 'default',
+                    firm_id TEXT NOT NULL,
                     username TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
                     email TEXT,
@@ -52,7 +52,7 @@ def init_users_table():
         conn.commit()
 
 
-def create_user(username: str, password: str, email: str = None, role: str = "user", firm_id: str = "default") -> bool:
+def create_user(username: str, password: str, email: str = None, role: str = "user", firm_id: str = None) -> bool:
     """
     Create a new user.
 
@@ -87,7 +87,7 @@ def create_user(username: str, password: str, email: str = None, role: str = "us
         return False
 
 
-def get_user(username: str, firm_id: str = "default") -> dict | None:
+def get_user(username: str, firm_id: str = None) -> dict | None:
     """Get user by username and firm_id."""
     init_users_table()
 
@@ -104,7 +104,7 @@ def get_user(username: str, firm_id: str = "default") -> dict | None:
     return _row_to_dict(row, USER_KEYS)
 
 
-def list_users(firm_id: str = "default") -> list:
+def list_users(firm_id: str = None) -> list:
     """List all users for a firm."""
     init_users_table()
 
@@ -122,7 +122,7 @@ def list_users(firm_id: str = "default") -> list:
     return [_row_to_dict(row, USER_LIST_KEYS) for row in rows]
 
 
-def update_user_password(username: str, new_password: str, firm_id: str = "default") -> bool:
+def update_user_password(username: str, new_password: str, firm_id: str = None) -> bool:
     """Update user's password."""
     password_hash = generate_password_hash(new_password)
 
@@ -140,7 +140,7 @@ def update_user_password(username: str, new_password: str, firm_id: str = "defau
     return success
 
 
-def delete_user(username: str, firm_id: str = "default") -> bool:
+def delete_user(username: str, firm_id: str = None) -> bool:
     """Delete a user (soft delete - sets is_active=FALSE)."""
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -156,7 +156,7 @@ def delete_user(username: str, firm_id: str = "default") -> bool:
     return success
 
 
-def update_last_login(username: str, firm_id: str = "default"):
+def update_last_login(username: str, firm_id: str = None):
     """Update user's last login timestamp."""
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -168,23 +168,45 @@ def update_last_login(username: str, firm_id: str = "default"):
         conn.commit()
 
 
-def login_user(request: Request, username: str, password: str, firm_id: str = "default") -> bool:
+def _detect_firm_id() -> str:
+    """Auto-detect the firm_id from cached data in the database."""
+    try:
+        import psycopg2.extensions
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extensions.cursor)
+            cur.execute("SELECT DISTINCT firm_id FROM cached_cases LIMIT 1")
+            row = cur.fetchone()
+            if row and row[0]:
+                return row[0]
+    except Exception:
+        pass
+    return None
+
+
+def login_user(request: Request, username: str, password: str, firm_id: str = None) -> bool:
     """
     Authenticate user credentials.
 
     Checks database users first, then falls back to env-based admin.
+    The firm_id is resolved from the database — there is no 'default' firm.
 
     Returns:
         bool: True if authentication successful, False otherwise
     """
+    # Resolve firm_id: explicit param > env var > auto-detect from DB
+    import os
+    resolved_firm_id = firm_id or os.environ.get('DASHBOARD_FIRM_ID') or _detect_firm_id()
+    if not resolved_firm_id:
+        return False  # Cannot determine firm — no data in DB
+
     # Check database users first
-    user = get_user(username, firm_id)
+    user = get_user(username, resolved_firm_id)
     if user and check_password_hash(user["password_hash"], password):
         request.session["logged_in"] = True
         request.session["username"] = username
-        request.session["firm_id"] = firm_id
+        request.session["firm_id"] = resolved_firm_id
         request.session["role"] = user["role"]
-        update_last_login(username, firm_id)
+        update_last_login(username, resolved_firm_id)
         return True
 
     # Fallback to env-based admin (for backwards compatibility)
@@ -192,7 +214,7 @@ def login_user(request: Request, username: str, password: str, firm_id: str = "d
         if check_password_hash(config.ADMIN_PASSWORD_HASH, password):
             request.session["logged_in"] = True
             request.session["username"] = username
-            request.session["firm_id"] = firm_id
+            request.session["firm_id"] = resolved_firm_id
             request.session["role"] = "admin"
             return True
 
@@ -217,10 +239,14 @@ def get_current_user(request: Request) -> str | None:
 
 
 def get_current_firm_id(request: Request) -> str:
-    """Get the current user's firm_id."""
+    """Get the current user's firm_id from session.
+
+    The firm_id is resolved at login from the database.
+    Returns None if not authenticated (callers should handle this).
+    """
     if is_authenticated(request):
-        return request.session.get("firm_id", "default")
-    return "default"
+        return request.session.get("firm_id")
+    return None
 
 
 def get_data(request: Request):
@@ -228,14 +254,10 @@ def get_data(request: Request):
 
     CRITICAL for multi-tenant isolation: never use a module-level DashboardData().
     Each request must get its own instance with the correct firm_id from session.
-
-    If the session firm_id is 'default' (legacy login), we pass None so
-    DashboardData auto-detects the actual firm_id from the database.
+    The session firm_id is set at login from the actual database — never 'default'.
     """
     from dashboard.models import DashboardData
     firm_id = get_current_firm_id(request)
-    if firm_id == "default":
-        firm_id = None  # Let DashboardData auto-detect from cached data
     return DashboardData(firm_id=firm_id)
 
 
