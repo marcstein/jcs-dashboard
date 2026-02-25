@@ -16,19 +16,45 @@ data = DashboardData()
 
 
 @router.get("/ar", response_class=HTMLResponse)
-async def ar_dashboard(request: Request, year: int = None):
+async def ar_dashboard(request: Request, year: int = None, view: str = None):
     """AR/Collections dashboard."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
-    # Default to current year if not specified
     current_year = datetime.now().year
-    if year is None:
-        year = current_year
     available_years = [2025, 2026]
 
-    summary = data.get_daily_collections_summary(year=year)
-    ar_aging = data.get_ar_aging_breakdown(year=year)
+    # View modes: None/year-based, "combined", "rolling6"
+    if view == "combined":
+        summary = data.get_combined_years_summary([2025, 2026])
+        year = None  # signal combined mode
+        ar_aging = {
+            'Collected': summary.get('total_collected', 0),
+            'Current': summary.get('ar_current', 0),
+            '0-30 days': summary.get('ar_0_30', 0),
+            '31-60 days': summary.get('ar_31_60', 0),
+            '61-90 days': summary.get('ar_61_90', 0),
+            '90+ days': summary.get('ar_90_plus', 0),
+        }
+        rolling = None
+    elif view == "rolling6":
+        rolling = data.get_rolling_6month_summary()
+        summary = rolling  # rolling has all the summary fields
+        ar_aging = {
+            'Current Outstanding': rolling.get('total_outstanding', 0),
+            '0-30 days': rolling.get('ar_0_30', 0),
+            '31-60 days': rolling.get('ar_31_60', 0),
+            '61-90 days': rolling.get('ar_61_90', 0),
+            '90+ days': rolling.get('ar_90_plus', 0),
+        }
+        year = None
+    else:
+        if year is None:
+            year = current_year
+        summary = data.get_daily_collections_summary(year=year)
+        ar_aging = data.get_ar_aging_breakdown(year=year)
+        rolling = None
+
     trend = data.get_collections_trend(days_back=30)
     plans = data.get_payment_plans_summary()
 
@@ -40,12 +66,14 @@ async def ar_dashboard(request: Request, year: int = None):
     return templates.TemplateResponse("ar.html", {
         "request": request,
         "year": year,
+        "view": view,
         "current_year": current_year,
         "available_years": available_years,
         "summary": summary,
         "ar_aging": ar_aging,
         "trend": trend,
         "plans": plans,
+        "rolling": rolling,
         "open_invoices": open_invoices,
         "past_due_invoices": past_due_invoices,
         "total_open_balance": total_open_balance,

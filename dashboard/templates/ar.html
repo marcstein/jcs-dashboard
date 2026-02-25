@@ -3,16 +3,32 @@
 {% block title %}A/R Dashboard - ClientShield{% endblock %}
 
 {% block content %}
-<h1>{{ year }} Accounts Receivable{% if year < current_year %} (Closed){% endif %}</h1>
+<h1>
+    {% if view == 'combined' %}
+        2025-2026 Combined Accounts Receivable
+    {% elif view == 'rolling6' %}
+        Rolling 6-Month Accounts Receivable
+    {% else %}
+        {{ year }} Accounts Receivable{% if year and year < current_year %} (Closed){% endif %}
+    {% endif %}
+</h1>
 
-<!-- Year Tabs -->
+<!-- View Tabs -->
 <div class="year-tabs">
     {% for y in available_years %}
-    <a href="?year={{ y }}" class="year-tab {% if y == year %}active{% endif %}">
+    <a href="?year={{ y }}" class="year-tab {% if year is not none and year == y and not view %}active{% endif %}">
         <span class="year-label">{{ y }}</span>
-        <span class="year-status">{% if y < current_year %}(Closed){% else %}YTD{% endif %}</span>
+        <span class="year-status">{% if y|int < current_year %}(Closed){% else %}YTD{% endif %}</span>
     </a>
     {% endfor %}
+    <a href="?view=combined" class="year-tab {% if view == 'combined' %}active{% endif %}">
+        <span class="year-label">2025-2026</span>
+        <span class="year-status">Combined</span>
+    </a>
+    <a href="?view=rolling6" class="year-tab {% if view == 'rolling6' %}active{% endif %}">
+        <span class="year-label">6-Month</span>
+        <span class="year-status">Rolling Avg</span>
+    </a>
 </div>
 
 <div class="stats-grid">
@@ -29,6 +45,20 @@
         <div class="stat-value">{{ summary.delinquent_accounts or 0 }}</div>
         <div class="stat-label">Delinquent Accounts</div>
     </div>
+    {% if view == 'combined' or view == 'rolling6' %}
+    <div class="stat-card {% if (summary.collection_rate or summary.overall_collection_rate or 0) >= 85 %}stat-success{% elif (summary.collection_rate or summary.overall_collection_rate or 0) >= 70 %}stat-warning{% else %}stat-danger{% endif %}">
+        <div class="stat-value">{{ "{:.1f}".format(summary.collection_rate or summary.overall_collection_rate or 0) }}%</div>
+        <div class="stat-label">Collection Rate</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_collected or 0) }}</div>
+        <div class="stat-label">Total Collected</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_billed or 0) }}</div>
+        <div class="stat-label">Total Billed</div>
+    </div>
+    {% endif %}
 </div>
 
 <section class="section">
@@ -89,6 +119,67 @@
     </div>
 </section>
 
+{% if view == 'rolling6' and rolling %}
+<section class="section">
+    <h2>Monthly Breakdown (Last {{ rolling.num_months }} Months)</h2>
+    <div class="stats-grid stats-small" style="margin-bottom: 1rem;">
+        <div class="stat-card">
+            <div class="stat-value">${{ "{:,.0f}".format(rolling.avg_monthly_billed) }}</div>
+            <div class="stat-label">Avg Monthly Billed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${{ "{:,.0f}".format(rolling.avg_monthly_collected) }}</div>
+            <div class="stat-label">Avg Monthly Collected</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ rolling.avg_monthly_invoices }}</div>
+            <div class="stat-label">Avg Invoices/Month</div>
+        </div>
+        <div class="stat-card {% if rolling.overall_collection_rate >= 85 %}stat-success{% elif rolling.overall_collection_rate >= 70 %}stat-warning{% else %}stat-danger{% endif %}">
+            <div class="stat-value">{{ "{:.1f}".format(rolling.overall_collection_rate) }}%</div>
+            <div class="stat-label">Overall Collection Rate</div>
+        </div>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th>Invoices</th>
+                <th>Billed</th>
+                <th>Collected</th>
+                <th>Outstanding</th>
+                <th>Collection Rate</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in rolling.months %}
+            <tr>
+                <td>{{ m.month }}</td>
+                <td class="text-center">{{ m.invoice_count }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(m.billed) }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(m.collected) }}</td>
+                <td class="text-right {% if m.outstanding > 0 %}text-warning{% endif %}">${{ "{:,.0f}".format(m.outstanding) }}</td>
+                <td class="text-center {% if m.collection_rate >= 85 %}text-success{% elif m.collection_rate >= 70 %}text-warning{% else %}text-danger{% endif %}">
+                    {{ "{:.1f}".format(m.collection_rate) }}%
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="font-weight: 700; border-top: 2px solid #333;">
+                <td>Total</td>
+                <td class="text-center">{{ rolling.total_invoices }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(rolling.total_billed) }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(rolling.total_collected) }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(rolling.total_outstanding) }}</td>
+                <td class="text-center">{{ "{:.1f}".format(rolling.overall_collection_rate) }}%</td>
+            </tr>
+        </tfoot>
+    </table>
+</section>
+{% endif %}
+
+{% if view != 'rolling6' %}
 <section class="section">
     <h2>Today's Collections</h2>
     <div class="collection-summary">
@@ -102,6 +193,7 @@
         </div>
     </div>
 </section>
+{% endif %}
 
 <!-- Open Invoices - ALL years -->
 <section class="section">
@@ -186,6 +278,9 @@
 .row-warning { background-color: #fff8e1; }
 .row-danger { background-color: #fff3e0; }
 .row-critical { background-color: #ffebee; }
+.stat-success { border-left: 4px solid #22863a; }
+.stat-warning { border-left: 4px solid #b08800; }
+.stat-danger { border-left: 4px solid #cb2431; }
 .case-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .table-footer { margin-top: 0.5rem; font-size: 0.85rem; color: #586069; }
 .empty-state { padding: 2rem; text-align: center; color: #586069; }

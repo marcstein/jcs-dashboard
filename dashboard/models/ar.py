@@ -576,6 +576,161 @@ class ARDataMixin:
         except Exception:
             return []
 
+    def get_combined_years_summary(self, years: List[int] = None) -> Dict:
+        """Get AR summary combining multiple years (e.g., 2025+2026)."""
+        if years is None:
+            years = [2025, 2026]
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                year_placeholders = ','.join(['%s'] * len(years))
+                cursor.execute(f"""
+                    SELECT
+                        SUM(balance_due) as total_ar,
+                        SUM(CASE WHEN CURRENT_DATE - due_date < 0 THEN balance_due ELSE 0 END) as ar_current,
+                        SUM(CASE WHEN CURRENT_DATE - due_date BETWEEN 0 AND 30 THEN balance_due ELSE 0 END) as ar_0_30,
+                        SUM(CASE WHEN CURRENT_DATE - due_date BETWEEN 31 AND 60 THEN balance_due ELSE 0 END) as ar_31_60,
+                        SUM(CASE WHEN CURRENT_DATE - due_date BETWEEN 61 AND 90 THEN balance_due ELSE 0 END) as ar_61_90,
+                        SUM(CASE WHEN CURRENT_DATE - due_date BETWEEN 91 AND 120 THEN balance_due ELSE 0 END) as ar_91_120,
+                        SUM(CASE WHEN CURRENT_DATE - due_date > 120 THEN balance_due ELSE 0 END) as ar_120_plus,
+                        SUM(CASE WHEN CURRENT_DATE - due_date > 90 THEN balance_due ELSE 0 END) as ar_90_plus,
+                        COUNT(CASE WHEN balance_due > 0 AND CURRENT_DATE - due_date > 30 THEN 1 END) as delinquent
+                    FROM cached_invoices
+                    WHERE firm_id = %s
+                      AND balance_due > 0
+                      AND EXTRACT(YEAR FROM invoice_date) IN ({year_placeholders})
+                """, (self.firm_id, *years))
+                row = cursor.fetchone()
+
+                cursor.execute(f"""
+                    SELECT SUM(total_amount) as total_billed, SUM(paid_amount) as total_collected
+                    FROM cached_invoices
+                    WHERE firm_id = %s
+                      AND EXTRACT(YEAR FROM invoice_date) IN ({year_placeholders})
+                """, (self.firm_id, *years))
+                billing_row = cursor.fetchone()
+                total_billed = (billing_row[0] or 0) if billing_row else 0
+                total_collected = (billing_row[1] or 0) if billing_row else 0
+
+                if row and row[0]:
+                    total_ar = row[0] or 0
+                    ar_61_90 = row[4] or 0
+                    ar_90_plus = row[7] or 0
+                    over_60 = ar_61_90 + ar_90_plus
+                    over_60_pct = (over_60 / total_billed * 100) if total_billed > 0 else 0
+                    collection_rate = (total_collected / total_billed * 100) if total_billed > 0 else 0
+
+                    return {
+                        'total_ar': total_ar,
+                        'total_billed': total_billed,
+                        'total_collected': total_collected,
+                        'collection_rate': collection_rate,
+                        'ar_current': row[1] or 0,
+                        'ar_0_30': row[2] or 0,
+                        'ar_31_60': row[3] or 0,
+                        'ar_61_90': ar_61_90,
+                        'ar_91_120': row[5] or 0,
+                        'ar_120_plus': row[6] or 0,
+                        'ar_90_plus': ar_90_plus,
+                        'aging_over_60_pct': over_60_pct,
+                        'delinquent_accounts': row[8] or 0,
+                    }
+        except Exception:
+            pass
+        return {'total_ar': 0, 'total_billed': 0, 'total_collected': 0, 'collection_rate': 0,
+                'ar_current': 0, 'ar_0_30': 0, 'ar_31_60': 0, 'ar_61_90': 0,
+                'ar_91_120': 0, 'ar_120_plus': 0, 'ar_90_plus': 0,
+                'aging_over_60_pct': 0, 'delinquent_accounts': 0}
+
+    def get_rolling_6month_summary(self) -> Dict:
+        """Get rolling 6-month AR summary with monthly averages."""
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                # Monthly breakdown for last 6 months
+                cursor.execute("""
+                    SELECT
+                        TO_CHAR(DATE_TRUNC('month', invoice_date), 'YYYY-MM') as month,
+                        COUNT(*) as invoice_count,
+                        COALESCE(SUM(total_amount), 0) as billed,
+                        COALESCE(SUM(paid_amount), 0) as collected,
+                        COALESCE(SUM(balance_due), 0) as outstanding
+                    FROM cached_invoices
+                    WHERE firm_id = %s
+                      AND invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'
+                    GROUP BY DATE_TRUNC('month', invoice_date)
+                    ORDER BY month
+                """, (self.firm_id,))
+                months = []
+                total_billed = 0
+                total_collected = 0
+                total_outstanding = 0
+                total_invoices = 0
+                for r in cursor.fetchall():
+                    months.append({
+                        'month': r[0],
+                        'invoice_count': r[1],
+                        'billed': r[2],
+                        'collected': r[3],
+                        'outstanding': r[4],
+                        'collection_rate': (r[3] / r[2] * 100) if r[2] > 0 else 0,
+                    })
+                    total_billed += r[2]
+                    total_collected += r[3]
+                    total_outstanding += r[4]
+                    total_invoices += r[1]
+
+                num_months = len(months) or 1
+                avg_billed = total_billed / num_months
+                avg_collected = total_collected / num_months
+                avg_invoices = total_invoices / num_months
+                overall_rate = (total_collected / total_billed * 100) if total_billed > 0 else 0
+
+                # Current aging snapshot for invoices in the 6-month window
+                cursor.execute("""
+                    SELECT
+                        SUM(balance_due) as total_ar,
+                        SUM(CASE WHEN CURRENT_DATE - due_date BETWEEN 0 AND 30 THEN balance_due ELSE 0 END) as ar_0_30,
+                        SUM(CASE WHEN CURRENT_DATE - due_date BETWEEN 31 AND 60 THEN balance_due ELSE 0 END) as ar_31_60,
+                        SUM(CASE WHEN CURRENT_DATE - due_date BETWEEN 61 AND 90 THEN balance_due ELSE 0 END) as ar_61_90,
+                        SUM(CASE WHEN CURRENT_DATE - due_date > 90 THEN balance_due ELSE 0 END) as ar_90_plus,
+                        COUNT(CASE WHEN balance_due > 0 AND CURRENT_DATE - due_date > 30 THEN 1 END) as delinquent
+                    FROM cached_invoices
+                    WHERE firm_id = %s
+                      AND balance_due > 0
+                      AND invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'
+                """, (self.firm_id,))
+                aging = cursor.fetchone()
+
+                return {
+                    'months': months,
+                    'num_months': num_months,
+                    'total_billed': total_billed,
+                    'total_collected': total_collected,
+                    'total_outstanding': total_outstanding,
+                    'total_invoices': total_invoices,
+                    'avg_monthly_billed': avg_billed,
+                    'avg_monthly_collected': avg_collected,
+                    'avg_monthly_invoices': round(avg_invoices),
+                    'overall_collection_rate': overall_rate,
+                    'total_ar': (aging[0] or 0) if aging else 0,
+                    'ar_0_30': (aging[1] or 0) if aging else 0,
+                    'ar_31_60': (aging[2] or 0) if aging else 0,
+                    'ar_61_90': (aging[3] or 0) if aging else 0,
+                    'ar_90_plus': (aging[4] or 0) if aging else 0,
+                    'aging_over_60_pct': (((aging[3] or 0) + (aging[4] or 0)) / total_billed * 100) if total_billed > 0 else 0,
+                    'delinquent_accounts': (aging[5] or 0) if aging else 0,
+                }
+        except Exception:
+            return {
+                'months': [], 'num_months': 0, 'total_billed': 0, 'total_collected': 0,
+                'total_outstanding': 0, 'total_invoices': 0, 'avg_monthly_billed': 0,
+                'avg_monthly_collected': 0, 'avg_monthly_invoices': 0,
+                'overall_collection_rate': 0, 'total_ar': 0, 'ar_0_30': 0,
+                'ar_31_60': 0, 'ar_61_90': 0, 'ar_90_plus': 0,
+                'aging_over_60_pct': 0, 'delinquent_accounts': 0,
+            }
+
     def get_open_invoices_list(self, min_days_overdue: int = 0) -> List[Dict]:
         """Get all open invoices with balance due across ALL years.
 
