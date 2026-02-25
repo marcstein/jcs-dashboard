@@ -109,19 +109,6 @@
         </table>
     </div>
 
-    <!-- Inactive Attorneys Section -->
-    {% set inactive_attorneys = attorneys|selectattr('active_cases', 'eq', 0)|list %}
-    {% if inactive_attorneys %}
-    <div class="inactive-section">
-        <h3>Attorneys with No Active Cases</h3>
-        <div class="inactive-list">
-            {% for atty in inactive_attorneys %}
-            <span class="inactive-tag">{{ atty.attorney_name }}</span>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
     <div class="legend-section">
         <h4>Legend</h4>
         <div class="legend-items">
