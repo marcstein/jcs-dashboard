@@ -190,27 +190,26 @@ def login_user(request: Request, username: str, password: str, firm_id: str = No
     Authenticate user credentials.
 
     Checks database users first, then falls back to env-based admin.
-    The firm_id is resolved from the database — there is no 'default' firm.
+    The firm_id must be provided explicitly (from the login form).
 
     Returns:
         bool: True if authentication successful, False otherwise
     """
-    # Resolve firm_id: explicit param > env var > auto-detect from DB
-    import os
-    resolved_firm_id = firm_id or os.environ.get('DASHBOARD_FIRM_ID') or _detect_firm_id()
-    print(f"[auth] login_user: username={username}, resolved_firm_id={resolved_firm_id}")
-    if not resolved_firm_id:
-        print("[auth] login_user: FAILED — could not resolve firm_id")
-        return False  # Cannot determine firm — no data in DB
+    # firm_id is required — provided from login form
+    if not firm_id:
+        print("[auth] login_user: FAILED — no firm_id provided")
+        return False
+
+    print(f"[auth] login_user: username={username}, firm_id={firm_id}")
 
     # Check database users first
-    user = get_user(username, resolved_firm_id)
+    user = get_user(username, firm_id)
     if user and check_password_hash(user["password_hash"], password):
         request.session["logged_in"] = True
         request.session["username"] = username
-        request.session["firm_id"] = resolved_firm_id
+        request.session["firm_id"] = firm_id
         request.session["role"] = user["role"]
-        update_last_login(username, resolved_firm_id)
+        update_last_login(username, firm_id)
         return True
 
     # Fallback to env-based admin (for backwards compatibility)
@@ -218,7 +217,7 @@ def login_user(request: Request, username: str, password: str, firm_id: str = No
         if check_password_hash(config.ADMIN_PASSWORD_HASH, password):
             request.session["logged_in"] = True
             request.session["username"] = username
-            request.session["firm_id"] = resolved_firm_id
+            request.session["firm_id"] = firm_id
             request.session["role"] = "admin"
             return True
 

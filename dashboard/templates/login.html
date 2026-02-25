@@ -14,8 +14,15 @@
 
         <form method="POST" action="/login" class="login-form">
             <div class="form-group">
+                <label for="firm_id">Firm ID</label>
+                <input type="text" id="firm_id" name="firm_id" required autofocus
+                       placeholder="e.g. jcs_law"
+                       value="{{ firm_id or '' }}">
+            </div>
+            <div class="form-group">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autofocus>
+                <input type="text" id="username" name="username" required
+                       value="{{ username or '' }}">
             </div>
             <div class="form-group">
                 <label for="password">Password</label>

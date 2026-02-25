@@ -106,26 +106,33 @@ async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {
         "request": request,
         "error": None,
+        "firm_id": None,
+        "username": None,
     })
 
 
 @router.post("/login")
 async def login_submit(
     request: Request,
+    firm_id: str = Form(...),
     username: str = Form(...),
     password: str = Form(...),
 ):
     """Handle login form submission."""
-    print(f"Login attempt: {username}")
-    if login_user(request, username, password):
+    firm_id = firm_id.strip()
+    username = username.strip()
+    print(f"Login attempt: {username} @ firm_id={firm_id}")
+    if login_user(request, username, password, firm_id=firm_id):
         print(f"Login SUCCESS - session: {dict(request.session)}")
         # 303 See Other - forces GET on redirect (proper POST-Redirect-GET pattern)
         return RedirectResponse(url="/", status_code=303)
 
-    print(f"Login FAILED for {username}")
+    print(f"Login FAILED for {username} @ firm_id={firm_id}")
     return templates.TemplateResponse("login.html", {
         "request": request,
-        "error": "Invalid username or password.",
+        "error": "Invalid credentials. Check firm ID, username, and password.",
+        "firm_id": firm_id,
+        "username": username,
     })
 
 
