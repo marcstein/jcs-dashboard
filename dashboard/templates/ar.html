@@ -204,7 +204,51 @@
         &bull; Total: ${{ "{:,.0f}".format(total_open_balance|default(0)) }}
     </p>
 
+    {% if attorney_summary %}
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.75rem;">By Attorney</h3>
+    <table class="data-table" style="margin-bottom: 2rem;">
+        <thead>
+            <tr>
+                <th>Attorney</th>
+                <th>Invoices</th>
+                <th>Billed</th>
+                <th>Paid</th>
+                <th>Balance</th>
+                <th>Avg Days Overdue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set ns = namespace(tot_billed=0, tot_paid=0, tot_balance=0, tot_invoices=0) %}
+            {% for atty in attorney_summary %}
+            <tr>
+                <td>{{ atty.attorney }}</td>
+                <td class="text-center">{{ atty.invoice_count }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(atty.total_billed) }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(atty.total_paid) }}</td>
+                <td class="text-right font-bold">${{ "{:,.0f}".format(atty.total_balance) }}</td>
+                <td class="text-center {% if atty.avg_days_overdue >= 180 %}text-critical{% elif atty.avg_days_overdue >= 90 %}text-danger{% elif atty.avg_days_overdue >= 60 %}text-warning{% endif %}">{{ atty.avg_days_overdue }}</td>
+            </tr>
+            {% set ns.tot_billed = ns.tot_billed + atty.total_billed %}
+            {% set ns.tot_paid = ns.tot_paid + atty.total_paid %}
+            {% set ns.tot_balance = ns.tot_balance + atty.total_balance %}
+            {% set ns.tot_invoices = ns.tot_invoices + atty.invoice_count %}
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="font-weight: 700; border-top: 2px solid #333;">
+                <td>Total</td>
+                <td class="text-center">{{ ns.tot_invoices }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(ns.tot_billed) }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(ns.tot_paid) }}</td>
+                <td class="text-right">${{ "{:,.0f}".format(ns.tot_balance) }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+    {% endif %}
+
     {% if open_invoices %}
+    <h3 style="margin-bottom: 0.75rem;">All Invoices</h3>
     <div class="table-controls">
         <input type="text" id="invoiceSearch" placeholder="Search by client, case, or attorney..." class="search-input" onkeyup="filterInvoices()">
         <select id="agingFilter" onchange="filterInvoices()" class="filter-select">

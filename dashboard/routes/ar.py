@@ -62,6 +62,7 @@ async def ar_dashboard(request: Request, year: int = None, view: str = None):
     open_invoices = data.get_open_invoices_list(min_days_overdue=0)
     total_open_balance = sum(inv['balance_due'] for inv in open_invoices)
     past_due_invoices = [inv for inv in open_invoices if inv['days_overdue'] > 0]
+    attorney_summary = data.get_open_invoices_by_attorney()
 
     return templates.TemplateResponse("ar.html", {
         "request": request,
@@ -77,6 +78,7 @@ async def ar_dashboard(request: Request, year: int = None, view: str = None):
         "open_invoices": open_invoices,
         "past_due_invoices": past_due_invoices,
         "total_open_balance": total_open_balance,
+        "attorney_summary": attorney_summary,
         "username": request.session.get("username"),
     })
 

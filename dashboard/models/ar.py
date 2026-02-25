@@ -783,3 +783,39 @@ class ARDataMixin:
                 } for r in rows]
         except Exception:
             return []
+
+    def get_open_invoices_by_attorney(self) -> List[Dict]:
+        """Get open invoice summary grouped by attorney.
+
+        Returns one row per attorney with totals for billed, paid, balance,
+        invoice count, and average days overdue.
+        """
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                cursor.execute("""
+                    SELECT
+                        COALESCE(c.lead_attorney_name, 'Unassigned') as attorney,
+                        COUNT(*) as invoice_count,
+                        SUM(i.total_amount) as total_billed,
+                        SUM(i.paid_amount) as total_paid,
+                        SUM(i.balance_due) as total_balance,
+                        AVG(CURRENT_DATE - i.due_date) as avg_days_overdue
+                    FROM cached_invoices i
+                    LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s
+                      AND i.balance_due > 0
+                    GROUP BY COALESCE(c.lead_attorney_name, 'Unassigned')
+                    ORDER BY SUM(i.balance_due) DESC
+                """, (self.firm_id,))
+                rows = cursor.fetchall()
+                return [{
+                    'attorney': r[0],
+                    'invoice_count': r[1],
+                    'total_billed': r[2] or 0,
+                    'total_paid': r[3] or 0,
+                    'total_balance': r[4] or 0,
+                    'avg_days_overdue': round(r[5] or 0),
+                } for r in rows]
+        except Exception:
+            return []
