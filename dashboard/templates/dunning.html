@@ -103,7 +103,17 @@
             <td>{{ inv.due_date }}</td>
             <td class="text-center">
                 {% if inv.contact_email %}
-                <button class="btn-draft-email" onclick='draftDunningEmail({{ inv | tojson }})' title="Create Gmail draft for {{ inv.contact_name }}">
+                <button class="btn-draft-email"
+                    data-contact-name="{{ inv.contact_name | e }}"
+                    data-contact-email="{{ inv.contact_email | e }}"
+                    data-invoice-number="{{ inv.invoice_number | e }}"
+                    data-case-name="{{ inv.case_name | e }}"
+                    data-balance-due="{{ inv.balance_due }}"
+                    data-days-overdue="{{ inv.days_overdue }}"
+                    data-stage="{{ inv.dunning_stage }}"
+                    data-due-date="{{ inv.due_date | e }}"
+                    onclick="draftDunningEmail(this)"
+                    title="Create Gmail draft for {{ inv.contact_name | e }}">
                     &#9993; Draft
                 </button>
                 {% else %}
@@ -716,7 +726,18 @@ function exportDunningQueue() {
     }, 1500);
 }
 
-function draftDunningEmail(inv) {
+function draftDunningEmail(btn) {
+    // Read invoice data from button's data attributes
+    var inv = {
+        contact_name: btn.getAttribute('data-contact-name') || 'Client',
+        contact_email: btn.getAttribute('data-contact-email') || '',
+        invoice_number: btn.getAttribute('data-invoice-number') || '',
+        case_name: btn.getAttribute('data-case-name') || '',
+        balance_due: parseFloat(btn.getAttribute('data-balance-due')) || 0,
+        days_overdue: parseInt(btn.getAttribute('data-days-overdue')) || 0,
+        dunning_stage: parseInt(btn.getAttribute('data-stage')) || 1,
+        due_date: btn.getAttribute('data-due-date') || ''
+    };
     _currentDraftInv = inv;
 
     // Call API to generate email content based on stage
@@ -724,14 +745,14 @@ function draftDunningEmail(inv) {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            contact_name: inv.contact_name || 'Client',
-            contact_email: inv.contact_email || '',
-            invoice_number: inv.invoice_number || '',
-            case_name: inv.case_name || '',
-            balance_due: inv.balance_due || 0,
-            days_overdue: inv.days_overdue || 0,
-            stage: inv.dunning_stage || 1,
-            due_date: inv.due_date || ''
+            contact_name: inv.contact_name,
+            contact_email: inv.contact_email,
+            invoice_number: inv.invoice_number,
+            case_name: inv.case_name,
+            balance_due: inv.balance_due,
+            days_overdue: inv.days_overdue,
+            stage: inv.dunning_stage,
+            due_date: inv.due_date
         })
     })
     .then(function(r) { return r.json(); })
