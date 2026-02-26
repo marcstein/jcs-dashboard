@@ -143,6 +143,8 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - Historical leads from 2022 - feature not actively used
 - Use case creation dates as proxy for intake metrics
 - **Tasks API only returns tasks for OPEN cases** - closed case tasks are not returned
+- **Invoices have NULL `contact_id`** - the `cached_invoices.contact_id` column is never populated by MyCase API. To find the client for an invoice, join through the case: `cached_invoices.case_id` → `cached_cases.data_json::jsonb -> 'billing_contact' ->> 'id'` → `cached_clients.id`. The case `data_json` also has `clients` and `contacts` arrays (all contain `{id: N}` objects).
+- **`cached_contacts` has no emails** - only `id` and `name` from MyCase API. Client emails are in `cached_clients.email` (2,247 of 2,475 have emails).
 
 ## Cache & Sync Behavior
 
@@ -774,6 +776,8 @@ All env vars stored in `.env` file in the project root.
 26. **Fixed `attorney_names` typo** - Entry_of_Appearance_Muni.docx and Entry_of_Appearance_State.docx both had `{{attorney_names}}` (plural) instead of `{{attorney_name}}`. Fixed in template XML and database.
 27. **Purged 1,307 inactive templates** - Deleted old per-county/per-attorney variants from database (42 MB freed). 400 active templates remain. All 55 test templates pass.
 28. **Multi-state architecture specification** - Created `MULTI_STATE_ARCHITECTURE.md` and `.docx` covering jurisdiction layer, PDF form engine, court registry, attorney profile expansion, and 16-week implementation roadmap for 6 Phase 1 states.
+29. **Added dunning click-to-draft email** - Dunning preview page now has Client column and Action column. Clicking "Draft" opens a modal with stage-appropriate email content (friendly reminder → collections referral), then "Create Gmail Draft" opens Gmail compose with pre-filled To/Subject/Body. API endpoint `POST /api/dunning/draft-email` generates email content per stage.
+30. **Fixed dunning client email lookup** - `cached_invoices.contact_id` is NULL for all records. Client emails (2,247 of 2,475 clients have emails) are in `cached_clients`. The join path goes through case `data_json`: invoice → `cached_cases` (via `case_id`) → `data_json::jsonb -> 'billing_contact' ->> 'id'` → `cached_clients` (email). Both `get_dunning_preview()` and `get_open_invoices_list()` in `dashboard/models/ar.py` use this JSONB extraction join.
 
 ### Template Consolidation
 
