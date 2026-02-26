@@ -151,6 +151,100 @@ async def api_dunning_run(request: Request):
         return JSONResponse({"error": str(e)})
 
 
+@router.post("/api/dunning/draft-email")
+async def api_dunning_draft_email(request: Request):
+    """Generate dunning email content for a specific invoice."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+        contact_name = body.get("contact_name", "Client")
+        contact_email = body.get("contact_email", "")
+        invoice_number = body.get("invoice_number", "")
+        case_name = body.get("case_name", "")
+        balance_due = body.get("balance_due", 0)
+        days_overdue = body.get("days_overdue", 0)
+        stage = body.get("stage", 1)
+        due_date = body.get("due_date", "")
+
+        # Determine subject and body based on dunning stage
+        firm_name = "JCS Law Firm"
+        firm_phone = "(816) 945-4444"
+        firm_email = "info@jcslawkc.com"
+
+        if stage == 1:
+            subject = f"Friendly Reminder - Invoice #{invoice_number} Past Due"
+            email_body = (
+                f"Dear {contact_name},\n\n"
+                f"This is a friendly reminder that Invoice #{invoice_number} "
+                f"for ${balance_due:,.2f} is now {days_overdue} days past due.\n\n"
+                f"Case: {case_name}\n"
+                f"Original Due Date: {due_date}\n"
+                f"Amount Due: ${balance_due:,.2f}\n\n"
+                f"Please remit payment at your earliest convenience. If you have already "
+                f"sent payment, please disregard this notice.\n\n"
+                f"If you have any questions about this invoice, please don't hesitate "
+                f"to contact our office.\n\n"
+                f"Sincerely,\n{firm_name}\n{firm_phone}"
+            )
+        elif stage == 2:
+            subject = f"Past Due Notice - Invoice #{invoice_number}"
+            email_body = (
+                f"Dear {contact_name},\n\n"
+                f"Our records indicate that Invoice #{invoice_number} for ${balance_due:,.2f} "
+                f"is now {days_overdue} days past due.\n\n"
+                f"Case: {case_name}\n"
+                f"Original Due Date: {due_date}\n"
+                f"Current Balance Due: ${balance_due:,.2f}\n\n"
+                f"We kindly request that you submit payment within the next 7 days "
+                f"to avoid any further collection activity.\n\n"
+                f"If you are experiencing financial difficulties, please contact our "
+                f"office to discuss payment arrangements.\n\n"
+                f"Sincerely,\n{firm_name}\n{firm_phone}"
+            )
+        elif stage == 3:
+            subject = f"URGENT: Payment Required - Invoice #{invoice_number}"
+            email_body = (
+                f"URGENT: Payment Required\n\n"
+                f"Dear {contact_name},\n\n"
+                f"This is a formal notice that Invoice #{invoice_number} remains unpaid "
+                f"and is now {days_overdue} days past due.\n\n"
+                f"Case: {case_name}\n"
+                f"Current Balance Due: ${balance_due:,.2f}\n\n"
+                f"Immediate payment is required to avoid further collection action. "
+                f"Please remit payment within 10 days of this notice.\n\n"
+                f"If you wish to discuss payment options, please contact our office "
+                f"immediately.\n\n"
+                f"{firm_name}\n{firm_phone}\n{firm_email}"
+            )
+        else:  # stage 4
+            subject = f"FINAL NOTICE - Invoice #{invoice_number} - Immediate Action Required"
+            email_body = (
+                f"FINAL NOTICE - IMMEDIATE ACTION REQUIRED\n\n"
+                f"Dear {contact_name},\n\n"
+                f"Despite our previous communications, Invoice #{invoice_number} remains "
+                f"unpaid and is now {days_overdue} days past due.\n\n"
+                f"Case: {case_name}\n"
+                f"Total Amount Due: ${balance_due:,.2f}\n\n"
+                f"This is our final notice before we pursue additional collection measures, "
+                f"which may include referral to a collection agency and potential legal action.\n\n"
+                f"To avoid these actions, please submit full payment within 5 business days "
+                f"of this notice, or contact our office immediately to make payment arrangements.\n\n"
+                f"{firm_name}\n{firm_phone}\n{firm_email}"
+            )
+
+        return JSONResponse({
+            "subject": subject,
+            "body": email_body,
+            "to": contact_email,
+            "contact_name": contact_name,
+        })
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+
 @router.get("/api/dunning/export")
 async def api_dunning_export(request: Request, stage: int = None):
     """Export dunning queue to CSV."""
@@ -164,12 +258,14 @@ async def api_dunning_export(request: Request, stage: int = None):
 
     output = io.StringIO()
     writer = csv_mod.writer(output)
-    writer.writerow(['Invoice', 'Case', 'Attorney', 'Balance Due', 'Days Overdue', 'Stage', 'Due Date'])
+    writer.writerow(['Invoice', 'Case', 'Client Name', 'Client Email', 'Attorney', 'Balance Due', 'Days Overdue', 'Stage', 'Due Date'])
 
     for inv in queue:
         writer.writerow([
             inv.get('invoice_id', ''),
             inv.get('case_name', ''),
+            inv.get('contact_name', ''),
+            inv.get('contact_email', ''),
             inv.get('attorney', inv.get('contact_name', '')),
             inv.get('balance_due', 0),
             inv.get('days_delinquent', 0),

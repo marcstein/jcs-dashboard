@@ -68,11 +68,13 @@
         <tr>
             <th>Invoice</th>
             <th>Case</th>
+            <th>Client</th>
             <th>Attorney</th>
             <th class="text-right">Balance</th>
             <th class="text-center">Days Overdue</th>
             <th>Stage</th>
             <th>Due Date</th>
+            <th class="text-center">Action</th>
         </tr>
     </thead>
     <tbody>
@@ -81,6 +83,12 @@
             <td>{{ inv.invoice_number }}</td>
             <td class="case-name" title="{{ inv.case_name or '' }}">
                 {{ (inv.case_name or 'N/A')[:30] }}{% if inv.case_name and inv.case_name|length > 30 %}...{% endif %}
+            </td>
+            <td title="{{ inv.contact_email or 'No email' }}">
+                {{ (inv.contact_name or 'Unknown')[:20] }}{% if inv.contact_name and inv.contact_name|length > 20 %}...{% endif %}
+                {% if inv.contact_email %}
+                <span class="email-indicator" title="{{ inv.contact_email }}">&#9993;</span>
+                {% endif %}
             </td>
             <td>{{ inv.attorney }}</td>
             <td class="text-right">${{ "{:,.2f}".format(inv.balance_due) }}</td>
@@ -93,6 +101,15 @@
                 </span>
             </td>
             <td>{{ inv.due_date }}</td>
+            <td class="text-center">
+                {% if inv.contact_email %}
+                <button class="btn-draft-email" onclick='draftDunningEmail({{ inv | tojson }})' title="Create Gmail draft for {{ inv.contact_name }}">
+                    &#9993; Draft
+                </button>
+                {% else %}
+                <span class="no-email-tag" title="No email on file">No email</span>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
     </tbody>
@@ -447,6 +464,167 @@
     background: var(--hover-bg, #f8f9fa);
 }
 
+/* Draft email button */
+.btn-draft-email {
+    background: #0366d6;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.btn-draft-email:hover {
+    background: #0256b9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(3,102,214,0.3);
+}
+
+.btn-draft-email:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.btn-draft-email.draft-sent {
+    background: #28a745;
+}
+
+.no-email-tag {
+    font-size: 0.75rem;
+    color: #999;
+    font-style: italic;
+}
+
+.email-indicator {
+    font-size: 0.75rem;
+    color: #0366d6;
+    margin-left: 0.25rem;
+}
+
+/* Draft modal */
+.draft-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+
+.draft-modal-overlay.active {
+    display: flex;
+}
+
+.draft-modal {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    width: 600px;
+    max-width: 95vw;
+    max-height: 85vh;
+    overflow: auto;
+}
+
+.draft-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #e1e4e8;
+}
+
+.draft-modal-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.draft-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #586069;
+    padding: 0 0.25rem;
+}
+
+.draft-modal-body {
+    padding: 1.25rem;
+}
+
+.draft-field {
+    margin-bottom: 1rem;
+}
+
+.draft-field label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 0.3rem;
+    color: #24292e;
+}
+
+.draft-field input,
+.draft-field textarea {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.draft-field textarea {
+    min-height: 200px;
+    resize: vertical;
+    font-family: monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.draft-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid #e1e4e8;
+}
+
+.draft-modal-footer .btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-cancel {
+    background: #e1e4e8;
+    color: #24292e;
+}
+
+.btn-create-draft {
+    background: #0366d6;
+    color: #fff;
+}
+
+.btn-create-draft:hover {
+    background: #0256b9;
+}
+
+.btn-create-draft:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 @media (max-width: 900px) {
     .stage-cards {
         grid-template-columns: repeat(2, 1fr);
@@ -460,7 +638,37 @@
 }
 </style>
 
+<!-- Email Draft Modal -->
+<div class="draft-modal-overlay" id="draft-modal-overlay">
+    <div class="draft-modal">
+        <div class="draft-modal-header">
+            <h3>&#9993; Draft Dunning Email</h3>
+            <button class="draft-modal-close" onclick="closeDraftModal()">&times;</button>
+        </div>
+        <div class="draft-modal-body">
+            <div class="draft-field">
+                <label>To:</label>
+                <input type="email" id="draft-to" readonly />
+            </div>
+            <div class="draft-field">
+                <label>Subject:</label>
+                <input type="text" id="draft-subject" />
+            </div>
+            <div class="draft-field">
+                <label>Body:</label>
+                <textarea id="draft-body"></textarea>
+            </div>
+        </div>
+        <div class="draft-modal-footer">
+            <button class="btn btn-cancel" onclick="closeDraftModal()">Cancel</button>
+            <button class="btn btn-create-draft" id="btn-create-draft" onclick="createGmailDraft()">Create Gmail Draft</button>
+        </div>
+    </div>
+</div>
+
 <script>
+var _currentDraftInv = null;
+
 function showStatus(msg, type) {
     var el = document.getElementById('dunning-action-status');
     el.style.display = 'block';
@@ -507,5 +715,81 @@ function exportDunningQueue() {
         showStatus('CSV download started.', 'success');
     }, 1500);
 }
+
+function draftDunningEmail(inv) {
+    _currentDraftInv = inv;
+
+    // Call API to generate email content based on stage
+    fetch('/api/dunning/draft-email', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            contact_name: inv.contact_name || 'Client',
+            contact_email: inv.contact_email || '',
+            invoice_number: inv.invoice_number || '',
+            case_name: inv.case_name || '',
+            balance_due: inv.balance_due || 0,
+            days_overdue: inv.days_overdue || 0,
+            stage: inv.dunning_stage || 1,
+            due_date: inv.due_date || ''
+        })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) {
+            showStatus('Error generating email: ' + data.error, 'error');
+            return;
+        }
+        // Populate modal
+        document.getElementById('draft-to').value = data.to || inv.contact_email || '';
+        document.getElementById('draft-subject').value = data.subject || '';
+        document.getElementById('draft-body').value = data.body || '';
+        document.getElementById('draft-modal-overlay').classList.add('active');
+    })
+    .catch(function(err) {
+        showStatus('Error: ' + err.message, 'error');
+    });
+}
+
+function closeDraftModal() {
+    document.getElementById('draft-modal-overlay').classList.remove('active');
+    _currentDraftInv = null;
+}
+
+function createGmailDraft() {
+    var btn = document.getElementById('btn-create-draft');
+    btn.disabled = true;
+    btn.textContent = 'Creating draft...';
+
+    var to = document.getElementById('draft-to').value;
+    var subject = document.getElementById('draft-subject').value;
+    var body = document.getElementById('draft-body').value;
+
+    // Use Gmail compose URL to open a pre-filled draft in a new tab
+    var gmailUrl = 'https://mail.google.com/mail/?view=cm'
+        + '&to=' + encodeURIComponent(to)
+        + '&su=' + encodeURIComponent(subject)
+        + '&body=' + encodeURIComponent(body);
+
+    window.open(gmailUrl, '_blank');
+
+    // Reset button and close modal
+    setTimeout(function() {
+        btn.disabled = false;
+        btn.textContent = 'Create Gmail Draft';
+        closeDraftModal();
+        showStatus('Gmail compose window opened for ' + (_currentDraftInv ? _currentDraftInv.contact_name : to), 'success');
+    }, 500);
+}
+
+// Close modal on overlay click
+document.getElementById('draft-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeDraftModal();
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeDraftModal();
+});
 </script>
 {% endblock %}

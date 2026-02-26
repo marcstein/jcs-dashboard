@@ -409,7 +409,8 @@ class ARDataMixin:
                         ct.name as contact_name,
                         i.balance_due,
                         (CURRENT_DATE - i.due_date::date) as days_overdue,
-                        i.due_date
+                        i.due_date,
+                        ct.email as contact_email
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     LEFT JOIN cached_contacts ct ON i.contact_id = ct.id AND i.firm_id = ct.firm_id
@@ -437,6 +438,7 @@ class ARDataMixin:
                         'days_delinquent': days,
                         'stage': s,
                         'last_notice_date': str(r[7]) if r[7] else '',
+                        'contact_email': r[8] or '',
                     })
                 return results
         except Exception as e:
@@ -809,7 +811,8 @@ class ARDataMixin:
                         (CURRENT_DATE - i.due_date) as days_overdue,
                         EXTRACT(YEAR FROM i.invoice_date) as invoice_year,
                         c.practice_area,
-                        c.status as case_status
+                        c.status as case_status,
+                        ct.email as contact_email
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     LEFT JOIN cached_contacts ct ON i.contact_id = ct.id AND i.firm_id = ct.firm_id
@@ -834,6 +837,7 @@ class ARDataMixin:
                     'invoice_year': int(r[11]) if r[11] else 0,
                     'practice_area': r[12] or 'Unknown',
                     'case_status': r[13] or 'Unknown',
+                    'contact_email': r[14] or '',
                 } for r in rows]
         except Exception:
             return []

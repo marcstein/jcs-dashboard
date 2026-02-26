@@ -137,6 +137,8 @@ async def dunning_preview(request: Request, stage: int = None):
             'invoice_number': inv.get('invoice_id', ''),
             'case_name': inv.get('case_name', ''),
             'attorney': inv.get('attorney', inv.get('contact_name', '')),
+            'contact_name': inv.get('contact_name', ''),
+            'contact_email': inv.get('contact_email', ''),
             'balance_due': inv.get('balance_due', 0) or 0,
             'days_overdue': inv.get('days_delinquent', 0) or 0,
             'dunning_stage': s,
