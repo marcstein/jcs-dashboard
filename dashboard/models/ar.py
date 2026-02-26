@@ -406,15 +406,17 @@ class ARDataMixin:
                         i.invoice_number,
                         c.name as case_name,
                         c.lead_attorney_name,
-                        COALESCE(ct.name, cl.first_name || ' ' || cl.last_name) as contact_name,
+                        COALESCE(cl.first_name || ' ' || cl.last_name, ct.name) as contact_name,
                         i.balance_due,
                         (CURRENT_DATE - i.due_date::date) as days_overdue,
                         i.due_date,
-                        COALESCE(ct.email, cl.email) as contact_email
+                        COALESCE(cl.email, ct.email) as contact_email
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    LEFT JOIN cached_clients cl
+                        ON cl.id = (c.data_json::jsonb -> 'billing_contact' ->> 'id')::integer
+                        AND cl.firm_id = i.firm_id
                     LEFT JOIN cached_contacts ct ON i.contact_id = ct.id AND i.firm_id = ct.firm_id
-                    LEFT JOIN cached_clients cl ON i.contact_id = cl.id AND i.firm_id = cl.firm_id
                     WHERE i.firm_id = %s
                       AND i.balance_due > 0
                       AND (CURRENT_DATE - i.due_date::date) >= 5
@@ -803,7 +805,7 @@ class ARDataMixin:
                         i.invoice_number,
                         c.name as case_name,
                         c.lead_attorney_name,
-                        COALESCE(ct.name, cl.first_name || ' ' || cl.last_name) as contact_name,
+                        COALESCE(cl.first_name || ' ' || cl.last_name, ct.name) as contact_name,
                         i.total_amount,
                         i.paid_amount,
                         i.balance_due,
@@ -813,11 +815,13 @@ class ARDataMixin:
                         EXTRACT(YEAR FROM i.invoice_date) as invoice_year,
                         c.practice_area,
                         c.status as case_status,
-                        COALESCE(ct.email, cl.email) as contact_email
+                        COALESCE(cl.email, ct.email) as contact_email
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    LEFT JOIN cached_clients cl
+                        ON cl.id = (c.data_json::jsonb -> 'billing_contact' ->> 'id')::integer
+                        AND cl.firm_id = i.firm_id
                     LEFT JOIN cached_contacts ct ON i.contact_id = ct.id AND i.firm_id = ct.firm_id
-                    LEFT JOIN cached_clients cl ON i.contact_id = cl.id AND i.firm_id = cl.firm_id
                     WHERE i.firm_id = %s
                       AND i.balance_due > 0
                       AND (CURRENT_DATE - i.due_date) >= %s
