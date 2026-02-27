@@ -45,7 +45,6 @@
         <div class="stat-value">{{ summary.delinquent_accounts or 0 }}</div>
         <div class="stat-label">Delinquent Accounts</div>
     </div>
-    {% if view == 'combined' or view == 'rolling6' %}
     <div class="stat-card {% if (summary.collection_rate or summary.overall_collection_rate or 0) >= 85 %}stat-success{% elif (summary.collection_rate or summary.overall_collection_rate or 0) >= 70 %}stat-warning{% else %}stat-danger{% endif %}">
         <div class="stat-value">{{ "{:.1f}".format(summary.collection_rate or summary.overall_collection_rate or 0) }}%</div>
         <div class="stat-label">Collection Rate</div>
@@ -58,7 +57,6 @@
         <div class="stat-value">${{ "{:,.0f}".format(summary.total_billed or 0) }}</div>
         <div class="stat-label">Total Billed</div>
     </div>
-    {% endif %}
 </div>
 
 <section class="section">
