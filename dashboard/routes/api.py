@@ -171,7 +171,7 @@ async def api_dunning_draft_email(request: Request):
         # Determine subject and body based on dunning stage
         firm_name = "JCS Law Firm"
         firm_phone = "(816) 945-4444"
-        firm_email = "info@jcslawkc.com"
+        firm_email = "info@jcslaw.com"
 
         if stage == 1:
             subject = f"Friendly Reminder - Invoice #{invoice_number} Past Due"
