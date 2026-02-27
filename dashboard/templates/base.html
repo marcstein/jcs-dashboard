@@ -345,10 +345,17 @@
 
                     if (inTable) {
                         tableHtml += '</table>';
-                        // Remove table lines from html and add table
-                        html = lines.filter(l => !l.includes('|') || !l.includes('---')).join('<br>');
-                        html = html.replace(/<br>(<br>)+/g, '<br>'); // Clean up extra breaks
-                        html += tableHtml;
+                        // Remove ALL table lines (lines starting with |) from raw text - only show HTML table
+                        html = lines.filter(l => !l.trim().startsWith('|')).join('<br>');
+                        // Remove "Results limited" note from raw text - put it after table
+                        let footnote = '';
+                        const footnoteMatch = html.match(/\*Results limited to \d+ rows\*/);
+                        if (footnoteMatch) {
+                            footnote = '<div class="chat-table-footnote">' + footnoteMatch[0].replace(/\*/g, '') + '</div>';
+                            html = html.replace(footnoteMatch[0], '');
+                        }
+                        html = html.replace(/<br>(<br>)+/g, '<br>').replace(/^(<br>)+|(<br>)+$/g, ''); // Clean up extra breaks
+                        html += tableHtml + footnote;
                     }
                 }
 

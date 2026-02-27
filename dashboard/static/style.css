@@ -1021,6 +1021,13 @@ h2 {
     font-size: 0.8rem;
 }
 
+.chat-table-footnote {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    font-style: italic;
+    margin-top: 0.5rem;
+}
+
 /* Chat Input */
 .chat-input-container {
     padding: 1.25rem 1.5rem;
