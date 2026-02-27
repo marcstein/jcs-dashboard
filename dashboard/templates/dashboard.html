@@ -11,11 +11,19 @@
 <!-- Year Tabs -->
 <div class="year-tabs">
     {% for y in available_years %}
-    <a href="?year={{ y }}" class="year-tab {% if y == year %}active{% endif %}">
+    <a href="?year={{ y }}" class="year-tab {% if year is not none and year == y and not view %}active{% endif %}">
         <span class="year-label">{{ y }}</span>
-        <span class="year-status">{% if y < current_year %}(Closed){% else %}YTD{% endif %}</span>
+        <span class="year-status">{% if y|int < current_year %}(Closed){% else %}YTD{% endif %}</span>
     </a>
     {% endfor %}
+    <a href="?view=combined" class="year-tab {% if view == 'combined' %}active{% endif %}">
+        <span class="year-label">2025-2026</span>
+        <span class="year-status">Combined</span>
+    </a>
+    <a href="?view=rolling6" class="year-tab {% if view == 'rolling6' %}active{% endif %}">
+        <span class="year-label">6-Month</span>
+        <span class="year-status">Rolling Avg</span>
+    </a>
 </div>
 
 {% if stats.no_data %}
@@ -31,10 +39,21 @@
 </div>
 
 <!-- A/R Collections Widget (Full Width) -->
-<h2>{{ year }} A/R Collections</h2>
+<h2>
+    {% if view == 'combined' %}2025-2026 Combined A/R Collections
+    {% elif view == 'rolling6' %}Rolling 6-Month A/R Collections
+    {% else %}{{ year }} A/R Collections
+    {% endif %}
+</h2>
 <div class="sop-widget sop-widget-ar">
     <div class="sop-header">
-        <h3>{{ year }} Invoice Aging{% if year < current_year %} (as of Dec 31){% endif %}</h3>
+        <h3>
+            {% if view == 'combined' %}2025-2026 Combined Invoice Aging
+            {% elif view == 'rolling6' %}Rolling 6-Month Invoice Aging
+            {% elif year < current_year %}{{ year }} Invoice Aging (as of Dec 31)
+            {% else %}{{ year }} Invoice Aging
+            {% endif %}
+        </h3>
         <span class="sop-status {% if melissa_sop.aging_compliant %}status-ok{% else %}status-alert{% endif %}">
             {% if melissa_sop.aging_compliant %}On Track{% else %}{{ "{:.0f}".format(melissa_sop.aging_over_60_pct or 0) }}% &gt;60 Days{% endif %}
         </span>
@@ -317,7 +336,7 @@
     </a>
 
     <!-- Melinda Gorman - Task Owner (2025 only - no longer with firm) -->
-    {% if year == 2025 %}
+    {% if year == 2025 or view == 'combined' %}
     <a href="/staff/Melinda" class="sop-widget-link">
     <div class="sop-widget sop-widget-sm sop-widget-clickable">
         <div class="sop-header">
@@ -421,7 +440,12 @@
 </div>
 
 <!-- Original Stats Grid -->
-<h2>Key Metrics</h2>
+<h2>
+    {% if view == 'combined' %}2025-2026 Combined Key Metrics
+    {% elif view == 'rolling6' %}Rolling 6-Month Key Metrics
+    {% else %}{{ year }} Key Metrics
+    {% endif %}
+</h2>
 <div class="stats-grid">
     <div class="stat-card">
         <div class="stat-value">${{ "{:,.0f}".format(stats.ar_under_180 or 0) }}</div>

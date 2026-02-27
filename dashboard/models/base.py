@@ -133,14 +133,34 @@ class DashboardData:
 
     # ─── Dashboard Stats ───────────────────────────────────────────
 
-    def get_dashboard_stats(self, year: int = None) -> Dict:
+    def get_dashboard_stats(self, year: int = None, years: list = None, rolling_months: int = None) -> Dict:
         """Get high-level dashboard statistics."""
         current_year = datetime.now().year
-        if year is None:
+        if year is None and not years and not rolling_months:
             year = current_year
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
+
+                # Build year filter and reference date based on view mode
+                if years:
+                    year_filter = "EXTRACT(YEAR FROM invoice_date) IN %s"
+                    year_param = (tuple(years),)
+                    case_year_filter = "EXTRACT(YEAR FROM created_at) IN %s"
+                    task_year_filter = "EXTRACT(YEAR FROM c.created_at) IN %s"
+                    ref_date = "CURRENT_DATE"
+                elif rolling_months:
+                    year_filter = "invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'"
+                    year_param = ()
+                    case_year_filter = "created_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'"
+                    task_year_filter = "c.created_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'"
+                    ref_date = "CURRENT_DATE"
+                else:
+                    year_filter = "EXTRACT(YEAR FROM invoice_date) = %s"
+                    year_param = (year,)
+                    case_year_filter = "EXTRACT(YEAR FROM created_at) = %s"
+                    task_year_filter = "EXTRACT(YEAR FROM c.created_at) = %s"
+                    ref_date = f"DATE('{year}-12-31')" if year < current_year else "CURRENT_DATE"
 
                 # Total active cases
                 cursor.execute("""
@@ -149,42 +169,37 @@ class DashboardData:
                 """, (self.firm_id,))
                 active_cases = cursor.fetchone()[0] or 0
 
-                # Total cases for the year
-                cursor.execute("""
+                # Total cases for the period
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM cached_cases
-                    WHERE firm_id = %s AND EXTRACT(YEAR FROM created_at) = %s
-                """, (self.firm_id, year))
+                    WHERE firm_id = %s AND {case_year_filter}
+                """, (self.firm_id,) + year_param)
                 year_cases = cursor.fetchone()[0] or 0
 
                 # Total open invoices
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*), COALESCE(SUM(balance_due), 0)
                     FROM cached_invoices
                     WHERE firm_id = %s AND balance_due > 0
-                      AND EXTRACT(YEAR FROM invoice_date) = %s
-                """, (self.firm_id, year))
+                      AND {year_filter}
+                """, (self.firm_id,) + year_param)
                 row = cursor.fetchone()
                 open_invoices = row[0] or 0
                 total_ar = row[1] or 0
 
                 # Total overdue tasks
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM cached_tasks t
                     JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
                     WHERE t.firm_id = %s
                       AND t.due_date < CURRENT_DATE
                       AND t.due_date >= CURRENT_DATE - INTERVAL '200 days'
                       AND (t.completed = false OR t.completed IS NULL)
-                      AND EXTRACT(YEAR FROM c.created_at) = %s
-                """, (self.firm_id, year))
+                      AND {task_year_filter}
+                """, (self.firm_id,) + year_param)
                 overdue_tasks = cursor.fetchone()[0] or 0
 
                 # AR aging buckets for Key Metrics section
-                if year < current_year:
-                    ref_date = f"DATE('{year}-12-31')"
-                else:
-                    ref_date = "CURRENT_DATE"
-
                 cursor.execute(f"""
                     SELECT
                         COALESCE(SUM(CASE WHEN ({ref_date} - due_date) <= 180 THEN balance_due ELSE 0 END), 0),
@@ -193,8 +208,8 @@ class DashboardData:
                         COALESCE(SUM(balance_due), 0)
                     FROM cached_invoices
                     WHERE firm_id = %s AND balance_due > 0
-                      AND EXTRACT(YEAR FROM invoice_date) = %s
-                """, (self.firm_id, year))
+                      AND {year_filter}
+                """, (self.firm_id,) + year_param)
                 ar_row = cursor.fetchone()
                 ar_under_180 = ar_row[0] or 0
                 ar_over_180 = ar_row[1] or 0
@@ -452,17 +467,31 @@ class DashboardData:
 
     # ─── Attorney Summary (for dashboard widget) ──────────────────
 
-    def get_attorney_summary(self, year: int = None) -> Dict:
+    def get_attorney_summary(self, year: int = None, years: list = None, rolling_months: int = None) -> Dict:
         """Get attorney summary for the dashboard home page."""
         current_year = datetime.now().year
-        if year is None:
+        if year is None and not years and not rolling_months:
             year = current_year
 
-        # For closed years, freeze aging at Dec 31 of that year
-        if year < current_year:
-            reference_date = f"DATE('{year}-12-31')"
-        else:
+        # Build filter and reference date based on view mode
+        if years:
+            inv_filter = "EXTRACT(YEAR FROM i.invoice_date) IN %s"
+            inv_param = (tuple(years),)
+            join_filter = "EXTRACT(YEAR FROM i.invoice_date) IN %s"
+            join_param = (tuple(years),)
             reference_date = "CURRENT_DATE"
+        elif rolling_months:
+            inv_filter = "i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'"
+            inv_param = ()
+            join_filter = "i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'"
+            join_param = ()
+            reference_date = "CURRENT_DATE"
+        else:
+            inv_filter = "EXTRACT(YEAR FROM i.invoice_date) = %s"
+            inv_param = (year,)
+            join_filter = "EXTRACT(YEAR FROM i.invoice_date) = %s"
+            join_param = (year,)
+            reference_date = f"DATE('{year}-12-31')" if year < current_year else "CURRENT_DATE"
 
         try:
             with get_connection() as conn:
@@ -498,8 +527,8 @@ class DashboardData:
                         COALESCE(SUM(i.paid_amount), 0) as total_collected
                     FROM cached_invoices i
                     WHERE i.firm_id = %s
-                      AND EXTRACT(YEAR FROM i.invoice_date) = %s
-                """, (self.firm_id, year))
+                      AND {inv_filter}
+                """, (self.firm_id,) + inv_param)
                 row = cursor.fetchone()
 
                 paid_full = row[0] or 0
@@ -512,21 +541,21 @@ class DashboardData:
                 total_collected = row[7] or 0
 
                 # Top attorneys by billing
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT c.lead_attorney_name,
                            COUNT(DISTINCT c.id) as case_count,
                            COALESCE(SUM(i.total_amount), 0) as billed,
                            COALESCE(SUM(i.paid_amount), 0) as collected
                     FROM cached_cases c
                     LEFT JOIN cached_invoices i ON i.case_id = c.id AND i.firm_id = c.firm_id
-                        AND EXTRACT(YEAR FROM i.invoice_date) = %s
+                        AND {join_filter}
                     WHERE c.firm_id = %s
                       AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
                       AND c.status = 'open'
                     GROUP BY c.lead_attorney_name
                     ORDER BY billed DESC
                     LIMIT 5
-                """, (year, self.firm_id))
+                """, join_param + (self.firm_id,))
                 top_attorneys = [{'name': r[0], 'cases': r[1], 'billed': r[2], 'collected': r[3]}
                                  for r in cursor.fetchall()]
 

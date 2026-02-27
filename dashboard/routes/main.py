@@ -14,24 +14,41 @@ templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates"
 
 
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request, year: int = None):
+async def index(request: Request, year: int = None, view: str = None):
     """Dashboard home page."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
     # Default to current year if not specified
     current_year = datetime.now().year
-    if year is None:
-        year = current_year
     available_years = [2025, 2026]
 
     data = get_data(request)
-    stats = data.get_dashboard_stats(year=year)
-    ar_aging = data.get_ar_aging_breakdown(year=year)
+
+    # View modes: None/year-based, "combined", "rolling6"
+    if view == "combined":
+        stats = data.get_dashboard_stats(years=[2025, 2026])
+        ar_aging = data.get_ar_aging_breakdown(years=[2025, 2026])
+        melissa_sop = data.get_melissa_sop_data(years=[2025, 2026])
+        attorney_summary = data.get_attorney_summary(years=[2025, 2026])
+        year = None  # signal combined mode
+    elif view == "rolling6":
+        stats = data.get_dashboard_stats(rolling_months=6)
+        ar_aging = data.get_ar_aging_breakdown(rolling_months=6)
+        melissa_sop = data.get_melissa_sop_data(rolling_months=6)
+        attorney_summary = data.get_attorney_summary(rolling_months=6)
+        year = None
+    else:
+        if year is None:
+            year = current_year
+        stats = data.get_dashboard_stats(year=year)
+        ar_aging = data.get_ar_aging_breakdown(year=year)
+        melissa_sop = data.get_melissa_sop_data(year=year)
+        attorney_summary = data.get_attorney_summary(year=year)
+
     recent_reports = data.get_recent_reports(limit=5)
 
-    # SOP widget data
-    melissa_sop = data.get_melissa_sop_data(year=year)
+    # SOP widget data (not year-dependent)
     ty_sop = data.get_ty_sop_data()
     tiffany_sop = data.get_tiffany_sop_data()
     alison_sop = data.get_legal_assistant_sop_data("Alison")
@@ -46,9 +63,6 @@ async def index(request: Request, year: int = None):
     leigh_sop = data.get_legal_assistant_sop_data("Leigh")
     jen_sop = data.get_legal_assistant_sop_data("Jen")
     ethan_sop = data.get_legal_assistant_sop_data("Ethan")
-
-    # Attorney summary for dashboard widget
-    attorney_summary = data.get_attorney_summary(year=year)
 
     # Staff caseload data
     tiffany_caseload = data.get_staff_caseload_data("Tiffany Willis")
@@ -65,6 +79,7 @@ async def index(request: Request, year: int = None):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "year": year,
+        "view": view,
         "current_year": current_year,
         "available_years": available_years,
         "stats": stats,

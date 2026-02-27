@@ -177,9 +177,14 @@ class ARDataMixin:
             'no_data': True,
         }
 
-    def get_ar_aging_breakdown(self, year: int = None) -> Dict:
-        """Get AR aging breakdown for charts (for specified year)."""
-        summary = self.get_daily_collections_summary(year=year)
+    def get_ar_aging_breakdown(self, year: int = None, years: list = None, rolling_months: int = None) -> Dict:
+        """Get AR aging breakdown for charts."""
+        if years:
+            summary = self.get_combined_years_summary(years)
+        elif rolling_months:
+            summary = self.get_rolling_6month_summary()
+        else:
+            summary = self.get_daily_collections_summary(year=year)
         # Use OrderedDict-like insertion order (Python 3.7+) for display order
         return {
             'Collected': summary.get('total_collected', 0),

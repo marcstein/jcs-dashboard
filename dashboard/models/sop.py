@@ -9,9 +9,14 @@ from db.connection import get_connection
 class SOPDataMixin:
     """Mixin providing SOP report data methods for each staff member."""
 
-    def get_melissa_sop_data(self, year: int = None) -> Dict:
-        """Get Melissa (AR Specialist) SOP metrics for specified year."""
-        summary = self.get_daily_collections_summary(year=year)
+    def get_melissa_sop_data(self, year: int = None, years: list = None, rolling_months: int = None) -> Dict:
+        """Get Melissa (AR Specialist) SOP metrics for specified year, combined years, or rolling months."""
+        if years:
+            summary = self.get_combined_years_summary(years)
+        elif rolling_months:
+            summary = self.get_rolling_6month_summary()
+        else:
+            summary = self.get_daily_collections_summary(year=year)
         plans = self.get_payment_plans_summary()
         noiw = self.get_noiw_pipeline()
 
