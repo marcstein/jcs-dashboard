@@ -138,6 +138,30 @@ def list_users(firm_id: str = None) -> list:
     return [_row_to_dict(row, USER_LIST_KEYS) for row in rows]
 
 
+def validate_password(password: str) -> tuple[bool, str]:
+    """
+    Validate password meets requirements:
+    - At least 8 characters
+    - At least one number
+    - At least one special character
+
+    Returns:
+        (is_valid, error_message)
+    """
+    import re
+
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+
+    if not re.search(r'\d', password):
+        return False, "Password must contain at least one number."
+
+    if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:\'",.<>?/\\`~]', password):
+        return False, "Password must contain at least one special character (!@#$%^&* etc.)."
+
+    return True, ""
+
+
 def update_user_password(username: str, new_password: str, firm_id: str = None) -> bool:
     """Update user's password."""
     password_hash = generate_password_hash(new_password)

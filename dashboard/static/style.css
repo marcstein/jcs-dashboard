@@ -527,6 +527,41 @@ h2 {
     border: 1px solid #fde68a;
 }
 
+.alert-success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.form-hint {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+}
+
+.nav-username {
+    color: var(--gray-600);
+    text-decoration: none;
+    font-size: 0.875rem;
+    transition: color 0.2s;
+}
+
+.nav-username:hover {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
+.back-link {
+    color: var(--gray-500);
+    text-decoration: none;
+    font-size: 0.875rem;
+}
+
+.back-link:hover {
+    color: var(--primary);
+}
+
 .sync-info {
     color: var(--gray-500);
     font-size: 0.875rem;

@@ -11,6 +11,7 @@ Run: python setup_users.py [--firm-id jcs_law] [--dry-run]
 """
 import os
 import sys
+import random
 import secrets
 import string
 import argparse
@@ -27,9 +28,21 @@ import psycopg2.extensions
 
 
 def generate_password(length=12):
-    """Generate a random password."""
-    chars = string.ascii_letters + string.digits + "!@#$%"
-    return ''.join(secrets.choice(chars) for _ in range(length))
+    """Generate a random password meeting requirements: 8+ chars, 1 number, 1 special."""
+    specials = "!@#$%^&*"
+    # Guarantee at least one of each required type
+    password = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        secrets.choice(specials),
+    ]
+    # Fill remaining with mixed chars
+    chars = string.ascii_letters + string.digits + specials
+    password += [secrets.choice(chars) for _ in range(length - 4)]
+    # Shuffle so required chars aren't always at the start
+    random.shuffle(password)
+    return ''.join(password)
 
 
 def username_from_name(full_name: str) -> str:

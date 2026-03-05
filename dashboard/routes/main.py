@@ -7,7 +7,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import login_user, logout_user, is_authenticated, get_data, get_current_role
+from dashboard.auth import (
+    login_user, logout_user, is_authenticated, get_data, get_current_role,
+    get_user, get_current_firm_id, validate_password, update_user_password,
+)
+from werkzeug.security import check_password_hash
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -230,3 +234,73 @@ async def view_report(request: Request, filename: str):
         "username": request.session.get("username"),
         "role": role,
     })
+
+
+@router.get("/change-password", response_class=HTMLResponse)
+async def change_password_page(request: Request):
+    """Change password page — available to all authenticated users."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    role = get_current_role(request)
+    return templates.TemplateResponse("change_password.html", {
+        "request": request,
+        "username": request.session.get("username"),
+        "role": role,
+        "error": None,
+        "success": None,
+    })
+
+
+@router.post("/change-password")
+async def change_password_submit(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    """Handle change password form submission."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    role = get_current_role(request)
+    username = request.session.get("username")
+    firm_id = get_current_firm_id(request)
+
+    ctx = {
+        "request": request,
+        "username": username,
+        "role": role,
+        "error": None,
+        "success": None,
+    }
+
+    # Verify current password
+    user = get_user(username, firm_id)
+    if not user or not check_password_hash(user["password_hash"], current_password):
+        ctx["error"] = "Current password is incorrect."
+        return templates.TemplateResponse("change_password.html", ctx)
+
+    # Check new passwords match
+    if new_password != confirm_password:
+        ctx["error"] = "New passwords do not match."
+        return templates.TemplateResponse("change_password.html", ctx)
+
+    # Validate new password requirements
+    is_valid, validation_error = validate_password(new_password)
+    if not is_valid:
+        ctx["error"] = validation_error
+        return templates.TemplateResponse("change_password.html", ctx)
+
+    # Don't allow reusing current password
+    if check_password_hash(user["password_hash"], new_password):
+        ctx["error"] = "New password must be different from your current password."
+        return templates.TemplateResponse("change_password.html", ctx)
+
+    # Update password
+    if update_user_password(username, new_password, firm_id):
+        ctx["success"] = "Password changed successfully."
+    else:
+        ctx["error"] = "Failed to update password. Please try again."
+
+    return templates.TemplateResponse("change_password.html", ctx)
