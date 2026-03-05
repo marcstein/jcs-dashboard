@@ -593,20 +593,26 @@ Example - user asks "Show billing by attorney":
 def execute_chat_query(sql: str) -> tuple[list[dict], str | None]:
     """Execute a SQL query against the PostgreSQL MyCase cache database."""
     try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
+        # Bypass connection pool to get a plain tuple cursor
+        # (pool sets RealDictCursor which causes dict iteration issues)
+        import psycopg2
+        import os
+        raw_conn = psycopg2.connect(os.environ.get("DATABASE_URL", ""))
+        try:
+            cursor = raw_conn.cursor()
             cursor.execute(sql)
 
             # Get column names from cursor description
             column_names = [desc[0] for desc in cursor.description]
 
-            # Fetch all rows — RealDictCursor returns dict-like rows,
-            # use .items() to reliably extract key-value pairs
+            # Fetch all rows as plain tuples, zip with column names
             rows = []
             for row in cursor.fetchall():
-                rows.append({k: v for k, v in row.items()})
+                rows.append(dict(zip(column_names, row)))
 
             return rows, None
+        finally:
+            raw_conn.close()
     except Exception as e:
         return [], str(e)
 
