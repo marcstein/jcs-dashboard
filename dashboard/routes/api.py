@@ -597,18 +597,14 @@ def execute_chat_query(sql: str) -> tuple[list[dict], str | None]:
             cursor = conn.cursor()
             cursor.execute(sql)
 
-            # Get column names
+            # Get column names from cursor description
             column_names = [desc[0] for desc in cursor.description]
 
-            # Fetch all rows — handle both RealDictCursor (dict) and tuple cursor
+            # Fetch all rows — RealDictCursor returns dict-like rows,
+            # use .items() to reliably extract key-value pairs
             rows = []
             for row in cursor.fetchall():
-                if hasattr(row, 'keys'):
-                    # RealDictRow: already a dict, just copy it
-                    rows.append(dict(row))
-                else:
-                    # Tuple row: zip with column names
-                    rows.append(dict(zip(column_names, row)))
+                rows.append({k: v for k, v in row.items()})
 
             return rows, None
     except Exception as e:
