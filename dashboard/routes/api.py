@@ -741,15 +741,15 @@ async def api_chat(request: Request):
 
                 if error:
                     return JSONResponse({
-                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question."
+                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question.\n\n_DEBUG: sql={sql[:200]}_"
                     })
 
                 formatted = format_query_results(rows, explanation)
-                return JSONResponse({"response": formatted})
+                return JSONResponse({"response": f"_DEBUG: path=query, rows={len(rows)}, sql={sql[:100]}_\n\n{formatted}"})
 
             else:
                 # Text response
-                return JSONResponse({"response": parsed.get("response", assistant_text)})
+                return JSONResponse({"response": f"_DEBUG: path=text, raw={assistant_text[:200]}_\n\n{parsed.get('response', assistant_text)}"})
 
         except json.JSONDecodeError:
             # JSON parsing failed - try to extract and execute SQL if present
@@ -779,11 +779,11 @@ async def api_chat(request: Request):
 
                 if error:
                     return JSONResponse({
-                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question."
+                        "response": f"**Query Error:** {error}\n\n_DEBUG: path=fallback_sql, sql={sql_match[:200]}_"
                     })
 
                 formatted = format_query_results(rows, "")
-                return JSONResponse({"response": formatted})
+                return JSONResponse({"response": f"_DEBUG: path=fallback_sql, rows={len(rows)}_\n\n{formatted}"})
 
             # No SQL found - return the text response but clean it up
             # Remove any JSON-like formatting that might confuse users
