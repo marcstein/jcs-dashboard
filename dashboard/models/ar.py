@@ -553,15 +553,30 @@ class ARDataMixin:
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
-                cursor.execute("""
-                    SELECT COUNT(*) as total_invoices,
-                           COALESCE(SUM(total_amount), 0) as total_billed,
-                           COALESCE(SUM(paid_amount), 0) as total_collected,
-                           COALESCE(AVG(CASE WHEN paid_amount > 0
-                               THEN GREATEST((CURRENT_DATE - due_date), 0) END), 0) as avg_days_to_payment
-                    FROM cached_invoices
-                    WHERE firm_id = %s AND EXTRACT(YEAR FROM invoice_date) = %s
-                """, (self.firm_id, year))
+                af_sql, af_params = self._attorney_case_filter("c")
+                if self.attorney_name:
+                    # Attorney-scoped: join through cases
+                    cursor.execute(f"""
+                        SELECT COUNT(*) as total_invoices,
+                               COALESCE(SUM(i.total_amount), 0) as total_billed,
+                               COALESCE(SUM(i.paid_amount), 0) as total_collected,
+                               COALESCE(AVG(CASE WHEN i.paid_amount > 0
+                                   THEN GREATEST((CURRENT_DATE - i.due_date), 0) END), 0) as avg_days_to_payment
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s AND EXTRACT(YEAR FROM i.invoice_date) = %s
+                          {af_sql}
+                    """, (self.firm_id, year, *af_params))
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(*) as total_invoices,
+                               COALESCE(SUM(total_amount), 0) as total_billed,
+                               COALESCE(SUM(paid_amount), 0) as total_collected,
+                               COALESCE(AVG(CASE WHEN paid_amount > 0
+                                   THEN GREATEST((CURRENT_DATE - due_date), 0) END), 0) as avg_days_to_payment
+                        FROM cached_invoices
+                        WHERE firm_id = %s AND EXTRACT(YEAR FROM invoice_date) = %s
+                    """, (self.firm_id, year))
                 r = cursor.fetchone()
                 return {
                     'total_invoices': r[0] or 0,
@@ -583,7 +598,8 @@ class ARDataMixin:
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
-                cursor.execute("""
+                af_sql, af_params = self._attorney_case_filter("c")
+                cursor.execute(f"""
                     SELECT c.lead_attorney_name,
                            COUNT(i.id) as invoice_count,
                            COALESCE(SUM(i.total_amount), 0) as total_billed,
@@ -594,9 +610,10 @@ class ARDataMixin:
                     JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     WHERE i.firm_id = %s AND EXTRACT(YEAR FROM i.invoice_date) = %s
                       AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                      {af_sql}
                     GROUP BY c.lead_attorney_name
                     ORDER BY avg_days DESC
-                """, (self.firm_id, year))
+                """, (self.firm_id, year, *af_params))
                 return [{'attorney_name': r[0], 'invoice_count': r[1],
                         'total_billed': r[2], 'total_collected': r[3],
                         'avg_days': round(r[4] or 0)}
@@ -613,7 +630,8 @@ class ARDataMixin:
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
-                cursor.execute("""
+                af_sql, af_params = self._attorney_case_filter("c")
+                cursor.execute(f"""
                     SELECT COALESCE(c.practice_area, 'Unknown') as case_type,
                            COUNT(i.id) as invoice_count,
                            COALESCE(SUM(i.total_amount), 0) as total_billed,
@@ -623,9 +641,10 @@ class ARDataMixin:
                     FROM cached_invoices i
                     JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     WHERE i.firm_id = %s AND EXTRACT(YEAR FROM i.invoice_date) = %s
+                      {af_sql}
                     GROUP BY c.practice_area
                     ORDER BY total_billed DESC
-                """, (self.firm_id, year))
+                """, (self.firm_id, year, *af_params))
                 return [{'case_type': r[0], 'invoice_count': r[1],
                         'total_billed': r[2], 'total_collected': r[3],
                         'avg_days': round(r[4] or 0)}
@@ -642,17 +661,33 @@ class ARDataMixin:
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
-                cursor.execute("""
-                    SELECT DATE_TRUNC('month', invoice_date) as month,
-                           COUNT(*) as invoice_count,
-                           COALESCE(SUM(total_amount), 0) as billed,
-                           COALESCE(SUM(paid_amount), 0) as collected
-                    FROM cached_invoices
-                    WHERE firm_id = %s
-                      AND invoice_date >= CURRENT_DATE - INTERVAL '%s months'
-                    GROUP BY DATE_TRUNC('month', invoice_date)
-                    ORDER BY month
-                """ % ('%s', months_back), (self.firm_id,))
+                af_sql, af_params = self._attorney_case_filter("c")
+                if self.attorney_name:
+                    cursor.execute(f"""
+                        SELECT DATE_TRUNC('month', i.invoice_date) as month,
+                               COUNT(*) as invoice_count,
+                               COALESCE(SUM(i.total_amount), 0) as billed,
+                               COALESCE(SUM(i.paid_amount), 0) as collected
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s
+                          AND i.invoice_date >= CURRENT_DATE - INTERVAL '{months_back} months'
+                          {af_sql}
+                        GROUP BY DATE_TRUNC('month', i.invoice_date)
+                        ORDER BY month
+                    """, (self.firm_id, *af_params))
+                else:
+                    cursor.execute("""
+                        SELECT DATE_TRUNC('month', invoice_date) as month,
+                               COUNT(*) as invoice_count,
+                               COALESCE(SUM(total_amount), 0) as billed,
+                               COALESCE(SUM(paid_amount), 0) as collected
+                        FROM cached_invoices
+                        WHERE firm_id = %s
+                          AND invoice_date >= CURRENT_DATE - INTERVAL '%s months'
+                        GROUP BY DATE_TRUNC('month', invoice_date)
+                        ORDER BY month
+                    """ % ('%s', months_back), (self.firm_id,))
                 return [{'month': str(r[0])[:10], 'invoice_count': r[1],
                         'billed': r[2], 'collected': r[3]}
                        for r in cursor.fetchall()]

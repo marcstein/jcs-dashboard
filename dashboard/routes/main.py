@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import login_user, logout_user, is_authenticated, get_data
+from dashboard.auth import login_user, logout_user, is_authenticated, get_data, get_current_role
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -18,6 +18,10 @@ async def index(request: Request, year: int = None, view: str = None):
     """Dashboard home page."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
+
+    role = get_current_role(request)
+    if role == 'attorney':
+        return RedirectResponse(url="/attorneys", status_code=303)
 
     # Default to current year if not specified
     current_year = datetime.now().year
@@ -110,6 +114,7 @@ async def index(request: Request, year: int = None, view: str = None):
         "jen_caseload": jen_caseload,
         "ethan_caseload": ethan_caseload,
         "username": request.session.get("username"),
+        "role": role,
     })
 
 
@@ -140,6 +145,9 @@ async def login_submit(
     if login_user(request, username, password, firm_id=firm_id):
         print(f"Login SUCCESS - session: {dict(request.session)}")
         # 303 See Other - forces GET on redirect (proper POST-Redirect-GET pattern)
+        # Attorneys go directly to their attorney dashboard
+        if request.session.get("role") == "attorney":
+            return RedirectResponse(url="/attorneys", status_code=303)
         return RedirectResponse(url="/", status_code=303)
 
     print(f"Login FAILED for {username} @ firm_id={firm_id}")
@@ -164,6 +172,10 @@ async def staff_tasks(request: Request, staff_name: str):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    role = get_current_role(request)
+    if role == 'attorney':
+        return RedirectResponse(url="/attorneys", status_code=303)
+
     data = get_data(request)
     staff = data.get_staff_tasks(staff_name, include_completed=False)
     active_cases = data.get_staff_active_cases_list(staff_name)
@@ -173,6 +185,7 @@ async def staff_tasks(request: Request, staff_name: str):
         "staff": staff,
         "active_cases": active_cases,
         "username": request.session.get("username"),
+        "role": role,
     })
 
 
@@ -182,6 +195,10 @@ async def reports_list(request: Request):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    role = get_current_role(request)
+    if role == 'attorney':
+        return RedirectResponse(url="/attorneys", status_code=303)
+
     data = get_data(request)
     reports = data.get_recent_reports(limit=50)
 
@@ -189,6 +206,7 @@ async def reports_list(request: Request):
         "request": request,
         "reports": reports,
         "username": request.session.get("username"),
+        "role": role,
     })
 
 
@@ -198,6 +216,10 @@ async def view_report(request: Request, filename: str):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    role = get_current_role(request)
+    if role == 'attorney':
+        return RedirectResponse(url="/attorneys", status_code=303)
+
     data = get_data(request)
     content = data.get_report_content(filename)
 
@@ -206,4 +228,5 @@ async def view_report(request: Request, filename: str):
         "filename": filename,
         "content": content,
         "username": request.session.get("username"),
+        "role": role,
     })

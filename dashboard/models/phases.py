@@ -49,9 +49,11 @@ class PhasesDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
+                af_sql, af_params = self._attorney_case_filter("c")
+
                 # Latest phase per case, joined with cached_cases for open status,
                 # and phases table for display_order
-                cursor.execute("""
+                cursor.execute(f"""
                     WITH latest AS (
                         SELECT DISTINCT ON (cph.case_id)
                                cph.case_id, cph.phase_code, cph.phase_name, cph.firm_id
@@ -66,9 +68,10 @@ class PhasesDataMixin:
                     JOIN cached_cases c ON lp.case_id = c.id AND lp.firm_id = c.firm_id
                     LEFT JOIN phases p ON lp.phase_code = p.code AND lp.firm_id = p.firm_id
                     WHERE c.status = 'open'
+                      {af_sql}
                     GROUP BY lp.phase_name, p.display_order
                     ORDER BY COALESCE(p.display_order, 0) ASC
-                """, (self.firm_id,))
+                """, (self.firm_id, *af_params))
 
                 phases = []
                 total = 0
@@ -103,7 +106,8 @@ class PhasesDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
+                af_sql, af_params = self._attorney_case_filter("c")
+                cursor.execute(f"""
                     WITH latest AS (
                         SELECT DISTINCT ON (cph.case_id)
                                cph.case_id, cph.case_name, cph.phase_name,
@@ -119,9 +123,10 @@ class PhasesDataMixin:
                     JOIN cached_cases c ON lp.case_id = c.id AND lp.firm_id = c.firm_id
                     WHERE c.status = 'open'
                       AND EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - lp.entered_at)) / 86400.0 >= %s
+                      {af_sql}
                     ORDER BY days_in_phase DESC
                     LIMIT 50
-                """, (self.firm_id, threshold))
+                """, (self.firm_id, threshold, *af_params))
 
                 return [{'case_id': r[0], 'case_name': r[1], 'phase': r[2],
                          'entered': r[3], 'days_in_phase': int(r[4])}
@@ -135,19 +140,22 @@ class PhasesDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
-                    SELECT phase_name,
-                           ROUND(AVG(duration_days)::numeric, 1) as avg_days,
-                           MIN(duration_days)::int as min_days,
-                           MAX(duration_days)::int as max_days,
+                af_sql, af_params = self._attorney_case_filter("c")
+                cursor.execute(f"""
+                    SELECT cph.phase_name,
+                           ROUND(AVG(cph.duration_days)::numeric, 1) as avg_days,
+                           MIN(cph.duration_days)::int as min_days,
+                           MAX(cph.duration_days)::int as max_days,
                            COUNT(*) as transitions
-                    FROM case_phase_history
-                    WHERE firm_id = %s
-                      AND duration_days IS NOT NULL
-                      AND duration_days > 0
-                    GROUP BY phase_name
-                    ORDER BY phase_name
-                """, (self.firm_id,))
+                    FROM case_phase_history cph
+                    JOIN cached_cases c ON cph.case_id = c.id AND cph.firm_id = c.firm_id
+                    WHERE cph.firm_id = %s
+                      AND cph.duration_days IS NOT NULL
+                      AND cph.duration_days > 0
+                      {af_sql}
+                    GROUP BY cph.phase_name
+                    ORDER BY cph.phase_name
+                """, (self.firm_id, *af_params))
 
                 return [{'phase_name': r[0], 'avg_days': float(r[1]),
                          'min_days': int(r[2]), 'max_days': int(r[3]),
@@ -162,7 +170,8 @@ class PhasesDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
+                af_sql, af_params = self._attorney_case_filter("c")
+                cursor.execute(f"""
                     WITH latest AS (
                         SELECT DISTINCT ON (cph.case_id)
                                cph.case_id, cph.phase_name, cph.firm_id
@@ -176,9 +185,10 @@ class PhasesDataMixin:
                     WHERE c.status = 'open'
                       AND c.practice_area IS NOT NULL
                       AND c.practice_area != ''
+                      {af_sql}
                     GROUP BY c.practice_area, lp.phase_name
                     ORDER BY c.practice_area, lp.phase_name
-                """, (self.firm_id,))
+                """, (self.firm_id, *af_params))
 
                 results = []
                 for r in cursor.fetchall():
@@ -197,7 +207,8 @@ class PhasesDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
+                af_sql, af_params = self._attorney_case_filter("c")
+                cursor.execute(f"""
                     WITH latest AS (
                         SELECT DISTINCT ON (cph.case_id)
                                cph.case_id, cph.phase_name, cph.entered_at, cph.firm_id
@@ -213,9 +224,10 @@ class PhasesDataMixin:
                     JOIN cached_cases c ON lp.case_id = c.id AND lp.firm_id = c.firm_id
                     WHERE lp.phase_name ILIKE %s
                       AND c.status = 'open'
+                      {af_sql}
                     ORDER BY lp.entered_at ASC
                     LIMIT %s
-                """, (self.firm_id, f'%{phase}%', limit))
+                """, (self.firm_id, f'%{phase}%', *af_params, limit))
 
                 return [{'case_id': r[0], 'case_name': r[1], 'case_number': r[2],
                          'practice_area': r[3], 'attorney': r[4],

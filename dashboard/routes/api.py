@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request, BackgroundTasks, UploadFile, File
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from dashboard.auth import is_authenticated, get_data
+from dashboard.auth import is_authenticated, get_data, get_current_role, get_current_attorney_name
 from db.connection import get_connection
 
 router = APIRouter()
@@ -961,6 +961,7 @@ async def documents_page(request: Request):
     return templates.TemplateResponse("documents.html", {
         "request": request,
         "username": request.session.get("username"),
+        "role": get_current_role(request),
     })
 
 

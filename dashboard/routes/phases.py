@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated, get_data
+from dashboard.auth import is_authenticated, get_data, get_current_role
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -133,4 +133,5 @@ async def phases_dashboard(request: Request, phase: str = None):
         "current_phase": phase,
         "phase_cases": phase_cases,
         "username": request.session.get("username"),
+        "role": get_current_role(request),
     })

@@ -1,6 +1,7 @@
 """
 KPI Trends, Promises Data Access
 """
+from datetime import date
 from typing import Dict, List, Optional
 
 from db.connection import get_connection
@@ -9,8 +10,93 @@ from db.connection import get_connection
 class TrendsDataMixin:
     """Mixin providing KPI trend analysis and payment promises data methods."""
 
+    # ---- Attorney-scoped live metric computation ----
+
+    def _compute_attorney_metrics(self) -> List[Dict]:
+        """Compute KPI metrics live from underlying tables for an attorney-scoped view.
+
+        Since kpi_snapshots are firm-wide aggregates, attorneys get live values
+        computed from their own cases/invoices. No historical trend data is available.
+        """
+        metrics = []
+        today = str(date.today())
+        try:
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+
+                # Total A/R for this attorney's cases
+                cursor.execute("""
+                    SELECT COALESCE(SUM(i.balance_due), 0)
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s
+                      AND i.balance_due > 0
+                      AND c.lead_attorney_name = %s
+                """, (self.firm_id, self.attorney_name))
+                total_ar = float(cursor.fetchone()[0] or 0)
+                metrics.append({
+                    'name': 'total_ar',
+                    'value': total_ar,
+                    'date': today,
+                    'previous_value': None,
+                    'direction': 'stable',
+                })
+
+                # A/R over 60 days percentage
+                cursor.execute("""
+                    SELECT
+                        COALESCE(SUM(i.balance_due), 0) as total,
+                        COALESCE(SUM(CASE WHEN CURRENT_DATE - i.due_date > 60
+                                     THEN i.balance_due ELSE 0 END), 0) as over_60
+                    FROM cached_invoices i
+                    JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                    WHERE i.firm_id = %s
+                      AND i.balance_due > 0
+                      AND c.lead_attorney_name = %s
+                """, (self.firm_id, self.attorney_name))
+                row = cursor.fetchone()
+                ar_total = float(row[0] or 0)
+                ar_over_60 = float(row[1] or 0)
+                ar_over_60_pct = round(ar_over_60 / ar_total * 100, 1) if ar_total > 0 else 0
+                metrics.append({
+                    'name': 'ar_over_60_pct',
+                    'value': ar_over_60_pct,
+                    'date': today,
+                    'previous_value': None,
+                    'direction': 'stable',
+                })
+
+                # Overdue tasks on this attorney's cases
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM cached_tasks t
+                    JOIN cached_cases c ON t.case_id = c.id AND t.firm_id = c.firm_id
+                    WHERE t.firm_id = %s
+                      AND t.due_date < CURRENT_DATE
+                      AND t.due_date >= CURRENT_DATE - INTERVAL '200 days'
+                      AND (t.completed = false OR t.completed IS NULL)
+                      AND c.lead_attorney_name = %s
+                """, (self.firm_id, self.attorney_name))
+                overdue_tasks = cursor.fetchone()[0] or 0
+                metrics.append({
+                    'name': 'overdue_tasks',
+                    'value': overdue_tasks,
+                    'date': today,
+                    'previous_value': None,
+                    'direction': 'stable',
+                })
+
+        except Exception:
+            pass
+        return metrics
+
+    # ---- Firm-wide KPI snapshot methods ----
+
     def get_kpi_trends(self, metric_name: str, days_back: int = 90) -> List[Dict]:
         """Get KPI trends for a specific metric over time."""
+        # No historical per-attorney data available
+        if self.attorney_name:
+            return []
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
@@ -30,6 +116,11 @@ class TrendsDataMixin:
 
     def get_trends_summary(self) -> Dict:
         """Get summary of all tracked KPI metrics with latest values and direction."""
+        # Attorney-scoped: compute live from underlying data
+        if self.attorney_name:
+            metrics = self._compute_attorney_metrics()
+            return {'metrics': metrics, 'total_metrics': len(metrics)}
+
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
@@ -86,6 +177,10 @@ class TrendsDataMixin:
 
     def get_metric_comparison(self, metric: str) -> Dict:
         """Get week-over-week and month-over-month comparison for a metric."""
+        # No historical per-attorney data for comparisons
+        if self.attorney_name:
+            return {}
+
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)

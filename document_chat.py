@@ -437,13 +437,13 @@ DOCUMENT_TYPES = {
     "petition_for_review": {
         "name": "Petition for Review (PFR)",
         "description": "Petition for judicial review of DOR license revocation (refusal cases) - DOR/DWI",
-        "required_vars": ["county", "petitioner_name", "case_number", "dob", "arrest_date", "arrest_county", "police_department"],
+        "required_vars": ["court_jurisdiction", "petitioner_name", "case_number", "dln", "dob", "arrest_date", "arrest_county", "police_department"],
         "optional_vars": [],
         "defaults": {},
         "party_terminology": "petitioner_respondent",
         "uses_attorney_profile_for": [
             "firm_name", "attorney_name", "attorney_bar", "attorney_email",
-            "firm_address", "firm_city_state_zip", "firm_phone"
+            "firm_address", "firm_city_state_zip", "firm_phone", "firm_fax"
         ]
     },
     "after_supplemental_disclosure_letter": {
@@ -1745,6 +1745,8 @@ Focus on the most important 5-10 variables."""
             "plaintiff_name": "Full legal name of the plaintiff",
             "case_number": "Court case number (e.g., 24JE-CC00191 or 12345)",
             "county": "County where case is filed (e.g., Jefferson)",
+            "court_jurisdiction": "Court jurisdiction for the header — e.g., 'Jefferson County' or 'City of St. Louis' (City of St. Louis uses 'City of' instead of 'County')",
+            "dln": "Driver's License Number (e.g., C1662010024)",
             "party_role": "Role of the filing party (e.g., Defendant, Petitioner, Plaintiff)",
             "respondent_name": "Name of the responding party (e.g., Director of Revenue)",
 

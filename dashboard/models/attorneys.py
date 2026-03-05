@@ -15,6 +15,33 @@ class AttorneyDataMixin:
         """Get attorney productivity metrics (legacy - used by CLI)."""
         return self.get_attorney_productivity_data()
 
+    def _get_attorney_list(self, cursor) -> List[str]:
+        """Get list of attorneys to show, filtered by self.attorney_name if set."""
+        if self.attorney_name:
+            # Attorney-role user: only show their own data
+            cursor.execute("""
+                SELECT DISTINCT lead_attorney_name
+                FROM cached_cases
+                WHERE firm_id = %s
+                  AND lead_attorney_name = %s
+            """, (self.firm_id, self.attorney_name))
+        else:
+            cursor.execute("""
+                SELECT DISTINCT lead_attorney_name
+                FROM cached_cases
+                WHERE firm_id = %s
+                  AND lead_attorney_name IS NOT NULL
+                  AND lead_attorney_name != ''
+                ORDER BY lead_attorney_name
+            """, (self.firm_id,))
+        return [row[0] for row in cursor.fetchall()]
+
+    def _attorney_aging_filter(self) -> tuple:
+        """Return (sql_fragment, params) for filtering aging queries to logged-in attorney."""
+        if self.attorney_name:
+            return " AND c.lead_attorney_name = %s", (self.attorney_name,)
+        return "", ()
+
     def get_attorney_productivity_data(self, year: int = None) -> List[Dict]:
         """Get attorney productivity metrics for specified year."""
         current_year = datetime.now().year
@@ -24,16 +51,7 @@ class AttorneyDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                # Get unique attorneys from cases
-                cursor.execute("""
-                    SELECT DISTINCT lead_attorney_name
-                    FROM cached_cases
-                    WHERE firm_id = %s
-                      AND lead_attorney_name IS NOT NULL
-                      AND lead_attorney_name != ''
-                    ORDER BY lead_attorney_name
-                """, (self.firm_id,))
-                attorneys = [row[0] for row in cursor.fetchall()]
+                attorneys = self._get_attorney_list(cursor)
 
                 result = []
                 for attorney_name in attorneys:
@@ -113,7 +131,8 @@ class AttorneyDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
+                af_sql, af_params = self._attorney_aging_filter()
+                cursor.execute(f"""
                     SELECT c.lead_attorney_name,
                            SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_full,
                            SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 1 AND 30 THEN 1 ELSE 0 END) as dpd_1_30,
@@ -127,9 +146,10 @@ class AttorneyDataMixin:
                     WHERE i.firm_id = %s
                       AND EXTRACT(YEAR FROM i.invoice_date) = %s
                       AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                      {af_sql}
                     GROUP BY c.lead_attorney_name
                     ORDER BY c.lead_attorney_name
-                """, (self.firm_id, year))
+                """, (self.firm_id, year, *af_params))
 
                 return [{
                     'attorney_id': r[0],
@@ -154,15 +174,7 @@ class AttorneyDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
-                    SELECT DISTINCT lead_attorney_name
-                    FROM cached_cases
-                    WHERE firm_id = %s
-                      AND lead_attorney_name IS NOT NULL
-                      AND lead_attorney_name != ''
-                    ORDER BY lead_attorney_name
-                """, (self.firm_id,))
-                attorneys = [row[0] for row in cursor.fetchall()]
+                attorneys = self._get_attorney_list(cursor)
 
                 year_placeholders = ','.join(['%s'] * len(years))
                 result = []
@@ -230,6 +242,7 @@ class AttorneyDataMixin:
                 cursor = self._cursor(conn)
                 year_placeholders = ','.join(['%s'] * len(years))
 
+                af_sql, af_params = self._attorney_aging_filter()
                 cursor.execute(f"""
                     SELECT c.lead_attorney_name,
                            SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_full,
@@ -244,9 +257,10 @@ class AttorneyDataMixin:
                     WHERE i.firm_id = %s
                       AND EXTRACT(YEAR FROM i.invoice_date) IN ({year_placeholders})
                       AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                      {af_sql}
                     GROUP BY c.lead_attorney_name
                     ORDER BY c.lead_attorney_name
-                """, (self.firm_id, *years))
+                """, (self.firm_id, *years, *af_params))
 
                 return [{
                     'attorney_id': r[0],
@@ -269,15 +283,7 @@ class AttorneyDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
-                    SELECT DISTINCT lead_attorney_name
-                    FROM cached_cases
-                    WHERE firm_id = %s
-                      AND lead_attorney_name IS NOT NULL
-                      AND lead_attorney_name != ''
-                    ORDER BY lead_attorney_name
-                """, (self.firm_id,))
-                attorneys = [row[0] for row in cursor.fetchall()]
+                attorneys = self._get_attorney_list(cursor)
 
                 result = []
                 for attorney_name in attorneys:
@@ -341,7 +347,8 @@ class AttorneyDataMixin:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
 
-                cursor.execute("""
+                af_sql, af_params = self._attorney_aging_filter()
+                cursor.execute(f"""
                     SELECT c.lead_attorney_name,
                            SUM(CASE WHEN i.balance_due = 0 THEN 1 ELSE 0 END) as paid_full,
                            SUM(CASE WHEN i.balance_due > 0 AND (CURRENT_DATE - i.due_date) BETWEEN 1 AND 30 THEN 1 ELSE 0 END) as dpd_1_30,
@@ -355,9 +362,10 @@ class AttorneyDataMixin:
                     WHERE i.firm_id = %s
                       AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' * %s
                       AND c.lead_attorney_name IS NOT NULL AND c.lead_attorney_name != ''
+                      {af_sql}
                     GROUP BY c.lead_attorney_name
                     ORDER BY c.lead_attorney_name
-                """, (self.firm_id, months))
+                """, (self.firm_id, months, *af_params))
 
                 return [{
                     'attorney_id': r[0],

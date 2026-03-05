@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated, get_data
+from dashboard.auth import is_authenticated, get_data, get_current_role
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -24,6 +24,10 @@ async def noiw_pipeline(request: Request, status: str = None):
     """
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
+
+    role = get_current_role(request)
+    if role == 'attorney':
+        return RedirectResponse(url="/attorneys", status_code=303)
 
     data = get_data(request)
 
@@ -57,4 +61,5 @@ async def noiw_pipeline(request: Request, status: str = None):
         "summary": summary,
         "current_filter": status,
         "username": request.session.get("username"),
+        "role": role,
     })

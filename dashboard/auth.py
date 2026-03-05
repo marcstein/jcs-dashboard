@@ -19,8 +19,8 @@ def _row_to_dict(row, keys):
     return {k: row[i] for i, k in enumerate(keys)}
 
 
-USER_KEYS = ["id", "firm_id", "username", "password_hash", "email", "role", "is_active", "created_at", "last_login"]
-USER_LIST_KEYS = ["id", "firm_id", "username", "email", "role", "is_active", "created_at", "last_login"]
+USER_KEYS = ["id", "firm_id", "username", "password_hash", "email", "role", "is_active", "created_at", "last_login", "attorney_name"]
+USER_LIST_KEYS = ["id", "firm_id", "username", "email", "role", "is_active", "created_at", "last_login", "attorney_name"]
 
 
 def init_users_table():
@@ -38,6 +38,7 @@ def init_users_table():
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_login TIMESTAMP,
+                    attorney_name TEXT,
                     UNIQUE(firm_id, username)
                 )
             """)
@@ -49,10 +50,23 @@ def init_users_table():
                 CREATE INDEX IF NOT EXISTS idx_dashboard_users_username
                 ON dashboard_users(username)
             """)
+            # Add attorney_name column if it doesn't exist (migration for existing tables)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'dashboard_users' AND column_name = 'attorney_name'
+                    ) THEN
+                        ALTER TABLE dashboard_users ADD COLUMN attorney_name TEXT;
+                    END IF;
+                END $$;
+            """)
         conn.commit()
 
 
-def create_user(username: str, password: str, email: str = None, role: str = "user", firm_id: str = None) -> bool:
+def create_user(username: str, password: str, email: str = None, role: str = "user",
+                 firm_id: str = None, attorney_name: str = None) -> bool:
     """
     Create a new user.
 
@@ -60,8 +74,9 @@ def create_user(username: str, password: str, email: str = None, role: str = "us
         username: Unique username
         password: Plain text password (will be hashed)
         email: Optional email address
-        role: User role ('admin' or 'user')
+        role: User role ('admin', 'attorney', 'collections', or 'user')
         firm_id: Firm ID for multi-tenant isolation
+        attorney_name: For attorney role, the lead_attorney_name to scope data to
 
     Returns:
         bool: True if created successfully
@@ -73,14 +88,15 @@ def create_user(username: str, password: str, email: str = None, role: str = "us
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO dashboard_users (firm_id, username, password_hash, email, role)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO dashboard_users (firm_id, username, password_hash, email, role, attorney_name)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (firm_id, username) DO UPDATE SET
                         password_hash = EXCLUDED.password_hash,
                         email = EXCLUDED.email,
                         role = EXCLUDED.role,
+                        attorney_name = EXCLUDED.attorney_name,
                         is_active = TRUE
-                """, (firm_id, username, password_hash, email, role))
+                """, (firm_id, username, password_hash, email, role, attorney_name))
             conn.commit()
         return True
     except Exception:
@@ -94,7 +110,7 @@ def get_user(username: str, firm_id: str = None) -> dict | None:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, firm_id, username, password_hash, email, role, is_active, created_at, last_login
+                SELECT id, firm_id, username, password_hash, email, role, is_active, created_at, last_login, attorney_name
                 FROM dashboard_users
                 WHERE username = %s AND firm_id = %s AND is_active = TRUE
             """, (username, firm_id))
@@ -111,7 +127,7 @@ def list_users(firm_id: str = None) -> list:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, firm_id, username, email, role, is_active, created_at, last_login
+                SELECT id, firm_id, username, email, role, is_active, created_at, last_login, attorney_name
                 FROM dashboard_users
                 WHERE firm_id = %s
                 ORDER BY created_at DESC
@@ -210,8 +226,9 @@ def login_user(request: Request, username: str, password: str, firm_id: str = No
             request.session["username"] = username
             request.session["firm_id"] = firm_id
             request.session["role"] = user["role"]
+            request.session["attorney_name"] = user.get("attorney_name")
             update_last_login(username, firm_id)
-            print(f"[auth] login_user: SUCCESS via DB user")
+            print(f"[auth] login_user: SUCCESS via DB user (role={user['role']}, attorney={user.get('attorney_name')})")
             return True
         elif user:
             print(f"[auth] login_user: DB user found but password mismatch")
@@ -267,16 +284,26 @@ def get_current_firm_id(request: Request) -> str:
     return None
 
 
+def get_current_attorney_name(request: Request) -> str | None:
+    """Get the current user's attorney_name from session (for attorney-role users)."""
+    if is_authenticated(request):
+        return request.session.get("attorney_name")
+    return None
+
+
 def get_data(request: Request):
     """Create a per-request DashboardData instance scoped to the user's firm_id.
 
     CRITICAL for multi-tenant isolation: never use a module-level DashboardData().
     Each request must get its own instance with the correct firm_id from session.
     The session firm_id is set at login from the actual database — never 'default'.
+
+    For attorney-role users, also passes attorney_name to scope data to their cases.
     """
     from dashboard.models import DashboardData
     firm_id = get_current_firm_id(request)
-    return DashboardData(firm_id=firm_id)
+    attorney_name = get_current_attorney_name(request)
+    return DashboardData(firm_id=firm_id, attorney_name=attorney_name)
 
 
 def get_current_role(request: Request) -> str | None:

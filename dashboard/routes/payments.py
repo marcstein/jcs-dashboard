@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated, get_data
+from dashboard.auth import is_authenticated, get_data, get_current_role
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -90,4 +90,5 @@ async def payments_analytics(request: Request, year: int = None):
         "by_case_type": by_case_type,
         "velocity_trend": velocity_trend,
         "username": request.session.get("username"),
+        "role": get_current_role(request),
     })

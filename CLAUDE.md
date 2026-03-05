@@ -17,6 +17,7 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - `payment_promises` — Promise tracking
 - `kpi_snapshots` — Trend analysis
 - `payment_plan_payments`, `outreach_log`, `collections_holds`, `noiw_tracking` — Collections
+- `aging_invoice_uploads` — Aging invoice CSV uploads (batch-based, latest batch used by dunning)
 - `firms`, `templates`, `generated_documents` — Document engine
 - `attorneys` — Attorney profiles
 - `jurisdictions`, `courts`, `document_type_taxonomy` — Multi-state jurisdiction layer
@@ -163,6 +164,26 @@ Because the MyCase API only returns tasks for open cases:
 2. The longer the cache runs, the more complete historical task data becomes
 3. Tasks that were never synced (case closed before cache existed) will never appear
 4. Paralegal metrics show tasks from their active cases at time of sync
+
+### Important: RealDictCursor Gotcha
+`get_connection()` sets `conn.cursor_factory = RealDictCursor`, so `conn.cursor()` returns dict-like rows. **Iterating a RealDictRow yields keys, not values** — `dict(zip(columns, row))` will map column names to column names. For code that needs tuple rows (e.g. `execute_chat_query`), use a direct `psycopg2.connect()` instead of the pool. Passing `cursor_factory=psycopg2.extensions.cursor` to `conn.cursor()` does NOT reliably override the connection-level setting.
+
+### Aging Invoice Uploads
+- Table: `aging_invoice_uploads` with `upload_batch_id` for batch grouping
+- Each CSV upload creates a new batch; old batches preserved for audit trail
+- Dunning query uses CTE `latest_aging_batch` to find most recent batch per firm
+- LEFT JOIN with dunning invoices: matched invoices show `amount_now_due` from aging; unmatched fall back to `balance_due`
+- Upload endpoint: `POST /api/aging-upload` (FastAPI UploadFile)
+- History endpoint: `GET /api/aging-upload/history` (last 10 uploads)
+- Flexible CSV parsing: `_normalize_header()` maps various column names; `_parse_currency()` handles `$1,234.56`; `_parse_date()` handles multiple formats
+
+### AI Chat (Dashboard)
+- System prompt in `CHAT_SYSTEM_PROMPT` tells Claude to generate PostgreSQL queries
+- `execute_chat_query()` uses direct `psycopg2.connect()` (NOT the pool) for plain tuple cursor
+- `format_query_results()` handles float, int, Decimal types; detects currency/rate/year columns
+- PostgreSQL `ROUND()` requires `::numeric` cast — system prompt instructs this
+- `EXTRACT(YEAR FROM ...)` returns float — formatter detects year-like values and displays as int
+- **Production restart**: always clear `__pycache__` before restart: `find /opt/jcs-mycase -name __pycache__ -type d -exec rm -rf {} +`
 
 ## Current Metrics (Jan 2026)
 
@@ -388,7 +409,8 @@ Production: https://jcs.lawmetrics.ai
 - `/trends` - Historical KPI trends with sparklines
 - `/promises` - Payment promise tracking and reliability
 - `/payments` - Payment analytics: time-to-payment by attorney and case type
-- `/dunning` - Dunning notices preview and approval
+- `/dunning` - Dunning notices preview and approval (two-amount columns: Amount Due Now + Total Balance)
+- `/aging-upload` - Aging invoice CSV upload (drag-and-drop, upload history)
 - `/staff/{name}` - Individual staff detail pages
 - `/wonky` - Invoices requiring attention
 
@@ -778,6 +800,10 @@ All env vars stored in `.env` file in the project root.
 28. **Multi-state architecture specification** - Created `MULTI_STATE_ARCHITECTURE.md` and `.docx` covering jurisdiction layer, PDF form engine, court registry, attorney profile expansion, and 16-week implementation roadmap for 6 Phase 1 states.
 29. **Added dunning click-to-draft email** - Dunning preview page now has Client column and Action column. Clicking "Draft" opens a modal with stage-appropriate email content (friendly reminder → collections referral), then "Create Gmail Draft" opens Gmail compose with pre-filled To/Subject/Body. API endpoint `POST /api/dunning/draft-email` generates email content per stage.
 30. **Fixed dunning client email lookup** - `cached_invoices.contact_id` is NULL for all records. Client emails (2,247 of 2,475 clients have emails) are in `cached_clients`. The join path goes through case `data_json`: invoice → `cached_cases` (via `case_id`) → `data_json::jsonb -> 'billing_contact' ->> 'id'` → `cached_clients` (email). Both `get_dunning_preview()` and `get_open_invoices_list()` in `dashboard/models/ar.py` use this JSONB extraction join.
+31. **Added aging invoice CSV upload** - New `aging_invoice_uploads` table and `/aging-upload` dashboard page with drag-and-drop CSV upload. Melissa can upload the aging invoice report (up to daily). Each upload gets a unique `upload_batch_id`; old batches preserved for audit trail. Flexible CSV parsing handles various header names and date/currency formats. Upload history shows last 10 batches with row counts and timestamps.
+32. **Integrated aging data into dunning system** - Dunning queue now shows two amount columns: "Amount Due Now" (from latest aging batch via LEFT JOIN) and "Total Remaining Balance" (from `cached_invoices.balance_due`). Draft emails show both amounts when they differ, or a single "Amount Due" when same. The dunning model uses a CTE (`latest_aging_batch`) to find the most recent upload per firm. 212 of 296 dunning queue invoices matched aging data (71% coverage); remaining fall back to cached balance.
+33. **Fixed AI chat table rendering** - `get_connection()` sets `RealDictCursor` on the connection, so iterating rows yielded column names instead of values. Fixed `execute_chat_query()` to bypass the connection pool with a direct `psycopg2.connect()` and plain tuple cursor. Also fixed `ROUND()` errors by adding `::numeric` cast guidance to the AI system prompt, and added `Decimal`-to-float conversion in `format_query_results()`.
+34. **Fixed AI chat year/float formatting** - `EXTRACT(YEAR FROM ...)` returns `double precision`, which was displaying as `2,026.0`. Added detection for year-like values (1900-2100 range) and whole-number floats to format as integers. Also fixed stale `__pycache__` issue on production causing service to crash-loop on port 3000 — must clear bytecode cache (`find ... -name __pycache__ -exec rm -rf {}`) before restart.
 
 ### Template Consolidation
 

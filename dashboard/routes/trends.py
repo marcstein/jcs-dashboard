@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated, get_data
+from dashboard.auth import is_authenticated, get_data, get_current_role
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -113,4 +113,5 @@ async def trends_dashboard(request: Request, metric: str = None):
         "metric_detail": metric_detail,
         "metric_history": metric_history,
         "username": request.session.get("username"),
+        "role": get_current_role(request),
     })

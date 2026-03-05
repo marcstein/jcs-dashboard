@@ -20,9 +20,26 @@ import dashboard.config as config
 class DashboardData:
     """Read-only data access for dashboard using cached database data."""
 
-    def __init__(self, firm_id: str = None):
+    def __init__(self, firm_id: str = None, attorney_name: str = None):
         self.firm_id = firm_id or os.environ.get('DASHBOARD_FIRM_ID') or self._detect_firm_id()
+        self.attorney_name = attorney_name  # Non-None for attorney-role users; scopes all queries to their cases
         self.reports_dir = config.REPORTS_DIR
+
+    def _attorney_case_filter(self, case_table_alias: str = "c") -> tuple:
+        """Return (sql_fragment, params) for filtering cases to the logged-in attorney.
+
+        If self.attorney_name is set (attorney role), returns an AND clause
+        that restricts results to cases where lead_attorney_name matches.
+        Otherwise returns empty string and empty tuple (no filter).
+
+        Usage:
+            af_sql, af_params = self._attorney_case_filter("c")
+            cursor.execute(f"SELECT ... FROM cached_cases {case_table_alias} WHERE firm_id = %s {af_sql}",
+                           (self.firm_id, *af_params))
+        """
+        if self.attorney_name:
+            return f" AND {case_table_alias}.lead_attorney_name = %s", (self.attorney_name,)
+        return "", ()
 
     @staticmethod
     def _detect_firm_id() -> str:

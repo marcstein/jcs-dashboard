@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from dashboard.auth import is_authenticated, get_data
+from dashboard.auth import is_authenticated, get_data, get_current_role, get_current_attorney_name
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
@@ -74,6 +74,7 @@ async def attorneys_dashboard(request: Request, year: int = None, view: str = No
         "available_years": available_years,
         "attorneys": productivity,
         "username": request.session.get("username"),
+        "role": get_current_role(request),
     })
 
 
@@ -82,6 +83,12 @@ async def attorney_detail_view(request: Request, attorney_name: str, year: int =
     """Attorney detail page with call list."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
+
+    role = get_current_role(request)
+    if role == 'attorney':
+        current_attorney = get_current_attorney_name(request)
+        if current_attorney and current_attorney != attorney_name:
+            return RedirectResponse(url=f"/attorney/{current_attorney}", status_code=303)
 
     # Default to current year if not specified
     current_year = datetime.now().year
@@ -99,6 +106,7 @@ async def attorney_detail_view(request: Request, attorney_name: str, year: int =
         "available_years": available_years,
         "attorney": detail,
         "username": request.session.get("username"),
+        "role": role,
     })
 
 
