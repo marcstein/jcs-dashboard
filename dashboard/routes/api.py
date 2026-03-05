@@ -545,12 +545,13 @@ You have access to a MyCase law firm management database with these tables:
 
 ## Important Notes:
 - This is a criminal defense law firm in Kansas City
-- Focus on 2025 data: use strftime('%Y', date_column) = '2025'
+- Focus on 2025 data: use EXTRACT(YEAR FROM date_column) = 2025
 - Collection rate = SUM(paid_amount) / SUM(total_amount) * 100
-- Days Past Due (DPD) = julianday('now') - julianday(due_date)
+- Days Past Due (DPD) = CURRENT_DATE - due_date::date
 - Key attorneys: Heidi Leopold, Anthony Muhlenkamp, Melinda Gorman
 - Case types: "Felony DWI", "Misdemeanor DWI", "Felony Drug", "Misdemeanor Traffic", "Municipal Court"
-- For tasks: completed=0 means pending, completed=1 means done
+- Case status values are LOWERCASE: 'open', 'closed' (NOT 'Open' or 'Closed')
+- For tasks: completed is BOOLEAN (use completed = false for pending, completed = true for done)
 """
 
 CHAT_SYSTEM_PROMPT = f"""You are an AI assistant for LawMetrics.ai, a legal analytics dashboard.
@@ -666,7 +667,10 @@ def format_query_results(rows: list[dict], explanation: str) -> str:
                     formatted_values.append(f"{val:.1f}%")
                 # Check if it's a currency amount
                 elif is_currency_column(h):
-                    formatted_values.append(f"${val:,.2f}")
+                    if val < 0:
+                        formatted_values.append(f"-${abs(val):,.2f}")
+                    else:
+                        formatted_values.append(f"${val:,.2f}")
                 # Check if it looks like a whole number (e.g. count returned as float)
                 elif val == int(val) and abs(val) < 1_000_000:
                     formatted_values.append(f"{int(val):,}")
