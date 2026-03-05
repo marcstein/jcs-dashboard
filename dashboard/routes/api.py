@@ -175,7 +175,7 @@ async def api_dunning_draft_email(request: Request):
 
         # Determine subject and body based on dunning stage
         firm_name = "JCS Law Firm"
-        firm_phone = "(816) 945-4444"
+        firm_phone = "(314) 561-9690"
         firm_email = "info@jcslaw.com"
 
         # Build amount section — show both if they differ
