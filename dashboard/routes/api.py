@@ -594,19 +594,21 @@ def execute_chat_query(sql: str) -> tuple[list[dict], str | None]:
     """Execute a SQL query against the PostgreSQL MyCase cache database."""
     try:
         with get_connection() as conn:
-            # Use a plain tuple cursor so zip(column_names, row) works correctly
-            # (RealDictCursor iteration yields keys, not values)
-            import psycopg2.extensions
-            cursor = conn.cursor(cursor_factory=psycopg2.extensions.cursor)
+            cursor = conn.cursor()
             cursor.execute(sql)
 
             # Get column names
             column_names = [desc[0] for desc in cursor.description]
 
-            # Fetch all rows
+            # Fetch all rows — handle both RealDictCursor (dict) and tuple cursor
             rows = []
             for row in cursor.fetchall():
-                rows.append(dict(zip(column_names, row)))
+                if hasattr(row, 'keys'):
+                    # RealDictRow: already a dict, just copy it
+                    rows.append(dict(row))
+                else:
+                    # Tuple row: zip with column names
+                    rows.append(dict(zip(column_names, row)))
 
             return rows, None
     except Exception as e:
