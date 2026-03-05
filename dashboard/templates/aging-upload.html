@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Aging Report - LawMetrics{% endblock %}
+
+{% block content %}
+<h1>Upload Aging Invoice Report</h1>
+<p class="page-description">Upload an updated aging invoice report CSV from your billing system. This data powers the dunning notices with accurate "Amount Due Now" figures.</p>
+
+<div class="upload-container">
+    <div class="upload-zone" id="upload-zone">
+        <div class="upload-icon">&#128196;</div>
+        <div class="upload-text">
+            <strong>Drag and drop your CSV file here</strong>
+            <br>or click to browse
+        </div>
+        <input type="file" id="file-input" accept=".csv" style="display:none" />
+        <div class="upload-hint">Accepted format: CSV (.csv)</div>
+    </div>
+
+    <div id="upload-status" class="upload-status" style="display:none;"></div>
+    <div id="upload-progress" class="upload-progress" style="display:none;">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-text" id="progress-text">Uploading...</div>
+    </div>
+</div>
+
+<!-- Expected Format -->
+<div class="section-header">
+    <h2>Expected CSV Format</h2>
+</div>
+<div class="format-box">
+    <p>The CSV should contain these columns (header names are flexible):</p>
+    <table class="format-table">
+        <thead>
+            <tr>
+                <th>Column</th>
+                <th>Example</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Invoice number</strong></td><td>250</td><td>Required &mdash; matches to system invoices</td></tr>
+            <tr><td><strong>Client</strong></td><td>Chaz Baker</td><td>Client name</td></tr>
+            <tr><td><strong>Case</strong></td><td>2021-BAKER.CHAZ: ...</td><td>Case description</td></tr>
+            <tr><td><strong>Amount overdue</strong></td><td>$2,055.25</td><td>Amount now due (key field for dunning)</td></tr>
+            <tr><td><strong>Invoice total</strong></td><td>$7,555.25</td><td>Original invoice total</td></tr>
+            <tr><td><strong>Amount paid</strong></td><td>$5,500.00</td><td>Amount already paid</td></tr>
+            <tr><td><strong>Due date</strong></td><td>08/20/2022</td><td>Invoice due date</td></tr>
+            <tr><td><strong>Status</strong></td><td>Overdue</td><td>Invoice status</td></tr>
+            <tr><td><strong>Days aging</strong></td><td>1292</td><td>Days past due</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Upload History -->
+<div class="section-header">
+    <h2>Recent Uploads</h2>
+</div>
+<div id="history-container">
+    <div class="loading-text">Loading upload history...</div>
+</div>
+
+<style>
+.upload-container {
+    max-width: 600px;
+    margin: 0 auto 2rem;
+}
+
+.upload-zone {
+    border: 2px dashed var(--border-color, #d1d5da);
+    border-radius: 12px;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--card-bg, #fff);
+}
+
+.upload-zone:hover, .upload-zone.drag-over {
+    border-color: #0366d6;
+    background: #f0f7ff;
+}
+
+.upload-icon { font-size: 3rem; margin-bottom: 1rem; }
+.upload-text { font-size: 1rem; color: var(--text-primary, #24292e); margin-bottom: 0.75rem; }
+.upload-hint { font-size: 0.8rem; color: var(--text-secondary, #586069); }
+
+.upload-status {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+.upload-status.success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+.upload-status.error { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+
+.upload-progress {
+    margin-top: 1rem;
+}
+.progress-bar {
+    height: 6px;
+    background: #e1e4e8;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: #0366d6;
+    width: 0%;
+    transition: width 0.3s;
+    border-radius: 3px;
+}
+.progress-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #586069);
+    margin-top: 0.5rem;
+    text-align: center;
+}
+
+.format-box {
+    background: var(--bg-secondary, #f6f8fa);
+    border: 1px solid var(--border-color, #e1e4e8);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 2rem;
+}
+.format-box p { margin: 0 0 1rem; font-size: 0.9rem; }
+
+.format-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.format-table th, .format-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    text-align: left;
+    font-size: 0.85rem;
+}
+.format-table th { background: var(--card-bg, #fff); font-weight: 600; }
+
+.section-header {
+    margin: 2rem 0 1rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    padding-bottom: 0.5rem;
+}
+.section-header h2 { font-size: 1.25rem; margin: 0; }
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.history-table th, .history-table td {
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border-color, #e1e4e8);
+    text-align: left;
+    font-size: 0.85rem;
+}
+.history-table th { background: var(--bg-secondary, #f6f8fa); font-weight: 600; }
+.loading-text { color: var(--text-secondary, #586069); font-size: 0.9rem; }
+.empty-history { color: var(--text-secondary, #586069); font-style: italic; padding: 1rem 0; }
+</style>
+
+<script>
+var uploadZone = document.getElementById('upload-zone');
+var fileInput = document.getElementById('file-input');
+
+// Click to browse
+uploadZone.addEventListener('click', function() { fileInput.click(); });
+
+// Drag events
+uploadZone.addEventListener('dragover', function(e) { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', function(e) { e.preventDefault(); uploadZone.classList.remove('drag-over'); });
+uploadZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) uploadFile(e.dataTransfer.files[0]);
+});
+
+fileInput.addEventListener('change', function() {
+    if (fileInput.files.length > 0) uploadFile(fileInput.files[0]);
+});
+
+function showUploadStatus(msg, type) {
+    var el = document.getElementById('upload-status');
+    el.style.display = 'block';
+    el.className = 'upload-status ' + type;
+    el.innerHTML = msg;
+}
+
+function uploadFile(file) {
+    if (!file.name.endsWith('.csv')) {
+        showUploadStatus('Please select a CSV file.', 'error');
+        return;
+    }
+
+    var progress = document.getElementById('upload-progress');
+    var progressFill = document.getElementById('progress-fill');
+    var progressText = document.getElementById('progress-text');
+    progress.style.display = 'block';
+    progressFill.style.width = '30%';
+    progressText.textContent = 'Uploading ' + file.name + '...';
+    document.getElementById('upload-status').style.display = 'none';
+
+    var formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/aging-upload', { method: 'POST', body: formData })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        progressFill.style.width = '100%';
+        if (data.success) {
+            progressText.textContent = 'Complete!';
+            showUploadStatus(
+                '<strong>' + data.rows_imported + ' invoices imported</strong> from ' + (data.filename || file.name),
+                'success'
+            );
+            setTimeout(function() { progress.style.display = 'none'; }, 1500);
+            loadHistory();
+        } else {
+            progressText.textContent = 'Failed';
+            showUploadStatus('Upload failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+    })
+    .catch(function(err) {
+        progressFill.style.width = '0%';
+        progressText.textContent = 'Error';
+        showUploadStatus('Upload error: ' + err.message, 'error');
+    });
+}
+
+function loadHistory() {
+    fetch('/api/aging-upload/history')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var container = document.getElementById('history-container');
+        if (data.error) {
+            container.innerHTML = '<div class="empty-history">Could not load history.</div>';
+            return;
+        }
+        var history = data.history || [];
+        if (history.length === 0) {
+            container.innerHTML = '<div class="empty-history">No uploads yet.</div>';
+            return;
+        }
+        var html = '<table class="history-table"><thead><tr><th>Date</th><th>Invoices</th><th>Batch ID</th></tr></thead><tbody>';
+        for (var i = 0; i < history.length; i++) {
+            var h = history[i];
+            var dt = h.uploaded_at ? new Date(h.uploaded_at).toLocaleString() : '';
+            var shortBatch = (h.batch_id || '').substring(0, 8) + '...';
+            html += '<tr><td>' + dt + '</td><td>' + h.row_count + '</td><td title="' + h.batch_id + '">' + shortBatch + '</td></tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    })
+    .catch(function() {
+        document.getElementById('history-container').innerHTML = '<div class="empty-history">Could not load history.</div>';
+    });
+}
+
+// Load history on page load
+loadHistory();
+</script>
+{% endblock %}

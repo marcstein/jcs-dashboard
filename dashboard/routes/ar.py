@@ -98,6 +98,18 @@ async def wonky_invoices(request: Request):
     })
 
 
+@router.get("/aging-upload", response_class=HTMLResponse)
+async def aging_upload_page(request: Request):
+    """Aging invoice report upload page."""
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    return templates.TemplateResponse("aging-upload.html", {
+        "request": request,
+        "username": request.session.get("username"),
+    })
+
+
 @router.get("/dunning", response_class=HTMLResponse)
 async def dunning_preview(request: Request, stage: int = None):
     """Dunning notices preview and approval dashboard."""
@@ -133,13 +145,20 @@ async def dunning_preview(request: Request, stage: int = None):
     queue = []
     for inv in raw_queue:
         s = inv.get('stage', 1) or 1
+        balance_due = inv.get('balance_due', 0) or 0
+        amount_now_due = inv.get('amount_now_due')  # from aging report
+        total_balance = inv.get('total_remaining_balance', balance_due)  # fallback to balance_due
+        if amount_now_due is None:
+            amount_now_due = balance_due  # fallback if no aging data
         queue.append({
             'invoice_number': inv.get('invoice_id', ''),
             'case_name': inv.get('case_name', ''),
             'attorney': inv.get('attorney', inv.get('contact_name', '')),
             'contact_name': inv.get('contact_name', ''),
             'contact_email': inv.get('contact_email', ''),
-            'balance_due': inv.get('balance_due', 0) or 0,
+            'balance_due': balance_due,
+            'amount_now_due': amount_now_due,
+            'total_balance': total_balance,
             'days_overdue': inv.get('days_delinquent', 0) or 0,
             'dunning_stage': s,
             'stage_name': stage_names.get(s, f'Stage {s}'),

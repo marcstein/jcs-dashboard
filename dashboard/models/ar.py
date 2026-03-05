@@ -401,11 +401,20 @@ class ARDataMixin:
 
         All open invoices with balance > 0 and 5+ days overdue, across ALL years,
         dynamically assigned to dunning stages based on days overdue.
+        LEFT JOINs with aging_invoice_uploads (latest batch) to get amount_now_due.
         """
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
                 cursor.execute("""
+                    WITH latest_aging_batch AS (
+                        SELECT upload_batch_id
+                        FROM aging_invoice_uploads
+                        WHERE firm_id = %s
+                        GROUP BY upload_batch_id
+                        ORDER BY MIN(uploaded_at) DESC
+                        LIMIT 1
+                    )
                     SELECT
                         i.id as invoice_id,
                         i.invoice_number,
@@ -415,18 +424,24 @@ class ARDataMixin:
                         i.balance_due,
                         (CURRENT_DATE - i.due_date::date) as days_overdue,
                         i.due_date,
-                        COALESCE(cl.email, ct.email) as contact_email
+                        COALESCE(cl.email, ct.email) as contact_email,
+                        ag.amount_overdue as aging_amount_due,
+                        ag.invoice_total as aging_invoice_total
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     LEFT JOIN cached_clients cl
                         ON cl.id = (c.data_json::jsonb -> 'billing_contact' ->> 'id')::integer
                         AND cl.firm_id = i.firm_id
                     LEFT JOIN cached_contacts ct ON i.contact_id = ct.id AND i.firm_id = ct.firm_id
+                    LEFT JOIN aging_invoice_uploads ag
+                        ON ag.firm_id = i.firm_id
+                        AND ag.invoice_number = i.invoice_number
+                        AND ag.upload_batch_id = (SELECT upload_batch_id FROM latest_aging_batch)
                     WHERE i.firm_id = %s
                       AND i.balance_due > 0
                       AND (CURRENT_DATE - i.due_date::date) >= 5
                     ORDER BY (CURRENT_DATE - i.due_date::date) DESC, i.balance_due DESC
-                """, (self.firm_id,))
+                """, (self.firm_id, self.firm_id))
 
                 results = []
                 for r in cursor.fetchall():
@@ -437,12 +452,16 @@ class ARDataMixin:
                         continue
                     if stage and s != stage:
                         continue
+                    balance_due = r[5] or 0
+                    aging_amount = float(r[9]) if r[9] is not None else None
                     results.append({
                         'invoice_id': r[1] or str(r[0]),
                         'case_name': r[2] or '',
                         'attorney': r[3] or 'Unassigned',
                         'contact_name': r[4] or '',
-                        'balance_due': r[5] or 0,
+                        'balance_due': balance_due,
+                        'amount_now_due': aging_amount,  # None if no aging data
+                        'total_remaining_balance': balance_due,
                         'days_delinquent': days,
                         'stage': s,
                         'last_notice_date': str(r[7]) if r[7] else '',

@@ -5,11 +5,14 @@ import threading
 import json
 import os
 import io
+import csv as csv_mod
+import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 import anthropic
-from fastapi import APIRouter, Request, BackgroundTasks
+from fastapi import APIRouter, Request, BackgroundTasks, UploadFile, File
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -164,6 +167,8 @@ async def api_dunning_draft_email(request: Request):
         invoice_number = body.get("invoice_number", "")
         case_name = body.get("case_name", "")
         balance_due = body.get("balance_due", 0)
+        amount_now_due = body.get("amount_now_due", balance_due)
+        total_balance = body.get("total_balance", balance_due)
         days_overdue = body.get("days_overdue", 0)
         stage = body.get("stage", 1)
         due_date = body.get("due_date", "")
@@ -173,15 +178,24 @@ async def api_dunning_draft_email(request: Request):
         firm_phone = "(816) 945-4444"
         firm_email = "info@jcslaw.com"
 
+        # Build amount section — show both if they differ
+        if abs(amount_now_due - total_balance) < 0.01:
+            amount_section = f"Amount Due: ${amount_now_due:,.2f}"
+        else:
+            amount_section = (
+                f"Amount Now Due: ${amount_now_due:,.2f}\n"
+                f"Total Remaining Balance: ${total_balance:,.2f}"
+            )
+
         if stage == 1:
             subject = f"Friendly Reminder - Invoice #{invoice_number} Past Due"
             email_body = (
                 f"Dear {contact_name},\n\n"
                 f"This is a friendly reminder that Invoice #{invoice_number} "
-                f"for ${balance_due:,.2f} is now {days_overdue} days past due.\n\n"
+                f"is now {days_overdue} days past due.\n\n"
                 f"Case: {case_name}\n"
                 f"Original Due Date: {due_date}\n"
-                f"Amount Due: ${balance_due:,.2f}\n\n"
+                f"{amount_section}\n\n"
                 f"Please remit payment at your earliest convenience. If you have already "
                 f"sent payment, please disregard this notice.\n\n"
                 f"If you have any questions about this invoice, please don't hesitate "
@@ -192,11 +206,11 @@ async def api_dunning_draft_email(request: Request):
             subject = f"Past Due Notice - Invoice #{invoice_number}"
             email_body = (
                 f"Dear {contact_name},\n\n"
-                f"Our records indicate that Invoice #{invoice_number} for ${balance_due:,.2f} "
+                f"Our records indicate that Invoice #{invoice_number} "
                 f"is now {days_overdue} days past due.\n\n"
                 f"Case: {case_name}\n"
                 f"Original Due Date: {due_date}\n"
-                f"Current Balance Due: ${balance_due:,.2f}\n\n"
+                f"{amount_section}\n\n"
                 f"We kindly request that you submit payment within the next 7 days "
                 f"to avoid any further collection activity.\n\n"
                 f"If you are experiencing financial difficulties, please contact our "
@@ -211,7 +225,7 @@ async def api_dunning_draft_email(request: Request):
                 f"This is a formal notice that Invoice #{invoice_number} remains unpaid "
                 f"and is now {days_overdue} days past due.\n\n"
                 f"Case: {case_name}\n"
-                f"Current Balance Due: ${balance_due:,.2f}\n\n"
+                f"{amount_section}\n\n"
                 f"Immediate payment is required to avoid further collection action. "
                 f"Please remit payment within 10 days of this notice.\n\n"
                 f"If you wish to discuss payment options, please contact our office "
@@ -226,7 +240,7 @@ async def api_dunning_draft_email(request: Request):
                 f"Despite our previous communications, Invoice #{invoice_number} remains "
                 f"unpaid and is now {days_overdue} days past due.\n\n"
                 f"Case: {case_name}\n"
-                f"Total Amount Due: ${balance_due:,.2f}\n\n"
+                f"{amount_section}\n\n"
                 f"This is our final notice before we pursue additional collection measures, "
                 f"which may include referral to a collection agency and potential legal action.\n\n"
                 f"To avoid these actions, please submit full payment within 5 business days "
@@ -282,6 +296,187 @@ async def api_dunning_export(request: Request, stage: int = None):
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# ============================================================================
+# Aging Invoice Upload API
+# ============================================================================
+
+def _parse_currency(val):
+    """Parse currency string like '$1,234.56' to float."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    # Remove $, commas, spaces
+    s = re.sub(r'[$,\s]', '', s)
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_date(val):
+    """Parse date string in various formats to YYYY-MM-DD."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    for fmt in ('%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y', '%m/%d/%y', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(s, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return None
+
+
+def _normalize_header(h):
+    """Normalize CSV header to a standard key."""
+    h = h.strip().lower().replace(' ', '_')
+    mapping = {
+        'invoice_number': 'invoice_number',
+        'invoice': 'invoice_number',
+        'inv_number': 'invoice_number',
+        'inv_#': 'invoice_number',
+        'inv': 'invoice_number',
+        'client': 'client_name',
+        'client_name': 'client_name',
+        'case': 'case_name',
+        'case_name': 'case_name',
+        'matter': 'case_name',
+        'amount_overdue': 'amount_overdue',
+        'amount_due': 'amount_overdue',
+        'overdue': 'amount_overdue',
+        'balance': 'amount_overdue',
+        'balance_due': 'amount_overdue',
+        'invoice_total': 'invoice_total',
+        'total': 'invoice_total',
+        'total_amount': 'invoice_total',
+        'amount_paid': 'amount_paid',
+        'paid': 'amount_paid',
+        'paid_amount': 'amount_paid',
+        'due_date': 'due_date',
+        'due': 'due_date',
+        'status': 'status',
+        'days_aging': 'days_aging',
+        'days': 'days_aging',
+        'dpd': 'days_aging',
+        'days_overdue': 'days_aging',
+        'aging': 'days_aging',
+    }
+    return mapping.get(h, h)
+
+
+@router.post("/api/aging-upload")
+async def api_aging_upload(request: Request, file: UploadFile = File(...)):
+    """Upload an aging invoice report CSV."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    firm_id = request.session.get("firm_id")
+    if not firm_id:
+        return JSONResponse({"error": "No firm_id in session"}, status_code=400)
+
+    try:
+        content = await file.read()
+        text = content.decode('utf-8-sig')  # Handle BOM
+        reader = csv_mod.DictReader(io.StringIO(text))
+
+        # Normalize headers
+        if not reader.fieldnames:
+            return JSONResponse({"error": "CSV file has no headers"}, status_code=400)
+
+        header_map = {}
+        for h in reader.fieldnames:
+            header_map[h] = _normalize_header(h)
+
+        batch_id = str(uuid.uuid4())
+        rows_imported = 0
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            for row in reader:
+                # Map to normalized keys
+                mapped = {}
+                for orig_key, val in row.items():
+                    norm_key = header_map.get(orig_key, orig_key)
+                    mapped[norm_key] = val
+
+                invoice_number = (mapped.get('invoice_number') or '').strip()
+                if not invoice_number:
+                    continue
+
+                cursor.execute("""
+                    INSERT INTO aging_invoice_uploads
+                        (firm_id, invoice_number, client_name, case_name,
+                         amount_overdue, invoice_total, amount_paid,
+                         due_date, status, days_aging, upload_batch_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    firm_id,
+                    invoice_number,
+                    (mapped.get('client_name') or '').strip(),
+                    (mapped.get('case_name') or '').strip(),
+                    _parse_currency(mapped.get('amount_overdue')),
+                    _parse_currency(mapped.get('invoice_total')),
+                    _parse_currency(mapped.get('amount_paid')),
+                    _parse_date(mapped.get('due_date')),
+                    (mapped.get('status') or '').strip(),
+                    int(mapped['days_aging']) if mapped.get('days_aging') and str(mapped['days_aging']).strip().isdigit() else None,
+                    batch_id,
+                ))
+                rows_imported += 1
+
+            conn.commit()
+
+        return JSONResponse({
+            "success": True,
+            "rows_imported": rows_imported,
+            "batch_id": batch_id,
+            "filename": file.filename,
+        })
+
+    except UnicodeDecodeError:
+        return JSONResponse({"error": "File is not a valid CSV (encoding error)"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": f"Upload failed: {str(e)}"}, status_code=500)
+
+
+@router.get("/api/aging-upload/history")
+async def api_aging_upload_history(request: Request):
+    """Get recent aging upload history."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    firm_id = request.session.get("firm_id")
+    if not firm_id:
+        return JSONResponse({"error": "No firm_id in session"}, status_code=400)
+
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT upload_batch_id, COUNT(*) as row_count,
+                       MIN(uploaded_at) as uploaded_at
+                FROM aging_invoice_uploads
+                WHERE firm_id = %s
+                GROUP BY upload_batch_id
+                ORDER BY MIN(uploaded_at) DESC
+                LIMIT 10
+            """, (firm_id,))
+            history = []
+            for r in cursor.fetchall():
+                history.append({
+                    'batch_id': r[0],
+                    'row_count': r[1],
+                    'uploaded_at': r[2].isoformat() if r[2] else '',
+                })
+            return JSONResponse({"history": history})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ============================================================================

@@ -70,7 +70,8 @@
             <th>Case</th>
             <th>Client</th>
             <th>Attorney</th>
-            <th class="text-right">Balance</th>
+            <th class="text-right">Amount Due Now</th>
+            <th class="text-right">Total Balance</th>
             <th class="text-center">Days Overdue</th>
             <th>Stage</th>
             <th>Due Date</th>
@@ -91,7 +92,8 @@
                 {% endif %}
             </td>
             <td>{{ inv.attorney }}</td>
-            <td class="text-right">${{ "{:,.2f}".format(inv.balance_due) }}</td>
+            <td class="text-right">${{ "{:,.2f}".format(inv.amount_now_due) }}</td>
+            <td class="text-right">${{ "{:,.2f}".format(inv.total_balance) }}</td>
             <td class="text-center {% if inv.days_overdue >= 45 %}text-critical{% elif inv.days_overdue >= 30 %}text-danger{% elif inv.days_overdue >= 15 %}text-warning{% endif %}">
                 {{ inv.days_overdue }}
             </td>
@@ -109,6 +111,8 @@
                     data-invoice-number="{{ inv.invoice_number | e }}"
                     data-case-name="{{ inv.case_name | e }}"
                     data-balance-due="{{ inv.balance_due }}"
+                    data-amount-now-due="{{ inv.amount_now_due }}"
+                    data-total-balance="{{ inv.total_balance }}"
                     data-days-overdue="{{ inv.days_overdue }}"
                     data-stage="{{ inv.dunning_stage }}"
                     data-due-date="{{ inv.due_date | e }}"
@@ -734,6 +738,8 @@ function draftDunningEmail(btn) {
         invoice_number: btn.getAttribute('data-invoice-number') || '',
         case_name: btn.getAttribute('data-case-name') || '',
         balance_due: parseFloat(btn.getAttribute('data-balance-due')) || 0,
+        amount_now_due: parseFloat(btn.getAttribute('data-amount-now-due')) || 0,
+        total_balance: parseFloat(btn.getAttribute('data-total-balance')) || 0,
         days_overdue: parseInt(btn.getAttribute('data-days-overdue')) || 0,
         dunning_stage: parseInt(btn.getAttribute('data-stage')) || 1,
         due_date: btn.getAttribute('data-due-date') || ''
@@ -750,6 +756,8 @@ function draftDunningEmail(btn) {
             invoice_number: inv.invoice_number,
             case_name: inv.case_name,
             balance_due: inv.balance_due,
+            amount_now_due: inv.amount_now_due,
+            total_balance: inv.total_balance,
             days_overdue: inv.days_overdue,
             stage: inv.dunning_stage,
             due_date: inv.due_date
