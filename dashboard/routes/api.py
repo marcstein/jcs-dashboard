@@ -575,7 +575,7 @@ For general questions (no query needed):
 
 Guidelines:
 - ALWAYS return valid JSON only - nothing else
-- Use proper PostgreSQL syntax
+- Use proper PostgreSQL syntax (IMPORTANT: ROUND() requires numeric type — always cast with ::numeric before rounding, e.g. ROUND(SUM(amount)::numeric, 2) not ROUND(SUM(amount), 2))
 - Limit results to 20 rows unless user asks for more
 - Order results meaningfully (by amount, date, etc.)
 - When comparing attorneys, include collection rate calculations
@@ -586,7 +586,7 @@ Guidelines:
 - For percentages use aliases containing "rate" or "pct" (system auto-formats with %)
 
 Example - user asks "Show billing by attorney":
-{{"type": "query", "sql": "SELECT lead_attorney_name, COUNT(*) as invoice_count, SUM(total_amount) as total_billed, SUM(paid_amount) as collected FROM cached_invoices i JOIN cached_cases c ON i.case_id = c.id WHERE EXTRACT(YEAR FROM invoice_date) = 2025 GROUP BY lead_attorney_name ORDER BY total_billed DESC LIMIT 20", "explanation": "Billing by attorney for 2025"}}
+{{"type": "query", "sql": "SELECT lead_attorney_name, COUNT(*) as invoice_count, SUM(total_amount) as total_billed, SUM(paid_amount) as collected, ROUND((SUM(paid_amount) / NULLIF(SUM(total_amount), 0) * 100)::numeric, 1) as collection_rate FROM cached_invoices i JOIN cached_cases c ON i.case_id = c.id WHERE EXTRACT(YEAR FROM invoice_date) = 2025 GROUP BY lead_attorney_name ORDER BY total_billed DESC LIMIT 20", "explanation": "Billing by attorney for 2025"}}
 """
 
 
