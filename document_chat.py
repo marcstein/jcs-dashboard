@@ -1375,6 +1375,28 @@ class DocumentChatEngine:
             elif 'oop entry' in template_name_lower or 'oop' in template_name_lower:
                 document_type_key = 'oop_entry'
 
+            # Cross-check: if template name matched but user's request suggests a different variant,
+            # override with the correct one. This handles cases where DB search returns a different
+            # variant than what the user actually asked for.
+            if document_type_key:
+                request_lower = request.lower()
+
+                # Bug fix: "motion to dismiss" resolving to DOR when user didn't ask for DOR
+                if document_type_key == 'motion_to_dismiss_dor':
+                    if 'dor' not in request_lower and 'director of revenue' not in request_lower:
+                        document_type_key = 'motion_to_dismiss_general'
+                elif document_type_key == 'motion_to_dismiss_general':
+                    if 'dor' in request_lower or 'director of revenue' in request_lower:
+                        document_type_key = 'motion_to_dismiss_dor'
+
+                # Bug fix: "entry of appearance" resolving to state when user asked for municipal
+                if document_type_key == 'entry_of_appearance_state':
+                    if 'muni' in request_lower or 'municipal' in request_lower:
+                        document_type_key = 'entry_of_appearance_muni'
+                elif document_type_key == 'entry_of_appearance_muni':
+                    if 'state' in request_lower and 'muni' not in request_lower and 'municipal' not in request_lower:
+                        document_type_key = 'entry_of_appearance_state'
+
             # If template name didn't match a DOCUMENT_TYPES key, try the user's original request
             if not document_type_key:
                 request_lower = request.lower()
