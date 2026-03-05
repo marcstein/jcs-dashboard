@@ -658,12 +658,18 @@ def format_query_results(rows: list[dict], explanation: str) -> str:
             if val is None:
                 formatted_values.append("-")
             elif isinstance(val, float):
+                # Check if it's a year (e.g. EXTRACT(YEAR FROM ...)) — show as integer
+                if ('year' in h_lower or 'month' in h_lower) and 1900 <= val <= 2100:
+                    formatted_values.append(str(int(val)))
                 # Check if it's a rate/percentage
-                if 'rate' in h_lower or 'percent' in h_lower or 'pct' in h_lower:
+                elif 'rate' in h_lower or 'percent' in h_lower or 'pct' in h_lower:
                     formatted_values.append(f"{val:.1f}%")
                 # Check if it's a currency amount
                 elif is_currency_column(h):
                     formatted_values.append(f"${val:,.2f}")
+                # Check if it looks like a whole number (e.g. count returned as float)
+                elif val == int(val) and abs(val) < 1_000_000:
+                    formatted_values.append(f"{int(val):,}")
                 else:
                     formatted_values.append(f"{val:,.1f}")
             elif isinstance(val, int):
@@ -734,15 +740,15 @@ async def api_chat(request: Request):
 
                 if error:
                     return JSONResponse({
-                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question.\n\n_DEBUG: sql={sql[:200]}_"
+                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question."
                     })
 
                 formatted = format_query_results(rows, explanation)
-                return JSONResponse({"response": f"_DEBUG: path=query, rows={len(rows)}, sql={sql[:100]}_\n\n{formatted}"})
+                return JSONResponse({"response": formatted})
 
             else:
                 # Text response
-                return JSONResponse({"response": f"_DEBUG: path=text, raw={assistant_text[:200]}_\n\n{parsed.get('response', assistant_text)}"})
+                return JSONResponse({"response": parsed.get("response", assistant_text)})
 
         except json.JSONDecodeError:
             # JSON parsing failed - try to extract and execute SQL if present
@@ -772,11 +778,11 @@ async def api_chat(request: Request):
 
                 if error:
                     return JSONResponse({
-                        "response": f"**Query Error:** {error}\n\n_DEBUG: path=fallback_sql, sql={sql_match[:200]}_"
+                        "response": f"**Query Error:** {error}\n\nPlease try rephrasing your question."
                     })
 
                 formatted = format_query_results(rows, "")
-                return JSONResponse({"response": f"_DEBUG: path=fallback_sql, rows={len(rows)}_\n\n{formatted}"})
+                return JSONResponse({"response": formatted})
 
             # No SQL found - return the text response but clean it up
             # Remove any JSON-like formatting that might confuse users
