@@ -78,7 +78,12 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 │   ├── test_dunning.py
 │   ├── test_cache.py
 │   ├── test_documents.py
-│   └── test_dashboard.py
+│   ├── test_dashboard.py
+│   ├── test_template_generation.py  # Template fill tests (all 56 templates)
+│   ├── test_prelaunch_docgen.py     # Pre-launch: document generation harness
+│   ├── test_prelaunch_chat.py       # Pre-launch: AI chat harness
+│   ├── run_prelaunch.py             # Pre-launch: test runner + report generator
+│   └── reports/                     # Generated test reports
 ├── templates/             # Email/notification templates
 ├── reports/               # Generated SOP compliance reports
 ├── data/templates/        # Templated .docx files with {{placeholders}}
@@ -846,6 +851,13 @@ All env vars stored in `.env` file in the project root.
 32. **Integrated aging data into dunning system** - Dunning queue now shows two amount columns: "Amount Due Now" (from latest aging batch via LEFT JOIN) and "Total Remaining Balance" (from `cached_invoices.balance_due`). Draft emails show both amounts when they differ, or a single "Amount Due" when same. The dunning model uses a CTE (`latest_aging_batch`) to find the most recent upload per firm. 212 of 296 dunning queue invoices matched aging data (71% coverage); remaining fall back to cached balance.
 33. **Fixed AI chat table rendering** - `get_connection()` sets `RealDictCursor` on the connection, so iterating rows yielded column names instead of values. Fixed `execute_chat_query()` to bypass the connection pool with a direct `psycopg2.connect()` and plain tuple cursor. Also fixed `ROUND()` errors by adding `::numeric` cast guidance to the AI system prompt, and added `Decimal`-to-float conversion in `format_query_results()`.
 34. **Fixed AI chat year/float formatting** - `EXTRACT(YEAR FROM ...)` returns `double precision`, which was displaying as `2,026.0`. Added detection for year-like values (1900-2100 range) and whole-number floats to format as integers. Also fixed stale `__pycache__` issue on production causing service to crash-loop on port 3000 — must clear bytecode cache (`find ... -name __pycache__ -exec rm -rf {}`) before restart.
+35. **Fixed SQLite syntax in AI chat MYCASE_SCHEMA** - System prompt contained SQLite functions (`strftime()`, `julianday()`) that would cause PostgreSQL query failures. Replaced with `EXTRACT(YEAR FROM ...)` and `CURRENT_DATE - date::date`. Also added notes about lowercase status values (`'open'`/`'closed'`) and boolean `completed` column to prevent AI from generating incorrect SQL.
+36. **Fixed negative currency formatting** - `format_query_results()` displayed negative amounts as `$-500.00` instead of `-$500.00`. Added sign-aware formatting with `abs()`.
+37. **Added pre-launch test harness** - Comprehensive test suites for the two most critical subsystems:
+    - `test_prelaunch_docgen.py`: 249 tests — catalog validation (5), template fill across all 56 templates (220), template identification (20), edge cases (2), DB existence checks (2). All 56 templates produce valid .docx with zero unfilled placeholders.
+    - `test_prelaunch_chat.py`: 71+ tests — `format_query_results()` unit tests (17), MYCASE_SCHEMA validation (8), SQL execution patterns (7), E2E Claude API→SQL→format pipeline (22 questions × 3 test types).
+    - `run_prelaunch.py`: Runner script that executes both suites and generates `tests/reports/PRELAUNCH_REPORT.md`.
+    - **Known identification bugs found**: "motion to dismiss" resolves to DOR variant instead of general; "entry of appearance for municipal court" resolves to state instead of muni. Both are `_identify_template()` DB search order issues.
 
 ### Template Consolidation
 
@@ -1141,6 +1153,21 @@ This project is migrating from a mixed SQLite/PostgreSQL codebase to **PostgreSQ
 - `conftest.py` provides test database fixtures (isolated PostgreSQL schema or test database)
 - Every module with financial calculations, state transitions, or SLA logic MUST have tests
 - Run: `uv run pytest tests/ -v`
+- **Pre-launch test harness** (requires `pytest` in venv — `pip install pytest`):
+  - `tests/test_prelaunch_docgen.py` — 249 tests: catalog validation, template fill (all 56), identification, edge cases
+  - `tests/test_prelaunch_chat.py` — 71+ tests: `format_query_results()` unit tests, schema validation, SQL execution, E2E chat
+  - `tests/run_prelaunch.py` — Runs both suites, generates `tests/reports/PRELAUNCH_REPORT.md`
+  - Production: `.venv/bin/python -m pytest tests/test_prelaunch_docgen.py tests/test_prelaunch_chat.py -v`
+  - E2E chat tests require `ANTHROPIC_API_KEY` (skipped if not set)
+- **Note**: `.gitignore` has `test_*.py` — use `git add -f` for test files in `tests/`
+
+#### AI Chat Schema (MYCASE_SCHEMA)
+- Located in `dashboard/routes/api.py` — instructs Claude to generate PostgreSQL SQL
+- **Case status values are lowercase**: `'open'`, `'closed'` (NOT `'Open'` or `'Closed'`)
+- **Task `completed` is boolean**: use `completed = false` (NOT `completed = 0`)
+- **DPD calculation**: `CURRENT_DATE - due_date::date` (NOT `julianday()`)
+- **Year filtering**: `EXTRACT(YEAR FROM date_column) = 2025` (NOT `strftime()`)
+- **ROUND() requires cast**: `ROUND(expr::numeric, 2)` (PostgreSQL requirement)
 
 #### Dashboard RBAC Pattern
 - Every route handler must call `data = get_data(request)` — this creates a `DashboardData` with the session's `firm_id` and `attorney_name`
