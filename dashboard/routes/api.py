@@ -606,9 +606,16 @@ def execute_chat_query(sql: str) -> tuple[list[dict], str | None]:
             column_names = [desc[0] for desc in cursor.description]
 
             # Fetch all rows as plain tuples, zip with column names
+            raw_rows = cursor.fetchall()
             rows = []
-            for row in cursor.fetchall():
+            for row in raw_rows:
                 rows.append(dict(zip(column_names, row)))
+
+            # Temporary debug: add diagnostics to see what's happening
+            if raw_rows:
+                sample = raw_rows[0]
+                debug_info = f"cursor_type={type(cursor).__name__}, row_type={type(sample).__name__}, row_repr={repr(sample)}"
+                rows.insert(0, {'_debug_info': debug_info})
 
             return rows, None
         finally:
