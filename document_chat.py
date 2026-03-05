@@ -994,9 +994,11 @@ class DocumentChatEngine:
         # -> "Document exported to: /path/to/Motion_to_Dismiss_26JE-CR00123.docx"
     """
 
-    def __init__(self, firm_id: str, attorney_id: int = None, api_key: str = None):
+    def __init__(self, firm_id: str, attorney_id: int = None, api_key: str = None,
+                 attorney_name_override: str = None):
         self.firm_id = firm_id
         self.attorney_id = attorney_id
+        self.attorney_name_override = attorney_name_override
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.sessions: Dict[str, DocumentSession] = {}
         self.current_session_id: Optional[str] = None
@@ -2062,6 +2064,28 @@ Email: {ap.email}"""
                 replacements.setdefault('signing_attorney_email', ap.email)
                 replacements.setdefault('service_signatory', ap.attorney_name)
 
+            # Override attorney name fields if a different attorney is logged in
+            # (e.g., Heidi Leopold logged in but only John Schleiffarth has a full profile)
+            if self.attorney_name_override:
+                override = self.attorney_name_override
+                replacements['attorney_name'] = override
+                replacements['attorney_full_name'] = override
+                replacements['attorney_names'] = override
+                replacements['signing_attorney'] = override
+                replacements['service_signatory'] = override
+                replacements['attorney1'] = override
+                # Update signature block if it was built from the primary profile
+                if self.attorney_profile:
+                    ap = self.attorney_profile
+                    sig_block = f"""{override}
+{ap.firm_name}
+{ap.firm_address}
+{ap.firm_city}, {ap.firm_state} {ap.firm_zip}
+Phone: {ap.phone}
+Email: {ap.email}"""
+                    replacements['attorney_signature_block'] = sig_block
+                    replacements['attorney1_signature_block'] = sig_block
+
             # Optional fields that should be empty (omitted) if not provided
             for blank_field in [
                 'second_attorney_name', 'second_attorney_bar', 'second_attorney_email',
@@ -2395,6 +2419,14 @@ Email: {ap.email}"""
             replacements.setdefault('firm_fax', ap.fax or '')
             replacements.setdefault('fax', ap.fax or '')
 
+        # Override attorney name fields if a different attorney is logged in
+        if self.attorney_name_override:
+            override = self.attorney_name_override
+            replacements['attorney_name'] = override
+            replacements['attorney_names'] = override
+            replacements['signing_attorney'] = override
+            replacements['service_signatory'] = override
+
         # Optional fields that should be empty (omitted) if not provided
         for blank_field in [
             'second_attorney_name', 'second_attorney_bar', 'second_attorney_email',
@@ -2530,8 +2562,9 @@ The lawyer will fill them in later. Do NOT make up values for placeholders."""
         # Get firm info for signature block from attorney profile
         if self.attorney_profile:
             ap = self.attorney_profile
+            display_name = self.attorney_name_override or ap.attorney_name
             firm_info = f"""
-Attorney: {ap.attorney_name}, #{ap.bar_number}
+Attorney: {display_name}, #{ap.bar_number}
 Firm: {ap.firm_name}
 Address: {ap.firm_address}, {ap.firm_city}, {ap.firm_state} {ap.firm_zip}
 Phone: {ap.phone}

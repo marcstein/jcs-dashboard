@@ -996,6 +996,7 @@ async def api_documents_chat(request: Request):
             # Create new session — use session firm_id and attorney profile
             firm_id = request.session.get("firm_id", "jcs_law")
             attorney_id = None
+            attorney_name_override = None
 
             # If logged-in user is an attorney, auto-set them as signing attorney
             attorney_name = request.session.get("attorney_name")
@@ -1005,10 +1006,18 @@ async def api_documents_chat(request: Request):
                     atty = get_attorney_by_name(firm_id, attorney_name)
                     if atty and atty.id:
                         attorney_id = atty.id
+                    else:
+                        # Attorney has no profile — use primary for firm details
+                        # but override the name for signing
+                        attorney_name_override = attorney_name
                 except Exception:
-                    pass  # Fall back to primary attorney
+                    attorney_name_override = attorney_name
 
-            chat_engine = DocumentChatEngine(firm_id=firm_id, attorney_id=attorney_id)
+            chat_engine = DocumentChatEngine(
+                firm_id=firm_id,
+                attorney_id=attorney_id,
+                attorney_name_override=attorney_name_override,
+            )
             session_id = f"doc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{id(chat_engine)}"
             _doc_sessions[session_id] = chat_engine
 
