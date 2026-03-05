@@ -197,6 +197,17 @@ def get_primary_attorney(firm_id: str) -> Optional[AttorneyProfile]:
     return manager.get_primary_attorney()
 
 
+def get_attorney_by_name(firm_id: str, attorney_name: str) -> Optional[AttorneyProfile]:
+    """Get an attorney by name for a firm. Matches case-insensitively."""
+    manager = AttorneyProfileManager(firm_id)
+    attorneys = manager.list_attorneys(active_only=True)
+    name_lower = attorney_name.lower()
+    for atty in attorneys:
+        if atty.attorney_name.lower() == name_lower:
+            return atty
+    return None
+
+
 def list_attorneys(firm_id: str) -> List[AttorneyProfile]:
     """List all active attorneys for a firm."""
     manager = AttorneyProfileManager(firm_id)
