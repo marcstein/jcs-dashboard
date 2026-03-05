@@ -117,7 +117,7 @@
                     data-stage="{{ inv.dunning_stage }}"
                     data-due-date="{{ inv.due_date | e }}"
                     onclick="draftDunningEmail(this)"
-                    title="Create Gmail draft for {{ inv.contact_name | e }}">
+                    title="Draft email in Outlook for {{ inv.contact_name | e }}">
                     &#9993; Draft
                 </button>
                 {% else %}
@@ -675,7 +675,7 @@
         </div>
         <div class="draft-modal-footer">
             <button class="btn btn-cancel" onclick="closeDraftModal()">Cancel</button>
-            <button class="btn btn-create-draft" id="btn-create-draft" onclick="createGmailDraft()">Create Gmail Draft</button>
+            <button class="btn btn-create-draft" id="btn-create-draft" onclick="openInOutlook()">Open in Outlook</button>
         </div>
     </div>
 </div>
@@ -785,30 +785,29 @@ function closeDraftModal() {
     _currentDraftInv = null;
 }
 
-function createGmailDraft() {
+function openInOutlook() {
     var btn = document.getElementById('btn-create-draft');
     btn.disabled = true;
-    btn.textContent = 'Creating draft...';
+    btn.textContent = 'Opening Outlook...';
 
     var to = document.getElementById('draft-to').value;
     var subject = document.getElementById('draft-subject').value;
     var body = document.getElementById('draft-body').value;
 
-    // Use Gmail compose URL to open a pre-filled draft in a new tab
-    var gmailUrl = 'https://mail.google.com/mail/?view=cm'
-        + '&to=' + encodeURIComponent(to)
-        + '&su=' + encodeURIComponent(subject)
+    // Use mailto: link to open in default mail client (Outlook desktop)
+    var mailtoUrl = 'mailto:' + encodeURIComponent(to)
+        + '?subject=' + encodeURIComponent(subject)
         + '&body=' + encodeURIComponent(body);
 
-    window.open(gmailUrl, '_blank');
+    window.location.href = mailtoUrl;
 
     // Reset button and close modal
     setTimeout(function() {
         btn.disabled = false;
-        btn.textContent = 'Create Gmail Draft';
+        btn.textContent = 'Open in Outlook';
         closeDraftModal();
-        showStatus('Gmail compose window opened for ' + (_currentDraftInv ? _currentDraftInv.contact_name : to), 'success');
-    }, 500);
+        showStatus('Outlook opened for ' + (_currentDraftInv ? _currentDraftInv.contact_name : to), 'success');
+    }, 1000);
 }
 
 // Close modal on overlay click
