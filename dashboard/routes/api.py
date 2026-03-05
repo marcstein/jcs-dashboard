@@ -594,7 +594,10 @@ def execute_chat_query(sql: str) -> tuple[list[dict], str | None]:
     """Execute a SQL query against the PostgreSQL MyCase cache database."""
     try:
         with get_connection() as conn:
-            cursor = conn.cursor()
+            # Use a plain tuple cursor so zip(column_names, row) works correctly
+            # (RealDictCursor iteration yields keys, not values)
+            import psycopg2.extensions
+            cursor = conn.cursor(cursor_factory=psycopg2.extensions.cursor)
             cursor.execute(sql)
 
             # Get column names
@@ -639,11 +642,15 @@ def format_query_results(rows: list[dict], explanation: str) -> str:
         return any(kw in col_lower for kw in currency_keywords)
 
     # Data rows
+    from decimal import Decimal
     for row in rows:
         formatted_values = []
         for h in headers:
             val = row[h]
             h_lower = h.lower()
+            # Convert Decimal to float for formatting (PostgreSQL ROUND returns Decimal)
+            if isinstance(val, Decimal):
+                val = float(val)
             if val is None:
                 formatted_values.append("-")
             elif isinstance(val, float):
