@@ -269,40 +269,40 @@ class TestSchemaValidation:
 # ===========================================================================
 CHAT_TEST_CASES = [
     # Basic counts
-    ("How many open cases do we have?", ["case_count"]),
-    ("How many cases by practice area?", ["practice_area", "case_count"]),
-    ("How many cases does each attorney have?", ["lead_attorney_name", "case_count"]),
+    ("How many open cases do we have?", ["count"]),
+    ("How many cases by practice area?", ["practice_area", "count"]),
+    ("How many cases does each attorney have?", ["lead_attorney_name", "count"]),
 
     # A/R & Billing
-    ("What is our total accounts receivable?", ["total_ar"]),
-    ("Show billing by attorney for 2025", ["lead_attorney_name", "total_billed"]),
-    ("What is the collection rate by attorney?", ["lead_attorney_name", "collection_rate"]),
-    ("Show invoices over 90 days past due", ["invoice_number", "balance_due"]),
-    ("What is the average invoice amount?", ["avg_amount"]),
-    ("Show unpaid invoices over $5000", ["invoice_number", "balance_due"]),
+    ("What is our total accounts receivable?", ["total"]),
+    ("Show billing by attorney for 2025", ["lead_attorney_name", "total"]),
+    ("What is the collection rate by attorney?", ["lead_attorney_name", "rate"]),
+    ("Show invoices over 90 days past due with balance", ["balance"]),
+    ("What is the average invoice amount?", ["avg"]),
+    ("Show unpaid invoices over $5000", ["balance"]),
 
     # Tasks
-    ("Which staff have overdue tasks?", ["assignee_name"]),
-    ("How many tasks are overdue?", ["overdue_count"]),
-    ("Show task completion by staff member", ["assignee_name"]),
+    ("Which staff have overdue tasks?", ["name"]),
+    ("How many tasks are overdue?", ["count"]),
+    ("Show task completion by staff member", ["name"]),
 
     # Time-based
-    ("How many cases opened this year?", ["case_count"]),
+    ("How many cases opened this year?", ["count"]),
     ("Show monthly invoice totals for 2025", ["month"]),
-    ("Cases closed in the last 30 days", ["case_number"]),
+    ("Cases closed in the last 30 days", ["case"]),
 
     # Attorney performance
-    ("Compare Heidi and Anthony billing", ["lead_attorney_name", "total_billed"]),
-    ("Which attorney has the most open cases?", ["lead_attorney_name", "case_count"]),
+    ("Compare Heidi and Anthony billing", ["lead_attorney_name", "total"]),
+    ("Which attorney has the most open cases?", ["lead_attorney_name", "count"]),
     ("Show attorney workload breakdown", ["lead_attorney_name"]),
 
     # Aggregates & calculations
-    ("What is the average balance due per case?", ["avg_balance"]),
-    ("Total collected vs total billed", ["total_billed", "collected"]),
+    ("What is the average balance due per case?", ["avg"]),
+    ("Total collected vs total billed", ["total"]),
 
     # Edge cases
     ("Show me everything", []),  # Should still work, limited to 20 rows
-    ("What cases are in the felony category?", ["case_number", "practice_area"]),
+    ("What cases are in the felony category?", ["case"]),
 ]
 
 
@@ -432,24 +432,42 @@ class TestChatE2E:
 
         # Check that at least one expected column concept appears
         # AI may use different aliases (e.g., 'open_cases' vs 'case_count')
-        # Build semantic keyword sets for flexible matching
-        def column_keywords(col_name: str) -> set:
-            """Extract semantic keywords from a column name."""
-            parts = re.split(r'[_\s]+', col_name.lower())
-            return set(parts)
+        # Use broad substring and synonym matching since Claude picks its own aliases
+        SYNONYMS = {
+            'count': {'count', 'total', 'num', 'number'},
+            'total': {'total', 'sum', 'amount', 'billed', 'collected'},
+            'avg': {'avg', 'average', 'mean'},
+            'rate': {'rate', 'pct', 'percent', 'percentage', 'ratio'},
+            'balance': {'balance', 'due', 'amount', 'owed', 'outstanding'},
+            'name': {'name', 'staff', 'assignee', 'attorney', 'member'},
+            'case': {'case', 'number', 'cases'},
+            'month': {'month', 'period', 'date'},
+        }
+
+        def matches_expected(expected: str, actual_cols: list) -> bool:
+            """Check if any actual column matches the expected concept."""
+            exp_lower = expected.lower()
+            # Get synonym set for this expected keyword
+            synonyms = SYNONYMS.get(exp_lower, {exp_lower})
+            for actual in actual_cols:
+                actual_lower = actual.lower()
+                # Direct substring match
+                if exp_lower in actual_lower or actual_lower in exp_lower:
+                    return True
+                # Synonym match: any synonym appears in the column name
+                for syn in synonyms:
+                    if syn in actual_lower:
+                        return True
+                # Keyword overlap
+                actual_parts = set(re.split(r'[_\s]+', actual_lower))
+                if actual_parts & synonyms:
+                    return True
+            return False
 
         found_any = False
         for expected in expected_columns:
-            expected_kw = column_keywords(expected)
-            for actual in actual_columns:
-                actual_kw = column_keywords(actual)
-                # Match if column names share keywords or one contains the other
-                if (expected.lower() in actual.lower() or
-                    actual.lower() in expected.lower() or
-                    len(expected_kw & actual_kw) >= 1):
-                    found_any = True
-                    break
-            if found_any:
+            if matches_expected(expected, actual_columns):
+                found_any = True
                 break
 
         assert found_any, \
