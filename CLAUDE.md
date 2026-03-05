@@ -18,6 +18,7 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - `kpi_snapshots` — Trend analysis
 - `payment_plan_payments`, `outreach_log`, `collections_holds`, `noiw_tracking` — Collections
 - `aging_invoice_uploads` — Aging invoice CSV uploads (batch-based, latest batch used by dunning)
+- `dashboard_users` — Dashboard login accounts with roles (admin, collections, attorney)
 - `firms`, `templates`, `generated_documents` — Document engine
 - `attorneys` — Attorney profiles
 - `jurisdictions`, `courts`, `document_type_taxonomy` — Multi-state jurisdiction layer
@@ -86,6 +87,7 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 │   └── Waiver_of_Arraignment_Generic.docx
 ├── import_filing_fee_memo.py   # Template import script (Filing Fee Memo)
 ├── reimport_bond_template.py   # Template import script (Bond Assignment)
+├── setup_users.py         # Dashboard user provisioning (RBAC accounts from caseload)
 ├── agent.py               # CLI entry point (thin — registers command groups)
 ├── api_client.py          # MyCase API client with OAuth, rate limiting
 ├── config.py              # Configuration (DATABASE_URL, env vars)
@@ -416,25 +418,60 @@ Production: https://jcs.lawmetrics.ai
 
 ### Dashboard Files
 - `dashboard/app.py` - FastAPI application
-- `dashboard/auth.py` - Authentication (multi-tenant, firm_id from login form)
+- `dashboard/auth.py` - Authentication (multi-tenant, firm_id from login), role/attorney_name session management
 - `dashboard/config.py` - Configuration (env vars, admin credentials)
-- `dashboard/routes/` - Route handlers split by domain (main, ar, attorneys, noiw, phases, trends, promises, payments, api, documents)
-- `dashboard/models/` - Data access split by domain (base, ar, attorneys, tasks, etc.)
-- `dashboard/templates/` - Jinja2 templates
+- `dashboard/routes/` - Route handlers split by domain (main, ar, attorneys, noiw, phases, trends, promises, payments, api, documents) — each has role guards
+- `dashboard/models/` - Data access split by domain (base, ar, attorneys, tasks, etc.) — all support attorney data scoping
+- `dashboard/templates/` - Jinja2 templates (base.html has role-conditional navigation)
 - `dashboard/static/` - CSS styles
 
 ### Multi-Tenant Authentication
 - Login requires **firm_id**, username, and password
-- firm_id is stored in session and used by `get_data(request)` to create per-request `DashboardData(firm_id=X)`
+- firm_id is stored in session and used by `get_data(request)` to create per-request `DashboardData(firm_id=X, attorney_name=Y)`
 - Each route handler calls `data = get_data(request)` — NO module-level `DashboardData()` singletons
 - Env-based admin fallback: `DASHBOARD_ADMIN_USER`/`DASHBOARD_ADMIN_PASSWORD_HASH` (works with any valid firm_id)
 - DB users: `dashboard_users` table with `UNIQUE(firm_id, username)` constraint
 
+### Role-Based Access Control (RBAC)
+
+Three roles control what users see and access:
+
+| Role | Navigation | Data Scope | Home Page |
+|------|-----------|------------|-----------|
+| `admin` | Full: Home, Attorneys, AR, NOIW, Phases, Trends, Payments, Dunning, Documents | All firm data | `/` (main dashboard) |
+| `collections` | AR, NOIW, Dunning, Payments, Aging Upload | All firm financial data | `/ar` |
+| `attorney` | Attorneys, Documents, Phases, Trends, Payments | **Own cases only** (filtered by `lead_attorney_name`) | `/attorneys` |
+
+**Session variables**: `role`, `attorney_name` (set at login from `dashboard_users` table)
+
+**Route guards**: Each route checks `request.session.get("role")` and returns 403 if unauthorized. Attorney role is blocked from: `/` (home), `/ar`, `/noiw`, `/promises`, `/dunning`, `/aging-upload`.
+
+**Attorney data scoping**: When `attorney_name` is set in session, `DashboardData` passes it through to all model classes. The `_attorney_case_filter(table_alias)` helper in `dashboard/models/base.py` returns a `(sql_fragment, params)` tuple that appends `AND {table}.lead_attorney_name = %s` to queries. This filters:
+- Attorney productivity (active cases, invoices, aging buckets)
+- A/R and payment analytics (invoices joined through `cached_cases`)
+- Phase distribution and velocity (joins `case_phase_history` → `cached_cases`)
+- Trends (live-computed metrics instead of firm-wide KPI snapshots)
+- Cross-attorney page access is blocked (attorney can only view their own `/attorneys/{name}` page)
+
+**Navigation**: `base.html` uses `{% if role != 'attorney' %}` to conditionally show/hide nav items. Promises tab removed from all roles.
+
 ### Dashboard Users
 - Login: `dashboard_users` table checked first, then env-based admin fallback
+- Table columns: `firm_id`, `username`, `password_hash`, `role` (admin/collections/attorney), `attorney_name` (for attorney role)
 - DB-created users: `firm_id` must match what user enters on login form (e.g. `jcs_law`)
 - Env admin: `DASHBOARD_ADMIN_USER`/`DASHBOARD_ADMIN_PASSWORD_HASH` in `.env`; if hash not set, defaults to password `admin`
 - Generate password hash: `python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your_password'))"`
+
+### User Provisioning (setup_users.py)
+```bash
+python setup_users.py --firm-id jcs_law --admin-password <password>
+```
+- Discovers lead attorneys from `cached_cases` (only those with open cases)
+- Creates one `attorney` account per lead attorney (username = lowercase first name, e.g. `anthony`)
+- Creates `collections` account for Melissa Scarlett (username = `melissa`)
+- Updates admin password if specified
+- Prints credential table — save output since passwords are randomly generated
+- Uses upsert logic — safe to re-run (updates existing users, adds new ones)
 
 ### Key Metrics Displayed
 - **A/R Overview**: Total AR, 60-120 day, 180+ day (uncollectible)
@@ -473,6 +510,11 @@ Production: https://jcs.lawmetrics.ai
 - **FIRM_ID env var**: SyncManager reads `FIRM_ID` env var first (e.g. `jcs_law`), avoiding the MyCase API UUID (`d5AgNpGZZvZ9Lgpce7ri4Q`) as firm_id
 - **Fixed INTERVAL parameterization**: Rolling 6-month attorney queries used `INTERVAL '%s months'` which psycopg2 doesn't substitute inside quotes; changed to `INTERVAL '1 month' * %s`
 - **Fixed dunning due_date casting**: Added `::date` cast in dunning queries to handle timestamp columns; handle both int and timedelta returns from date subtraction
+- **Role-based access control**: Three roles (admin, collections, attorney) with role-conditional navigation, route guards, and attorney-scoped data filtering via `lead_attorney_name` on `cached_cases`
+- **Attorney data scoping**: `_attorney_case_filter()` helper in `dashboard/models/base.py` provides reusable SQL fragment for attorney isolation across all model classes (attorneys, AR, phases, trends, payments)
+- **Attorney live metrics**: Trends page computes attorney-specific KPIs live (total_ar, ar_over_60_pct, overdue_tasks) instead of using firm-wide `kpi_snapshots`
+- **User provisioning script**: `setup_users.py` auto-discovers attorneys from caseload and creates dashboard accounts with appropriate roles
+- **Removed Promises from nav**: Promises tab hidden from all roles (feature deprioritized)
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
@@ -1099,6 +1141,14 @@ This project is migrating from a mixed SQLite/PostgreSQL codebase to **PostgreSQ
 - `conftest.py` provides test database fixtures (isolated PostgreSQL schema or test database)
 - Every module with financial calculations, state transitions, or SLA logic MUST have tests
 - Run: `uv run pytest tests/ -v`
+
+#### Dashboard RBAC Pattern
+- Every route handler must call `data = get_data(request)` — this creates a `DashboardData` with the session's `firm_id` and `attorney_name`
+- Role checks: `if request.session.get("role") == "attorney": return RedirectResponse(...)` or raise 403
+- Model classes inherit `attorney_name` from `DashboardData` and use `_attorney_case_filter(table_alias)` for SQL filtering
+- `_attorney_case_filter()` returns `("", ())` when `attorney_name` is None (admin/collections) — no filter applied
+- When adding new model methods that query case-related data, always JOIN to `cached_cases` and include `{af_sql}` in the WHERE clause
+- Template context must include `role=request.session.get("role")` for nav rendering
 
 #### Code Organization Rules
 - No module should exceed ~500 lines — split into submodules if growing beyond that
