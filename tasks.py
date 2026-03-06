@@ -270,25 +270,33 @@ def refresh_firm_tokens(self, firm_id: str):
 def _refresh_token(firm_id: str, db):
     """Internal: refresh a firm's MyCase OAuth token.
 
-    Updates both the platform DB and data/tokens.json so the existing
-    dashboard app stays in sync during the migration period.
+    Uses per-firm client_id/secret from FirmSettings (database), falling
+    back to env vars during migration period. Updates both the platform DB
+    and data/tokens.json so the existing dashboard app stays in sync.
     """
     import json
     import httpx
     from pathlib import Path
-    from config import MYCASE_AUTH_URL, CLIENT_ID, CLIENT_SECRET
+    from config import MYCASE_AUTH_URL, get_mycase_credentials
 
     creds = db.get_mycase_credentials(firm_id)
     if not creds:
         raise ValueError(f"No credentials found for firm {firm_id}")
+
+    # Get per-firm client_id/secret from database (falls back to env vars)
+    firm_creds = get_mycase_credentials(firm_id)
+    client_id = firm_creds.get("client_id") or ""
+    client_secret = firm_creds.get("client_secret") or ""
+    if not client_id or not client_secret:
+        raise ValueError(f"No MyCase client_id/secret configured for firm {firm_id}")
 
     response = httpx.post(
         f"{MYCASE_AUTH_URL}/oauth/token",
         data={
             "grant_type": "refresh_token",
             "refresh_token": creds.refresh_token,
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
+            "client_id": client_id,
+            "client_secret": client_secret,
         },
         timeout=30,
     )
@@ -421,12 +429,27 @@ def _generate_events_reports(firm_id: str, days: int = 7) -> Dict[str, Any]:
 
 
 def _notify_sync_complete(firm_id: str, firm_name: str, records: int):
-    """Notify firm admin that initial sync is complete."""
+    """Notify firm admin that initial sync is complete via Slack/email."""
     from platform_db import get_platform_db
 
     db = get_platform_db()
     users = db.get_firm_users(firm_id)
     admins = [u for u in users if u.role == "admin"]
+
+    # Send Slack notification if configured for this firm
+    try:
+        from notifications import NotificationManager, NotificationChannel, Notification
+        nm = NotificationManager(firm_id=firm_id)
+        slack_cfg = nm._config.get("slack", {})
+        if slack_cfg.get("webhook_url"):
+            nm._dry_run = False  # Actually send
+            nm.send(Notification(
+                title="Initial Sync Complete",
+                message=f"*{firm_name}*: Initial sync complete — {records:,} records imported.",
+                channel=NotificationChannel.SLACK,
+            ))
+    except Exception as e:
+        logger.warning(f"Slack notification failed for {firm_id}: {e}")
 
     for admin in admins:
         logger.info(

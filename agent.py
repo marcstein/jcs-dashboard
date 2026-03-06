@@ -28,6 +28,7 @@ from commands.users import users
 from commands.phases import phases
 from commands.overrides import overrides
 from commands.dashboard import dashboard_cmd
+from commands.firms import firms
 
 # AI and Document Generation Commands
 from ai_commands import (
@@ -73,6 +74,7 @@ cli.add_command(users)
 cli.add_command(phases)
 cli.add_command(overrides)
 cli.add_command(dashboard_cmd, name="dashboard")
+cli.add_command(firms)
 
 # ── Register AI / Document Generation groups ────────────────────────────
 

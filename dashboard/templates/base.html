@@ -31,6 +31,9 @@
             <a href="/wonky" class="{% if request.url.path == '/wonky' %}active{% endif %}">Wonky</a>
             <a href="/reports" class="{% if request.url.path == '/reports' %}active{% endif %}">Reports</a>
             {% endif %}
+            {% if role == 'admin' %}
+            <a href="/firms" class="{% if '/firms' in request.url.path %}active{% endif %}">Firms</a>
+            {% endif %}
         </div>
         <div class="nav-user">
             <button id="chatToggle" class="btn-chat" title="AI Assistant">

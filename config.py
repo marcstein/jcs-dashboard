@@ -31,13 +31,44 @@ LOGS_DIR.mkdir(exist_ok=True)
 MYCASE_AUTH_URL = "https://auth.mycase.com"
 MYCASE_API_URL = "https://external-integrations.mycase.com/v1"
 
-# OAuth Credentials (load from environment or use defaults for dev)
-CLIENT_ID = os.getenv("MYCASE_CLIENT_ID", "q6TmALUXVPbqZscL")
-CLIENT_SECRET = os.getenv("MYCASE_CLIENT_SECRET", "DH2mQVLkyXXU3Zeuu5nvyNDD5bfdQaCE")
+# OAuth Credentials
+# DEPRECATED: These module-level constants are for backward compatibility only.
+# New code should use FirmSettings(firm_id).get_mycase_credentials() instead.
+# These still work for single-firm deployments and CLI tools.
+CLIENT_ID = os.getenv("MYCASE_CLIENT_ID", "")
+CLIENT_SECRET = os.getenv("MYCASE_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("MYCASE_REDIRECT_URI", "https://legal.practical.ai/oauth/callback")
 
-# Token storage
+# Token storage (legacy — single-firm only; multi-firm uses DB)
 TOKEN_FILE = DATA_DIR / "tokens.json"
+
+
+def get_mycase_credentials(firm_id: str = None) -> dict:
+    """Get MyCase OAuth credentials, preferring database over env vars.
+
+    Returns dict with: client_id, client_secret, oauth_token, oauth_refresh,
+                       token_expires_at, mycase_firm_id, connected
+    """
+    if firm_id:
+        try:
+            from firm_settings import get_firm_settings
+            fs = get_firm_settings(firm_id)
+            creds = fs.get_mycase_credentials()
+            if creds.get("client_id"):
+                return creds
+        except (ValueError, Exception):
+            pass
+
+    # Fallback to env vars
+    return {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "oauth_token": "",
+        "oauth_refresh": "",
+        "token_expires_at": None,
+        "mycase_firm_id": None,
+        "connected": bool(CLIENT_ID),
+    }
 
 # Rate limiting
 RATE_LIMIT_PER_SECOND = 25

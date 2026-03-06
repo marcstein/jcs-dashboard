@@ -457,9 +457,20 @@ class DunningEmailManager:
         self.firm_id = firm_id
         self.test_mode = test_mode
         self.test_email = test_email or "marc.stein@gmail.com"
-        self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
-        self.from_email = "melissa@jcslawstl.com"
-        self.from_name = "Melissa Scarlett - JCS Law Firm"
+
+        # Load firm-specific config from database
+        try:
+            from firm_settings import get_firm_settings
+            fs = get_firm_settings(firm_id)
+            self.sendgrid_api_key = fs.get_sendgrid_key() or ""
+            dunning_cfg = fs.get_dunning_config()
+            self.from_email = dunning_cfg.get("from_email") or "billing@firm.com"
+            self.from_name = dunning_cfg.get("from_name") or fs.firm_name
+        except (ValueError, Exception):
+            # Fallback if firm not in DB yet (migration in progress)
+            self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
+            self.from_email = os.getenv("DUNNING_FROM_EMAIL", "billing@firm.com")
+            self.from_name = os.getenv("DUNNING_FROM_NAME", "Law Firm - Billing")
 
     def get_invoices_for_stage(self, stage: DunningStage, limit: int = 1) -> List[DunningInvoice]:
         """Get invoices that match a dunning stage from PostgreSQL."""

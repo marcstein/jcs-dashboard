@@ -28,9 +28,11 @@ def ensure_all_tables():
     from db.promises import ensure_promises_tables
     from db.trends import ensure_trends_tables
     from db.collections import ensure_collections_tables
+    from db.firms import ensure_firms_tables
     from db.documents import ensure_documents_tables
     from db.attorneys import ensure_attorneys_tables
 
+    ensure_firms_tables()
     ensure_cache_tables()
     ensure_tracking_tables()
     ensure_phases_tables()

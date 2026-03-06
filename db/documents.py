@@ -13,12 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 DOCUMENTS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS firms (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    settings JSONB DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- NOTE: firms table is defined in db/firms.py (single source of truth).
+-- Do NOT add a CREATE TABLE firms here.
 
 CREATE TABLE IF NOT EXISTS templates (
     id SERIAL PRIMARY KEY,
@@ -119,32 +115,21 @@ def ensure_documents_tables():
 
 
 # ── Firms ─────────────────────────────────────────────────────
+# Firm CRUD functions are now in db/firms.py (single source of truth).
+# These wrappers remain for backward compatibility.
 
 def upsert_firm(firm_id: str, name: str, settings: dict = None) -> str:
+    """Backward-compatible wrapper — delegates to db.firms.upsert_firm()."""
     import json
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO firms (id, name, settings)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                settings = COALESCE(EXCLUDED.settings, firms.settings)
-            RETURNING id
-            """,
-            (firm_id, name, json.dumps(settings or {})),
-        )
-        row = cur.fetchone()
-        return row["id"] if row else firm_id
+    from db.firms import upsert_firm as _upsert_firm
+    result = _upsert_firm(firm_id, name, settings=json.dumps(settings or {}))
+    return result["id"] if result else firm_id
 
 
 def get_firm(firm_id: str) -> Optional[Dict]:
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM firms WHERE id = %s", (firm_id,))
-        row = cur.fetchone()
-        return dict(row) if row else None
+    """Backward-compatible wrapper — delegates to db.firms.get_firm()."""
+    from db.firms import get_firm as _get_firm
+    return _get_firm(firm_id)
 
 
 # ── Templates ─────────────────────────────────────────────────

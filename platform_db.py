@@ -105,34 +105,14 @@ class PlatformDB:
             conn.close()
 
     def _init_tables(self):
+        """Initialize tables. Firms, sync_status, sync_history, and audit_log
+        are now managed by db/firms.py (single source of truth).
+        Only the users table is created here (platform-specific)."""
+        from db.firms import ensure_firms_tables
+        ensure_firms_tables()
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS firms (
-                    id VARCHAR(36) PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL,
-                    subscription_status VARCHAR(20) DEFAULT 'trial',
-                    subscription_tier VARCHAR(20) DEFAULT 'standard',
-                    mycase_connected BOOLEAN DEFAULT FALSE,
-                    mycase_firm_id INTEGER,
-                    mycase_oauth_token TEXT,
-                    mycase_oauth_refresh TEXT,
-                    mycase_token_expires_at TIMESTAMP,
-                    stripe_customer_id VARCHAR(255),
-                    stripe_subscription_id VARCHAR(255),
-                    trial_ends_at TIMESTAMP,
-                    sync_frequency_minutes INTEGER DEFAULT 240,
-                    next_sync_at TIMESTAMP,
-                    last_sync_at TIMESTAMP,
-                    last_sync_status VARCHAR(20),
-                    last_sync_error TEXT,
-                    last_sync_records INTEGER,
-                    last_sync_duration_seconds REAL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -149,53 +129,8 @@ class PlatformDB:
                 )
             """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sync_status (
-                    firm_id VARCHAR(36) REFERENCES firms(id) ON DELETE CASCADE,
-                    status VARCHAR(20) DEFAULT 'pending',
-                    started_at TIMESTAMP,
-                    completed_at TIMESTAMP,
-                    records_synced INTEGER DEFAULT 0,
-                    error_message TEXT,
-                    PRIMARY KEY (firm_id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sync_history (
-                    id SERIAL PRIMARY KEY,
-                    firm_id VARCHAR(36) REFERENCES firms(id) ON DELETE CASCADE,
-                    status VARCHAR(20) DEFAULT 'started',
-                    triggered_by VARCHAR(50) DEFAULT 'scheduler',
-                    celery_task_id VARCHAR(255),
-                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    completed_at TIMESTAMP,
-                    duration_seconds REAL,
-                    records_synced INTEGER DEFAULT 0,
-                    entity_results JSONB,
-                    error_message TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS audit_log (
-                    id SERIAL PRIMARY KEY,
-                    firm_id VARCHAR(36) REFERENCES firms(id) ON DELETE CASCADE,
-                    user_id VARCHAR(36),
-                    action VARCHAR(100) NOT NULL,
-                    details JSONB,
-                    ip_address VARCHAR(45),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_firm ON users(firm_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_firm ON audit_log(firm_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_history_firm ON sync_history(firm_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_firms_next_sync ON firms(next_sync_at)")
 
     def _encrypt(self, value: str) -> str:
         if self.fernet:

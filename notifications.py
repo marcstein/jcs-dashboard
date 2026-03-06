@@ -95,32 +95,84 @@ class NotificationManager:
     - Dry-run mode for testing
     """
 
-    def __init__(self):
+    def __init__(self, firm_id: str = None):
+        self.firm_id = firm_id
         self.config_file = DATA_DIR / "notifications_config.json"
         self.log_file = DATA_DIR / "notifications_log.json"
         self._config = self._load_config()
         self._dry_run = self._config.get("dry_run", True)
 
     def _load_config(self) -> Dict:
-        """Load notification configuration."""
+        """Load notification configuration.
+
+        If firm_id is set, loads from the firm's database record via FirmSettings.
+        Falls back to config file or env vars if firm not in DB.
+        """
+        # Try database-driven config first (multi-tenant)
+        if self.firm_id:
+            try:
+                from firm_settings import get_firm_settings
+                fs = get_firm_settings(self.firm_id)
+                firm_info = fs.get_firm_info()
+                twilio_cfg = fs.get_twilio_config()
+                smtp_cfg = fs.get_smtp_config()
+                return {
+                    "dry_run": True,
+                    "enabled_channels": ["console"],
+                    "slack": {
+                        "webhook_url": fs.get_slack_webhook() or "",
+                        "default_channel": "#mycase-alerts",
+                        "username": "LawMetrics Bot",
+                        "icon_emoji": ":scales:",
+                    },
+                    "email": {
+                        "api_key": fs.get_sendgrid_key() or "",
+                        "from_email": fs.get_sendgrid_from_email() or firm_info.get("email", ""),
+                        "from_name": fs.get_sendgrid_from_name() or firm_info.get("name", ""),
+                    },
+                    "smtp": {
+                        "smtp_server": smtp_cfg.get("server", "smtp.gmail.com"),
+                        "smtp_port": smtp_cfg.get("port", 587),
+                        "username": smtp_cfg.get("username", ""),
+                        "password": smtp_cfg.get("password", ""),
+                        "from_email": smtp_cfg.get("from_email", ""),
+                        "from_name": firm_info.get("name", ""),
+                    },
+                    "sms": {
+                        "account_sid": twilio_cfg.get("account_sid", ""),
+                        "auth_token": twilio_cfg.get("auth_token", ""),
+                        "from_number": twilio_cfg.get("from_number", ""),
+                    },
+                    "routing": {
+                        "critical_alerts": ["slack", "email"],
+                        "daily_reports": ["slack"],
+                        "deadline_reminders": ["email"],
+                        "payment_reminders": ["email", "sms"],
+                    },
+                    "recipients": {},  # populated from staff table per firm
+                }
+            except (ValueError, Exception):
+                pass  # Fall through to file/env-based config
+
+        # Legacy: file-based config
         if self.config_file.exists():
             with open(self.config_file) as f:
                 return json.load(f)
 
-        # Default config
+        # Legacy: env-var based config (single-firm fallback)
         return {
             "dry_run": True,
             "enabled_channels": ["console"],
             "slack": {
                 "webhook_url": os.getenv("SLACK_WEBHOOK_URL", ""),
                 "default_channel": "#mycase-alerts",
-                "username": "MyCase Bot",
+                "username": "LawMetrics Bot",
                 "icon_emoji": ":scales:",
             },
             "email": {
                 "api_key": os.getenv("SENDGRID_API_KEY", ""),
-                "from_email": "mycase@jcslaw.com",
-                "from_name": "JCS Law Firm - MyCase",
+                "from_email": os.getenv("DUNNING_FROM_EMAIL", ""),
+                "from_name": os.getenv("DUNNING_FROM_NAME", ""),
             },
             "smtp": {
                 "smtp_server": "smtp.gmail.com",
@@ -128,7 +180,7 @@ class NotificationManager:
                 "username": os.getenv("SMTP_USERNAME", ""),
                 "password": os.getenv("SMTP_PASSWORD", ""),
                 "from_email": os.getenv("SMTP_FROM_EMAIL", ""),
-                "from_name": "JCS Law Firm - MyCase",
+                "from_name": "",
             },
             "sms": {
                 "account_sid": os.getenv("TWILIO_ACCOUNT_SID", ""),
@@ -136,20 +188,12 @@ class NotificationManager:
                 "from_number": os.getenv("TWILIO_FROM_NUMBER", ""),
             },
             "routing": {
-                # Route notifications by type to channels
                 "critical_alerts": ["slack", "email"],
                 "daily_reports": ["slack"],
                 "deadline_reminders": ["email"],
                 "payment_reminders": ["email", "sms"],
             },
-            "recipients": {
-                # Staff notification preferences
-                "melissa": {"email": "", "slack": "@melissa", "sms": ""},
-                "ty": {"email": "", "slack": "@ty", "sms": ""},
-                "tiffany": {"email": "", "slack": "@tiffany", "sms": ""},
-                "alison": {"email": "", "slack": "@alison", "sms": ""},
-                "cole": {"email": "", "slack": "@cole", "sms": ""},
-            },
+            "recipients": {},
         }
 
     def save_config(self, config: Dict):

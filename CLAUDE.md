@@ -1113,6 +1113,182 @@ Architecture specification for expanding the document generation engine from Mis
 
 ---
 
+## Multi-Firm Scaling Architecture
+
+### Status: PHASE 3 IN PROGRESS
+
+LawMetrics.ai is scaling from a single-firm deployment (JCS Law) to a multi-firm SaaS platform. All firm-specific configuration has been moved from `.env` environment variables to per-firm database records.
+
+### Key Components
+
+#### `db/firms.py` — Single Source of Truth for Firms Table
+- Unified schema combining previous definitions from `db/documents.py` and `platform_db.py`
+- Core columns: id, name, subscription_status/tier, Stripe IDs, MyCase OAuth, sync config
+- `notification_config JSONB` stores all per-firm notification settings (SendGrid, Slack, Twilio, SMTP, dunning)
+- Firm branding: `firm_phone`, `firm_email`, `firm_website`, `logo_url`
+- Generic `settings JSONB` for feature flags, schedule preferences, etc.
+- Supporting tables: `sync_status`, `sync_history`, `audit_log`
+- Functions: `ensure_firms_tables()`, `get_firm()`, `upsert_firm()`, `list_firms()`, `update_firm_notification_config()`
+
+#### `firm_settings.py` — FirmSettings Service Class
+- Replaces all `os.getenv()` calls for firm-specific values
+- Loads firm record from DB once at construction, call `.refresh()` to reload
+- Key methods:
+  - `.get_sendgrid_key()`, `.get_dunning_config()` — email/dunning
+  - `.get_slack_webhook()` — Slack notifications
+  - `.get_twilio_config()`, `.has_twilio()` — SMS
+  - `.get_mycase_credentials()`, `.is_mycase_connected()` — MyCase OAuth
+  - `.get_firm_info()`, `.firm_name`, `.firm_phone` — branding
+  - `.get_subscription_status()`, `.is_active()` — subscription
+  - `.get_sync_config()`, `.get_schedule_config()` — automation
+  - `.get_setting(key)` — generic feature flags
+- Module-level `get_firm_settings(firm_id, use_cache=True)` with optional caching
+- `clear_settings_cache()` to invalidate after config updates
+
+#### `commands/firms.py` — Firm Management CLI
+```bash
+python agent.py firms list                         # List all registered firms
+python agent.py firms create "Name" --id firm_id   # Create new firm
+python agent.py firms show firm_id                 # Show firm config (all panels)
+python agent.py firms set-config firm_id \         # Update notification config
+    --sendgrid-key SG.xxx \
+    --dunning-email billing@firm.com \
+    --slack-webhook https://hooks.slack.com/xxx \
+    --firm-phone "(555) 123-4567"
+python agent.py firms migrate-env firm_id          # Migrate .env → database
+python agent.py firms migrate-env firm_id --dry-run # Preview migration
+python agent.py firms run-migration --migration 001 # Run DB migration
+```
+
+#### `db/migrations/001_consolidate_firms.py` — JCS Migration Script
+- Populates JCS firm record from current `.env` values
+- Builds `notification_config` JSONB from SendGrid, Slack, Twilio, SMTP env vars
+- Migrates OAuth tokens from `data/tokens.json` into firms table
+- Idempotent (safe to re-run)
+
+### What's Wired to FirmSettings
+
+| Module | What Changed |
+|--------|-------------|
+| `dashboard/routes/api.py` | Dunning batch send + draft email use `FirmSettings` for SendGrid key, from_email, firm_name, firm_phone |
+| `dunning_emails.py` | `DunningEmailManager.__init__()` loads SendGrid/from config from FirmSettings (env fallback) |
+| `notifications.py` | `NotificationManager(firm_id=)` loads all channel config from FirmSettings when firm_id provided |
+| `config.py` | Added `get_mycase_credentials(firm_id=)` that checks DB first, falls back to env vars. Module-level `CLIENT_ID`/`CLIENT_SECRET` deprecated |
+
+### notification_config JSONB Keys
+
+All per-firm notification settings stored in `firms.notification_config`:
+
+| Key | Description | Example |
+|-----|-------------|---------|
+| `sendgrid_api_key` | SendGrid API key | `SG.xxx` |
+| `sendgrid_from_email` | SendGrid default from address | `alerts@firm.com` |
+| `sendgrid_from_name` | SendGrid default from name | `Firm Name` |
+| `dunning_from_email` | Dunning notice from address | `billing@firm.com` |
+| `dunning_from_name` | Dunning notice from name | `Firm - Billing` |
+| `slack_webhook_url` | Slack incoming webhook URL | `https://hooks.slack.com/...` |
+| `twilio_account_sid` | Twilio account SID | `ACxxx` |
+| `twilio_auth_token` | Twilio auth token | `xxx` |
+| `twilio_from_number` | Twilio from phone number | `+15551234567` |
+| `smtp_server` | SMTP server | `smtp.gmail.com` |
+| `smtp_port` | SMTP port | `587` |
+| `smtp_username` | SMTP username | `user@gmail.com` |
+| `smtp_password` | SMTP app password | `xxx` |
+| `smtp_from_email` | SMTP from address | `user@gmail.com` |
+
+### Existing Multi-Tenant Infrastructure (Not Yet Activated)
+
+These modules were written earlier and are ready to activate in Phase 4:
+
+| Module | Purpose |
+|--------|---------|
+| `platform_db.py` | PlatformDB class — firm CRUD, credential encryption (Fernet), sync orchestration |
+| `tenant.py` | TenantContext via `contextvars` — pass firm_id through call stack without explicit params |
+| `celery_app.py` | Redis broker + Beat schedule: dispatch syncs every 5 min, refresh tokens every 30 min |
+| `tasks.py` | Celery tasks: `dispatch_pending_syncs`, `sync_firm_task`, `refresh_expiring_tokens`, `generate_firm_reports` |
+| `api_client_mt.py` | Multi-tenant API client wrapper |
+| `sync_mt.py` | Multi-tenant sync orchestrator |
+
+### Scaling Phases
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Unified `firms` table, migration script | ✅ Complete |
+| 2 | `FirmSettings` service, `commands/firms.py` CLI | ✅ Complete |
+| 3 | Wire FirmSettings into existing code (api.py, notifications, config, dunning) | ✅ Complete |
+| 4 | Activate Celery infrastructure for per-firm automation | Pending |
+| 5 | Firm onboarding dashboard UI | Pending |
+
+### Onboarding a New Firm
+
+```bash
+# 1. Create the firm record
+python agent.py firms create "Smith & Associates, P.C." --id smith_law
+
+# 2. Configure notification channels
+python agent.py firms set-config smith_law \
+    --sendgrid-key SG.xxx \
+    --dunning-email billing@smithlaw.com \
+    --dunning-name "Smith Law - Billing" \
+    --slack-webhook https://hooks.slack.com/xxx \
+    --firm-phone "(555) 555-5555" \
+    --firm-email info@smithlaw.com
+
+# 3. Connect MyCase (OAuth flow — Phase 4)
+# For now: set credentials manually in DB
+
+# 4. Create dashboard users
+python setup_users.py --firm-id smith_law --admin-password <password>
+
+# 5. Run initial sync
+FIRM_ID=smith_law python agent.py sync
+```
+
+### Celery Deployment (Phase 4)
+
+Per-firm automation uses Celery with Redis broker. The infrastructure is ready to activate.
+
+**Required:**
+- Redis server (local or hosted)
+- `REDIS_URL` env var (default: `redis://localhost:6379/0`)
+
+**Starting workers:**
+```bash
+# Start worker (handles sync, reports queues)
+celery -A celery_app worker --loglevel=info --concurrency=3 -Q default,sync,reports
+
+# Start beat scheduler (dispatches periodic tasks)
+celery -A celery_app beat --loglevel=info
+
+# Development: both in one process
+celery -A celery_app worker --beat --loglevel=info --concurrency=3
+```
+
+**Beat schedule (automatic):**
+
+| Interval | Task | Queue | Description |
+|----------|------|-------|-------------|
+| Every 5 min | `dispatch_pending_syncs` | default | Find firms due for sync, queue sync tasks |
+| Every 30 min | `refresh_expiring_tokens` | sync | Proactively refresh OAuth tokens expiring within 1 hour |
+| Daily 12:30 UTC | `dispatch_daily_reports` | reports | Generate reports for all active firms |
+| Every 1 hour | `detect_stale_syncs` | default | Find syncs stuck >45 min, mark failed |
+| Sunday 3:00 AM | `cleanup_sync_history` | default | Purge sync history >90 days old |
+
+**Per-firm sync flow:**
+1. `dispatch_pending_syncs` queries `firms` table for firms where `next_sync_at <= NOW()`
+2. Queues `sync_firm_task` for each firm (staggered by 5 seconds)
+3. `sync_firm_task` validates subscription, refreshes token if needed, runs sync via `TenantContextManager`
+4. Records results in `sync_history`, schedules next sync based on `sync_frequency_minutes`
+
+**Key files:**
+- `celery_app.py` — App config, broker, beat schedule, queue routing
+- `tasks.py` — Task implementations (sync, token refresh, reports, maintenance)
+- `tenant.py` — TenantContext via `contextvars` for firm_id isolation
+- `sync_mt.py` — Multi-tenant sync orchestrator
+- `api_client_mt.py` — Multi-tenant API client wrapper
+
+---
+
 ## Architecture Migration: SQLite → PostgreSQL
 
 ### Status: IN PROGRESS

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Firms - LawMetrics.ai{% endblock %}
+
+{% block content %}
+<h1>Firm Management</h1>
+<p class="page-description">Manage registered firms, notification configuration, and MyCase connections.</p>
+
+<div class="stats-grid" style="margin-bottom: 1.5rem;">
+    <div class="stat-card">
+        <div class="stat-value">{{ firms|length }}</div>
+        <div class="stat-label">Total Firms</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-value">{{ firms|selectattr('subscription_status', 'equalto', 'active')|list|length }}</div>
+        <div class="stat-label">Active</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ firms|selectattr('subscription_status', 'equalto', 'trial')|list|length }}</div>
+        <div class="stat-label">Trial</div>
+    </div>
+</div>
+
+<div class="section" style="margin-bottom: 1.5rem;">
+    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Registered Firms</h2>
+        <button class="btn btn-primary" onclick="document.getElementById('createFirmModal').style.display='flex'">+ New Firm</button>
+    </div>
+
+    {% if firms %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Firm ID</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Tier</th>
+                <th>MyCase</th>
+                <th>SendGrid</th>
+                <th>Slack</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for firm in firms %}
+            <tr>
+                <td><code>{{ firm.id }}</code></td>
+                <td><strong>{{ firm.name }}</strong></td>
+                <td>
+                    {% if firm.subscription_status == 'active' %}
+                        <span class="badge" style="background: #dcfce7; color: #16a34a;">Active</span>
+                    {% elif firm.subscription_status == 'trial' %}
+                        <span class="badge" style="background: #fef3c7; color: #d97706;">Trial</span>
+                    {% elif firm.subscription_status == 'suspended' %}
+                        <span class="badge" style="background: #fee2e2; color: #dc2626;">Suspended</span>
+                    {% else %}
+                        <span class="badge" style="background: #f3f4f6; color: #6b7280;">{{ firm.subscription_status or 'Unknown' }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ firm.subscription_tier or '-' }}</td>
+                <td>
+                    {% if firm.mycase_connected %}
+                        <span style="color: #16a34a;" title="Connected">&#10003;</span>
+                    {% else %}
+                        <span style="color: #9ca3af;" title="Not connected">&#8212;</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% set nc = firm.notification_config or {} %}
+                    {% if nc.get('sendgrid_api_key') %}
+                        <span style="color: #16a34a;" title="Configured">&#10003;</span>
+                    {% else %}
+                        <span style="color: #9ca3af;">&#8212;</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if nc.get('slack_webhook_url') %}
+                        <span style="color: #16a34a;" title="Configured">&#10003;</span>
+                    {% else %}
+                        <span style="color: #9ca3af;">&#8212;</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="/firms/{{ firm.id }}" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;">Configure</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: #6b7280; text-align: center; padding: 2rem;">No firms registered yet. Click "New Firm" to get started.</p>
+    {% endif %}
+</div>
+
+<!-- Create Firm Modal -->
+<div id="createFirmModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: white; border-radius: 8px; padding: 1.5rem; width: 100%; max-width: 450px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h3 style="margin: 0 0 1rem;">Create New Firm</h3>
+        <form method="POST" action="/firms/create">
+            <div class="form-group">
+                <label for="firm_name">Firm Name</label>
+                <input type="text" id="firm_name" name="name" placeholder="Smith & Associates, P.C." required>
+            </div>
+            <div class="form-group">
+                <label for="firm_id">Firm ID</label>
+                <input type="text" id="firm_id" name="firm_id" placeholder="smith_law" pattern="[a-z0-9_]+" title="Lowercase letters, numbers, and underscores only" required>
+                <div class="form-hint">Lowercase identifier used in URLs and database (e.g. smith_law)</div>
+            </div>
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('createFirmModal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Firm</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

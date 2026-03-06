@@ -161,19 +161,27 @@ async def api_dunning_run(request: Request):
             })
 
         # --- Execute mode: send via SendGrid ---
-        sendgrid_key = os.getenv("SENDGRID_API_KEY", "")
+        # Load firm-specific config from database
+        from firm_settings import get_firm_settings
+        try:
+            fs = get_firm_settings(firm_id, use_cache=False)
+        except ValueError:
+            return JSONResponse({"error": f"Firm '{firm_id}' not found in database"}, status_code=500)
+
+        sendgrid_key = fs.get_sendgrid_key() or ""
         if not sendgrid_key:
             return JSONResponse({
-                "error": "SENDGRID_API_KEY not configured. Set it in .env to enable batch sending."
+                "error": "SendGrid API key not configured for this firm. Use 'firms set-config' to set it."
             }, status_code=500)
 
         import httpx
 
-        from_email = os.getenv("DUNNING_FROM_EMAIL", "billing@jcsattorney.com")
-        from_name = os.getenv("DUNNING_FROM_NAME", "JCS Law Firm - Billing")
-        firm_name = "JCS Law Firm"
-        firm_phone = "(314) 561-9690"
-        firm_email = "info@jcslaw.com"
+        dunning_cfg = fs.get_dunning_config()
+        from_email = dunning_cfg["from_email"]
+        from_name = dunning_cfg["from_name"]
+        firm_name = dunning_cfg["firm_name"]
+        firm_phone = dunning_cfg["firm_phone"]
+        firm_email = dunning_cfg["firm_email"]
 
         sent = 0
         failed = 0
@@ -356,10 +364,17 @@ async def api_dunning_draft_email(request: Request):
         stage = body.get("stage", 1)
         due_date = body.get("due_date", "")
 
-        # Determine subject and body based on dunning stage
-        firm_name = "JCS Law Firm"
-        firm_phone = "(314) 561-9690"
-        firm_email = "info@jcslaw.com"
+        # Load firm-specific config from database
+        firm_id = request.session.get("firm_id", "")
+        from firm_settings import get_firm_settings
+        try:
+            fs = get_firm_settings(firm_id) if firm_id else None
+            dunning_cfg = fs.get_dunning_config() if fs else {}
+        except ValueError:
+            dunning_cfg = {}
+        firm_name = dunning_cfg.get("firm_name") or "Law Firm"
+        firm_phone = dunning_cfg.get("firm_phone") or ""
+        firm_email = dunning_cfg.get("firm_email") or ""
 
         # Build amount section — show both if they differ
         if abs(amount_now_due - total_balance) < 0.01:

@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}{{ firm.name }} - LawMetrics.ai{% endblock %}
+
+{% block content %}
+<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.25rem;">
+    <a href="/firms" style="color: #6b7280; text-decoration: none; font-size: 0.875rem;">&larr; All Firms</a>
+</div>
+<h1>{{ firm.name }}</h1>
+<p class="page-description">Firm ID: <code>{{ firm.id }}</code></p>
+
+{% if request.query_params.get('saved') %}
+<div style="background: #dcfce7; color: #16a34a; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.875rem;">
+    Settings saved successfully.
+</div>
+{% endif %}
+
+<!-- Status Cards -->
+<div class="stats-grid" style="margin-bottom: 1.5rem;">
+    <div class="stat-card {% if subscription_status == 'active' %}stat-success{% elif subscription_status == 'trial' %}stat-warning{% else %}stat-danger{% endif %}">
+        <div class="stat-value" style="font-size: 1.1rem; text-transform: capitalize;">{{ subscription_status or 'Unknown' }}</div>
+        <div class="stat-label">Subscription</div>
+    </div>
+    <div class="stat-card {% if is_mycase_connected %}stat-success{% endif %}">
+        <div class="stat-value" style="font-size: 1.1rem;">{{ 'Connected' if is_mycase_connected else 'Not Connected' }}</div>
+        <div class="stat-label">MyCase</div>
+    </div>
+    <div class="stat-card {% if has_sendgrid %}stat-success{% endif %}">
+        <div class="stat-value" style="font-size: 1.1rem;">{{ 'Configured' if has_sendgrid else 'Not Set' }}</div>
+        <div class="stat-label">SendGrid</div>
+    </div>
+    <div class="stat-card {% if has_slack %}stat-success{% endif %}">
+        <div class="stat-value" style="font-size: 1.1rem;">{{ 'Configured' if has_slack else 'Not Set' }}</div>
+        <div class="stat-label">Slack</div>
+    </div>
+    <div class="stat-card {% if has_twilio %}stat-success{% endif %}">
+        <div class="stat-value" style="font-size: 1.1rem;">{{ 'Configured' if has_twilio else 'Not Set' }}</div>
+        <div class="stat-label">Twilio SMS</div>
+    </div>
+</div>
+
+<form method="POST" action="/firms/{{ firm.id }}/update">
+
+<!-- Branding -->
+<div class="section" style="margin-bottom: 1.5rem;">
+    <div class="section-header"><h2>Firm Branding</h2></div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+            <label for="name">Firm Name</label>
+            <input type="text" id="name" name="name" value="{{ firm_info.name or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="firm_phone">Phone</label>
+            <input type="text" id="firm_phone" name="firm_phone" value="{{ firm_info.phone or '' }}" placeholder="(555) 123-4567">
+        </div>
+        <div class="form-group">
+            <label for="firm_email">Email</label>
+            <input type="email" id="firm_email" name="firm_email" value="{{ firm_info.email or '' }}" placeholder="info@firm.com">
+        </div>
+        <div class="form-group">
+            <label for="firm_website">Website</label>
+            <input type="url" id="firm_website" name="firm_website" value="{{ firm_info.website or '' }}" placeholder="https://www.firm.com">
+        </div>
+    </div>
+</div>
+
+<!-- Dunning / Email -->
+<div class="section" style="margin-bottom: 1.5rem;">
+    <div class="section-header"><h2>Dunning &amp; Email</h2></div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+            <label for="sendgrid_api_key">SendGrid API Key</label>
+            <input type="password" id="sendgrid_api_key" name="sendgrid_api_key" value="" placeholder="{{ '********' if has_sendgrid else 'SG.xxxxxxxx' }}">
+            <div class="form-hint">Leave blank to keep existing key{{ ' (configured)' if has_sendgrid else '' }}</div>
+        </div>
+        <div class="form-group">
+            <label for="dunning_from_email">Dunning From Email</label>
+            <input type="email" id="dunning_from_email" name="dunning_from_email" value="{{ dunning_config.from_email or '' }}" placeholder="billing@firm.com">
+        </div>
+        <div class="form-group">
+            <label for="dunning_from_name">Dunning From Name</label>
+            <input type="text" id="dunning_from_name" name="dunning_from_name" value="{{ dunning_config.from_name or '' }}" placeholder="Firm Name - Billing">
+        </div>
+    </div>
+</div>
+
+<!-- Slack -->
+<div class="section" style="margin-bottom: 1.5rem;">
+    <div class="section-header"><h2>Slack Notifications</h2></div>
+    <div class="form-group">
+        <label for="slack_webhook_url">Slack Webhook URL</label>
+        <input type="password" id="slack_webhook_url" name="slack_webhook_url" value="" placeholder="{{ '********' if has_slack else 'https://hooks.slack.com/services/...' }}">
+        <div class="form-hint">Leave blank to keep existing webhook{{ ' (configured)' if has_slack else '' }}</div>
+    </div>
+</div>
+
+<!-- Twilio SMS -->
+<div class="section" style="margin-bottom: 1.5rem;">
+    <div class="section-header"><h2>Twilio SMS</h2></div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+            <label for="twilio_account_sid">Account SID</label>
+            <input type="password" id="twilio_account_sid" name="twilio_account_sid" value="" placeholder="{{ '********' if has_twilio else 'ACxxxxxxxx' }}">
+            <div class="form-hint">Leave blank to keep existing{{ ' (configured)' if has_twilio else '' }}</div>
+        </div>
+        <div class="form-group">
+            <label for="twilio_auth_token">Auth Token</label>
+            <input type="password" id="twilio_auth_token" name="twilio_auth_token" value="" placeholder="{{ '********' if has_twilio else '' }}">
+        </div>
+        <div class="form-group">
+            <label for="twilio_from_number">From Number</label>
+            <input type="text" id="twilio_from_number" name="twilio_from_number" value="" placeholder="+15551234567">
+        </div>
+    </div>
+</div>
+
+<!-- Sync Config -->
+{% if sync_config %}
+<div class="section" style="margin-bottom: 1.5rem;">
+    <div class="section-header"><h2>Sync Status</h2></div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+        <div>
+            <div style="font-size: 0.75rem; color: #6b7280; text-transform: uppercase; margin-bottom: 0.25rem;">Last Sync</div>
+            <div style="font-size: 0.875rem;">{{ sync_config.last_sync_at or 'Never' }}</div>
+        </div>
+        <div>
+            <div style="font-size: 0.75rem; color: #6b7280; text-transform: uppercase; margin-bottom: 0.25rem;">Status</div>
+            <div style="font-size: 0.875rem;">
+                {% if sync_config.last_sync_status == 'success' %}
+                    <span style="color: #16a34a;">Success</span>
+                {% elif sync_config.last_sync_status == 'error' %}
+                    <span style="color: #dc2626;">Error</span>
+                {% else %}
+                    {{ sync_config.last_sync_status or 'N/A' }}
+                {% endif %}
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 0.75rem; color: #6b7280; text-transform: uppercase; margin-bottom: 0.25rem;">Next Sync</div>
+            <div style="font-size: 0.875rem;">{{ sync_config.next_sync_at or 'Not scheduled' }}</div>
+        </div>
+        <div>
+            <div style="font-size: 0.75rem; color: #6b7280; text-transform: uppercase; margin-bottom: 0.25rem;">Frequency</div>
+            <div style="font-size: 0.875rem;">{{ sync_config.sync_frequency_minutes or 60 }} min</div>
+        </div>
+    </div>
+    {% if sync_config.last_sync_error %}
+    <div style="margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: #fee2e2; border-radius: 4px; font-size: 0.8rem; color: #dc2626;">
+        {{ sync_config.last_sync_error }}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+    <a href="/firms" class="btn btn-secondary">Cancel</a>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+</div>
+
+</form>
+{% endblock %}
