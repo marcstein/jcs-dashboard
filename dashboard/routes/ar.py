@@ -142,8 +142,8 @@ async def dunning_preview(request: Request, stage: int = None):
 
     # Reshape summary keys to match template expectations
     stage_names = {1: 'Friendly Reminder', 2: 'Past Due Notice',
-                   3: 'Final Warning', 4: 'Collections Referral'}
-    stage_days = {1: '5-14', 2: '15-29', 3: '30-44', 4: '45+'}
+                   3: 'Final Warning', 4: 'NOIW Notice'}
+    stage_days = {1: '5-14', 2: '15-29', 3: '30-59', 4: '60+ (open cases)'}
     stages = {}
     for s_num in [1, 2, 3, 4]:
         s_data = raw.get('by_stage', {}).get(s_num, {})

@@ -245,7 +245,7 @@ uv run python agent.py plans noiw-update <case> <inv> <status>  # Update case st
 uv run python agent.py collections report             # Generate aging report
 uv run python agent.py collections preview            # Preview dunning queue (all stages)
 uv run python agent.py collections preview --stage 1  # Preview stage 1 only (5-14 days)
-uv run python agent.py collections preview --stage 4  # Preview stage 4 only (45+ days)
+uv run python agent.py collections preview --stage 4  # Preview stage 4 only (60+ days, open cases)
 uv run python agent.py collections preview --export   # Export queue to CSV
 uv run python agent.py collections dunning --dry-run  # Simulate sending notices
 uv run python agent.py collections dunning --execute  # LIVE: Actually send notices
@@ -528,6 +528,7 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Dunning emails switched to Outlook**: Draft button uses `mailto:` link instead of Gmail compose URL — opens pre-filled email in Outlook desktop
 - **Fixed firm phone number**: Dunning email drafts now use correct firm phone (314) 561-9690
 - **Dunning notice deduplication**: Each dunning notice (invoice + stage) is now tracked in `dunning_notices` table to prevent sending the same notice twice. `get_dunning_preview()` LEFT JOINs `dunning_notices` via LATERAL subquery to detect already-sent notices. Draft button records sent notice via `POST /api/dunning/mark-sent`. Dunning page shows "Sent" badge with green checkmark for already-sent notices and "Pending" for unsent. Sent rows are dimmed. Button changes to "Resend" for already-sent notices. History section now queries actual `dunning_notices` table columns.
+- **NOIW Stage 4 requires 60 days + open case**: Stage 4 (Notice of Intent to Withdraw) changed from 45 to 60 days overdue, and only applies to open cases. Closed cases with 60+ day overdue invoices cap at Stage 3 (Final Warning) — they still receive payment dunning but not NOIW. Stage 3 range widened from 30-44 to 30-59 days. Stage 4 email updated with NOIW-specific language referencing Motion to Withdraw. `_compute_dunning_stage()` now takes `case_status` parameter; `get_dunning_summary()` joins `cached_cases` for status.
 - **Planned: Outlook SMTP batch dunning**: Batch email sending via firm's Outlook/Exchange SMTP server (replacing SendGrid for dunning notices), triggered by dashboard button
 
 ### v1.x — Feature Build-Out (Completed)

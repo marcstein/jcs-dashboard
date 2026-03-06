@@ -384,9 +384,13 @@ class ARDataMixin:
         except Exception:
             return []
 
-    def _compute_dunning_stage(self, days_overdue: int) -> int:
-        """Map days overdue to dunning stage (1-4)."""
-        if days_overdue >= 45:
+    def _compute_dunning_stage(self, days_overdue: int, case_status: str = 'open') -> int:
+        """Map days overdue to dunning stage (1-4).
+
+        Stage 4 (NOIW) requires 60+ days AND an open case.
+        Closed cases cap at Stage 3.
+        """
+        if days_overdue >= 60 and case_status == 'open':
             return 4
         elif days_overdue >= 30:
             return 3
@@ -433,7 +437,8 @@ class ARDataMixin:
                         ag.amount_overdue as aging_amount_due,
                         ag.invoice_total as aging_invoice_total,
                         dn.notice_level as sent_notice_level,
-                        dn.sent_at as sent_at
+                        dn.sent_at as sent_at,
+                        COALESCE(c.status, 'open') as case_status
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     LEFT JOIN cached_clients cl
@@ -459,7 +464,8 @@ class ARDataMixin:
                 for r in cursor.fetchall():
                     raw_days = r[6]
                     days = raw_days if isinstance(raw_days, int) else (raw_days.days if hasattr(raw_days, 'days') else int(raw_days or 0))
-                    s = self._compute_dunning_stage(days)
+                    case_status = (r[13] or 'open').lower()  # col 13 = case_status
+                    s = self._compute_dunning_stage(days, case_status=case_status)
                     if s == 0:
                         continue
                     if stage and s != stage:
@@ -502,6 +508,7 @@ class ARDataMixin:
         """Get dunning summary computed live from cached_invoices.
 
         Dynamically computes stage counts from all open invoices across all years.
+        Stage 4 (NOIW) only counts open cases with 60+ days overdue.
         """
         try:
             with get_connection() as conn:
@@ -510,8 +517,10 @@ class ARDataMixin:
                 cursor.execute("""
                     SELECT
                         (CURRENT_DATE - i.due_date::date) as days_overdue,
-                        i.balance_due
+                        i.balance_due,
+                        COALESCE(c.status, 'open') as case_status
                     FROM cached_invoices i
+                    LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     WHERE i.firm_id = %s
                       AND i.balance_due > 0
                       AND (CURRENT_DATE - i.due_date::date) >= 5
@@ -523,7 +532,8 @@ class ARDataMixin:
                 for r in cursor.fetchall():
                     days = r[0] if isinstance(r[0], int) else (r[0].days if hasattr(r[0], 'days') else int(r[0] or 0))
                     balance = r[1] or 0
-                    s = self._compute_dunning_stage(days)
+                    case_status = (r[2] or 'open').lower()
+                    s = self._compute_dunning_stage(days, case_status=case_status)
                     if s == 0:
                         continue
                     if s not in by_stage:

@@ -232,19 +232,21 @@ async def api_dunning_draft_email(request: Request):
                 f"immediately.\n\n"
                 f"{firm_name}\n{firm_phone}\n{firm_email}"
             )
-        else:  # stage 4
-            subject = f"FINAL NOTICE - Invoice #{invoice_number} - Immediate Action Required"
+        else:  # stage 4 — Notice of Intent to Withdraw
+            subject = f"NOTICE OF INTENT TO WITHDRAW - Invoice #{invoice_number}"
             email_body = (
-                f"FINAL NOTICE - IMMEDIATE ACTION REQUIRED\n\n"
+                f"NOTICE OF INTENT TO WITHDRAW\n\n"
                 f"Dear {contact_name},\n\n"
                 f"Despite our previous communications, Invoice #{invoice_number} remains "
-                f"unpaid and is now {days_overdue} days past due.\n\n"
+                f"unpaid and is now {days_overdue} days past due with no payment received "
+                f"in over 60 days.\n\n"
                 f"Case: {case_name}\n"
                 f"{amount_section}\n\n"
-                f"This is our final notice before we pursue additional collection measures, "
-                f"which may include referral to a collection agency and potential legal action.\n\n"
-                f"To avoid these actions, please submit full payment within 5 business days "
-                f"of this notice, or contact our office immediately to make payment arrangements.\n\n"
+                f"Please be advised that {firm_name} intends to file a Motion to Withdraw "
+                f"from representation in this matter if full payment or an acceptable payment "
+                f"arrangement is not received within 10 business days of this notice.\n\n"
+                f"We strongly encourage you to contact our office immediately to discuss "
+                f"your options and avoid any interruption in your legal representation.\n\n"
                 f"{firm_name}\n{firm_phone}\n{firm_email}"
             )
 
