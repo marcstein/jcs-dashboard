@@ -38,6 +38,12 @@ app.add_middleware(
     path="/",
 )
 
+# Subdomain resolution — extracts firm_id from Host header (e.g. jcs.lawmetrics.ai → jcs_law)
+# Registered AFTER SessionMiddleware so it runs BEFORE it in the request chain
+# (Starlette middleware is LIFO — last added runs first)
+from dashboard.middleware import SubdomainResolutionMiddleware
+app.add_middleware(SubdomainResolutionMiddleware)
+
 # Static files and templates
 DASHBOARD_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=DASHBOARD_DIR / "static"), name="static")

@@ -530,6 +530,10 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Dunning notice deduplication**: Each dunning notice (invoice + stage) is now tracked in `dunning_notices` table to prevent sending the same notice twice. `get_dunning_preview()` LEFT JOINs `dunning_notices` via LATERAL subquery to detect already-sent notices. Draft button records sent notice via `POST /api/dunning/mark-sent`. Dunning page shows "Sent" badge with green checkmark for already-sent notices and "Pending" for unsent. Sent rows are dimmed. Button changes to "Resend" for already-sent notices. History section now queries actual `dunning_notices` table columns.
 - **NOIW Stage 4 requires 60 days + open case**: Stage 4 (Notice of Intent to Withdraw) changed from 45 to 60 days overdue, and only applies to open cases. Closed cases with 60+ day overdue invoices cap at Stage 3 (Final Warning) — they still receive payment dunning but not NOIW. Stage 3 range widened from 30-44 to 30-59 days. Stage 4 email updated with NOIW-specific language referencing Motion to Withdraw. `_compute_dunning_stage()` now takes `case_status` parameter; `get_dunning_summary()` joins `cached_cases` for status.
 - **SendGrid batch dunning from billing@jcsattorney.com**: "Send All Pending via Email" button on dunning page sends all unsent notices via SendGrid. Dry-run preview shows count by stage. Execute mode sends plain-text emails, records each in `dunning_notices` for dedup, then auto-reloads page. Requires `SENDGRID_API_KEY` env var. From address configurable via `DUNNING_FROM_EMAIL` (default: `billing@jcsattorney.com`). Individual notices still available via Outlook Draft button. Confirmation dialog prevents accidental batch sends.
+- **Multi-firm scaling (Phases 1-3)**: Unified `firms` table with all config, `FirmSettings` service class replacing env vars, `commands/firms.py` CLI, firm management dashboard UI (`/firms`, `/firms/{id}`), connection pool failover resilience with retry-on-disconnect
+- **Per-firm subdomain routing**: `SubdomainResolutionMiddleware` extracts firm_id from Host header (e.g. `jcs.lawmetrics.ai` → `jcs_law`). Login form hides firm_id field when on a firm subdomain. `firms.subdomain` column with uniqueness constraint and verification flag. Reserved subdomains (www, app, api, etc.) skip firm resolution.
+- **Wildcard nginx configuration**: `deployment/lawmetrics.nginx.conf` with three server blocks: HTTP→HTTPS redirect, wildcard subdomain proxy to port 3000, www/apex marketing site. Rate limiting on `/login`. Security headers.
+- **Brochure site routing**: `www.lawmetrics.ai` serves static marketing site (Cloudflare Pages or local). Apex `lawmetrics.ai` redirects to www. `app.lawmetrics.ai` shows generic login with firm_id field.
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
@@ -1115,9 +1119,9 @@ Architecture specification for expanding the document generation engine from Mis
 
 ## Multi-Firm Scaling Architecture
 
-### Status: PHASE 3 IN PROGRESS
+### Status: PHASE 5 — SUBDOMAIN ROUTING & WEB INFRASTRUCTURE
 
-LawMetrics.ai is scaling from a single-firm deployment (JCS Law) to a multi-firm SaaS platform. All firm-specific configuration has been moved from `.env` environment variables to per-firm database records.
+LawMetrics.ai is scaling from a single-firm deployment (JCS Law) to a multi-firm SaaS platform. All firm-specific configuration has been moved from `.env` environment variables to per-firm database records. Per-firm subdomain routing is now implemented.
 
 ### Key Components
 
@@ -1165,6 +1169,94 @@ python agent.py firms run-migration --migration 001 # Run DB migration
 - Builds `notification_config` JSONB from SendGrid, Slack, Twilio, SMTP env vars
 - Migrates OAuth tokens from `data/tokens.json` into firms table
 - Idempotent (safe to re-run)
+
+### Subdomain Routing Architecture
+
+Per-firm subdomain routing allows each firm to access the dashboard at `{subdomain}.lawmetrics.ai` (e.g. `jcs.lawmetrics.ai`). The firm_id is resolved from the URL automatically — users don't need to type it on login.
+
+#### How It Works
+
+1. **DNS**: Wildcard A record `*.lawmetrics.ai` → droplet IP
+2. **Nginx**: Wildcard HTTPS server block proxies all `*.lawmetrics.ai` to port 3000
+3. **Middleware** (`dashboard/middleware.py`): `SubdomainResolutionMiddleware` extracts subdomain from `Host` header, looks up `firms.subdomain` in DB, sets `request.state.firm_id_from_subdomain`
+4. **Login route**: If `firm_id_from_subdomain` is set, hides the firm_id field on login form. If not (e.g. `app.lawmetrics.ai`), shows all three fields.
+5. **Session**: Once logged in, `firm_id` in session works exactly as before — all queries scoped by firm_id
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `dashboard/middleware.py` | `SubdomainResolutionMiddleware` — extracts subdomain, resolves firm_id from DB |
+| `db/firms.py` | `get_firm_by_subdomain()`, `set_firm_subdomain()` — DB lookup and management |
+| `dashboard/routes/main.py` | Login routes use `request.state.firm_id_from_subdomain` as fallback |
+| `dashboard/templates/login.html` | Conditional firm_id field based on `show_firm_id_field` |
+| `commands/firms.py` | `--subdomain` option on `set-config` command |
+| `deployment/lawmetrics.nginx.conf` | Wildcard HTTPS proxy + www/apex marketing site |
+| `deployment/lawmetrics-dashboard.service` | Systemd service (renamed from jcs-dashboard) |
+
+#### Database Columns
+
+- `firms.subdomain VARCHAR(63) UNIQUE` — the subdomain prefix (e.g. `jcs`)
+- `firms.subdomain_verified BOOLEAN DEFAULT FALSE` — only verified subdomains route to dashboard
+- Index: `idx_firms_subdomain` (partial, WHERE subdomain IS NOT NULL)
+
+#### URL Routing
+
+| URL | Behavior |
+|-----|----------|
+| `jcs.lawmetrics.ai/login` | Login with username+password only (firm_id=jcs_law from subdomain) |
+| `app.lawmetrics.ai/login` | Login with firm_id+username+password (generic fallback) |
+| `www.lawmetrics.ai` | Marketing/brochure site (Cloudflare Pages or local static) |
+| `lawmetrics.ai` | Redirects to www.lawmetrics.ai |
+| `fake.lawmetrics.ai/login` | Shows firm_id field (unknown subdomain, no crash) |
+
+#### Reserved Subdomains
+
+`www`, `app`, `api`, `admin`, `mail`, `smtp`, `ftp`, `staging`, `dev`, `test` — these never resolve to a firm.
+
+#### Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `LAWMETRICS_DOMAIN` | `lawmetrics.ai` | Base domain for subdomain extraction (override for staging) |
+
+#### Setting Up a Firm's Subdomain
+
+```bash
+# Via CLI
+python agent.py firms set-config smith_law --subdomain smith
+
+# Via SQL (production seed)
+UPDATE firms SET subdomain = 'jcs', subdomain_verified = TRUE WHERE id = 'jcs_law';
+```
+
+#### Production Deployment Steps
+
+```bash
+# 1. DNS (DigitalOcean)
+# Add wildcard A record: *.lawmetrics.ai → droplet IP
+# Add apex A record: @ → droplet IP
+
+# 2. Wildcard SSL certificate
+sudo certbot certonly \
+  --dns-digitalocean \
+  --dns-digitalocean-credentials /etc/letsencrypt/digitalocean.ini \
+  -d lawmetrics.ai -d '*.lawmetrics.ai'
+
+# 3. Seed JCS subdomain
+psql $DATABASE_URL -c "UPDATE firms SET subdomain = 'jcs', subdomain_verified = TRUE WHERE id = 'jcs_law';"
+
+# 4. Install nginx config
+sudo cp deployment/lawmetrics.nginx.conf /etc/nginx/sites-available/lawmetrics
+sudo ln -sf /etc/nginx/sites-available/lawmetrics /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 5. Switch service
+sudo cp deployment/lawmetrics-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable lawmetrics-dashboard
+sudo systemctl restart lawmetrics-dashboard
+```
 
 ### What's Wired to FirmSettings
 
@@ -1216,8 +1308,10 @@ These modules were written earlier and are ready to activate in Phase 4:
 | 1 | Unified `firms` table, migration script | ✅ Complete |
 | 2 | `FirmSettings` service, `commands/firms.py` CLI | ✅ Complete |
 | 3 | Wire FirmSettings into existing code (api.py, notifications, config, dunning) | ✅ Complete |
-| 4 | Activate Celery infrastructure for per-firm automation | Pending |
-| 5 | Firm onboarding dashboard UI | Pending |
+| 4 | Firm management dashboard UI (`/firms`, `/firms/{id}`) | ✅ Complete |
+| 5 | Per-firm subdomain routing, wildcard nginx, brochure site routing | ✅ Complete |
+| 6 | Activate Celery infrastructure for per-firm automation | Pending |
+| 7 | Brochure/marketing site at www.lawmetrics.ai (Cloudflare Pages) | Pending |
 
 ### Onboarding a New Firm
 
@@ -1234,13 +1328,17 @@ python agent.py firms set-config smith_law \
     --firm-phone "(555) 555-5555" \
     --firm-email info@smithlaw.com
 
-# 3. Connect MyCase (OAuth flow — Phase 4)
+# 3. Set subdomain for branded URL
+python agent.py firms set-config smith_law --subdomain smith
+# → smith.lawmetrics.ai (auto-verified, no DNS changes needed with wildcard)
+
+# 4. Connect MyCase (OAuth flow — Phase 6)
 # For now: set credentials manually in DB
 
-# 4. Create dashboard users
+# 5. Create dashboard users
 python setup_users.py --firm-id smith_law --admin-password <password>
 
-# 5. Run initial sync
+# 6. Run initial sync
 FIRM_ID=smith_law python agent.py sync
 ```
 

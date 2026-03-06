@@ -124,42 +124,69 @@ async def index(request: Request, year: int = None, view: str = None):
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    """Login page."""
+    """Login page.
+
+    If accessed via firm subdomain (e.g. jcs.lawmetrics.ai), the firm_id
+    is implicit — hide the firm_id field and show only username/password.
+    If accessed via app.lawmetrics.ai or directly, show all three fields.
+    """
     if is_authenticated(request):
         return RedirectResponse(url="/", status_code=303)
+
+    firm_id_from_subdomain = getattr(request.state, "firm_id_from_subdomain", None)
+
     return templates.TemplateResponse("login.html", {
         "request": request,
         "error": None,
         "firm_id": None,
         "username": None,
+        "show_firm_id_field": firm_id_from_subdomain is None,
     })
 
 
 @router.post("/login")
 async def login_submit(
     request: Request,
-    firm_id: str = Form(...),
+    firm_id: str = Form(default=""),
     username: str = Form(...),
     password: str = Form(...),
 ):
-    """Handle login form submission."""
+    """Handle login form submission.
+
+    firm_id can come from the form field OR from the subdomain middleware.
+    If both are empty, show an error.
+    """
     firm_id = firm_id.strip()
     username = username.strip()
+
+    # Use subdomain-resolved firm_id if not provided in form
+    if not firm_id:
+        firm_id = getattr(request.state, "firm_id_from_subdomain", None) or ""
+
+    if not firm_id:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Firm ID is required. Access via your firm's URL or enter a Firm ID.",
+            "firm_id": "",
+            "username": username,
+            "show_firm_id_field": True,
+        })
+
     print(f"Login attempt: {username} @ firm_id={firm_id}")
     if login_user(request, username, password, firm_id=firm_id):
         print(f"Login SUCCESS - session: {dict(request.session)}")
-        # 303 See Other - forces GET on redirect (proper POST-Redirect-GET pattern)
-        # Attorneys go directly to their attorney dashboard
         if request.session.get("role") == "attorney":
             return RedirectResponse(url="/attorneys", status_code=303)
         return RedirectResponse(url="/", status_code=303)
 
     print(f"Login FAILED for {username} @ firm_id={firm_id}")
+    firm_id_from_subdomain = getattr(request.state, "firm_id_from_subdomain", None)
     return templates.TemplateResponse("login.html", {
         "request": request,
-        "error": "Invalid credentials. Check firm ID, username, and password.",
+        "error": "Invalid credentials. Check your username and password.",
         "firm_id": firm_id,
         "username": username,
+        "show_firm_id_field": firm_id_from_subdomain is None,
     })
 
 

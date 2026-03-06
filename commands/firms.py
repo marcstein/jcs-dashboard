@@ -164,9 +164,10 @@ def show_firm(firm_id):
 @click.option("--firm-phone", help="Firm phone number")
 @click.option("--firm-email", help="Firm email address")
 @click.option("--firm-website", help="Firm website URL")
+@click.option("--subdomain", help="Firm subdomain (e.g. 'jcs' for jcs.lawmetrics.ai)")
 def set_config(firm_id, sendgrid_key, dunning_email, dunning_name,
                slack_webhook, twilio_sid, twilio_token, twilio_number,
-               firm_phone, firm_email, firm_website):
+               firm_phone, firm_email, firm_website, subdomain):
     """Update firm notification and branding configuration."""
     from firm_settings import FirmSettings, clear_settings_cache
     from db.connection import get_connection
@@ -219,7 +220,18 @@ def set_config(firm_id, sendgrid_key, dunning_email, dunning_name,
             conn.commit()
         console.print(f"[green]✓ Updated branding: {', '.join(branding_updates.keys())}[/green]")
 
-    if not nc_updates and not branding_updates:
+    # Update subdomain
+    subdomain_updated = False
+    if subdomain:
+        from db.firms import set_firm_subdomain
+        try:
+            set_firm_subdomain(firm_id, subdomain)
+            console.print(f"[green]✓ Subdomain set: {subdomain}.lawmetrics.ai[/green]")
+            subdomain_updated = True
+        except ValueError as e:
+            console.print(f"[red]✗ Subdomain error: {e}[/red]")
+
+    if not nc_updates and not branding_updates and not subdomain_updated:
         console.print("[yellow]No options provided. Use --help to see available options.[/yellow]")
         return
 

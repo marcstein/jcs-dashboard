@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS firms (
     firm_website VARCHAR(255),
     logo_url TEXT,
 
+    -- Subdomain routing (e.g. 'jcs' for jcs.lawmetrics.ai)
+    subdomain VARCHAR(63) UNIQUE,
+    subdomain_verified BOOLEAN DEFAULT FALSE,
+
     -- Generic settings (feature flags, schedule preferences, etc.)
     settings JSONB DEFAULT '{}'::jsonb
 );
@@ -114,6 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_sync_history_firm ON sync_history(firm_id);
 CREATE INDEX IF NOT EXISTS idx_sync_history_created ON sync_history(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_firm ON audit_log(firm_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_firms_subdomain ON firms(subdomain) WHERE subdomain IS NOT NULL;
 """
 
 
@@ -144,6 +149,8 @@ _MIGRATION_COLUMNS = [
     ("firm_website", "VARCHAR(255)"),
     ("logo_url", "TEXT"),
     ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+    ("subdomain", "VARCHAR(63) UNIQUE"),
+    ("subdomain_verified", "BOOLEAN DEFAULT FALSE"),
 ]
 
 
@@ -247,6 +254,52 @@ def list_firms(active_only: bool = True) -> list:
                 ORDER BY name
             """)
         return [dict(row) for row in cur.fetchall()]
+
+
+def get_firm_by_subdomain(subdomain: str) -> dict:
+    """Look up a firm by its subdomain. Returns dict or None.
+
+    Only returns verified subdomains (subdomain_verified=TRUE).
+    Used by SubdomainResolutionMiddleware to resolve Host header to firm_id.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM firms WHERE subdomain = %s AND subdomain_verified = TRUE",
+            (subdomain,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def set_firm_subdomain(firm_id: str, subdomain: str, verified: bool = True) -> bool:
+    """Set or update a firm's subdomain. Returns True on success.
+
+    Subdomain must be unique across all firms. Raises ValueError on conflict.
+    """
+    subdomain = subdomain.lower().strip()
+    if not subdomain or not all(c.isalnum() or c == '-' for c in subdomain):
+        raise ValueError("Subdomain must contain only lowercase letters, numbers, and hyphens")
+    if subdomain in ('www', 'app', 'api', 'admin', 'mail', 'smtp', 'ftp'):
+        raise ValueError(f"Subdomain '{subdomain}' is reserved")
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE firms
+                SET subdomain = %s, subdomain_verified = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (subdomain, verified, firm_id))
+            if cur.rowcount == 0:
+                raise ValueError(f"Firm '{firm_id}' not found")
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                raise ValueError(f"Subdomain '{subdomain}' is already taken")
+            raise
 
 
 def update_firm_notification_config(firm_id: str, **config_updates):

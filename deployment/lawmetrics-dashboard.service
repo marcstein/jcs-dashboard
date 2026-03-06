@@ -1,0 +1,18 @@
+[Unit]
+Description=LawMetrics.ai Multi-Tenant Dashboard
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/jcs-mycase
+EnvironmentFile=/opt/jcs-mycase/.env
+ExecStart=/opt/jcs-mycase/.venv/bin/python agent.py dashboard --host 0.0.0.0 --port 3000
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
