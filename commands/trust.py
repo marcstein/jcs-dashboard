@@ -14,7 +14,6 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-from config import FIRM_ID
 from trust_transfer import (
     generate_trust_transfer_report,
     export_trust_report_csv,
@@ -33,13 +32,22 @@ def trust():
 
 
 @trust.command("report")
-@click.option("--firm-id", default=FIRM_ID, help="Firm ID")
+@click.option("--firm-id", default=None, help="Firm ID")
 @click.option("--export", "export_csv", is_flag=True, help="Export to CSV")
 @click.option("--attorney", default=None, help="Filter by lead attorney name")
 @click.option("--phase", default=None, help="Filter by current phase code")
 @click.option("--limit", default=None, type=int, help="Limit number of rows")
 def trust_report(firm_id, export_csv, attorney, phase, limit):
     """Generate trust-to-operating transfer report."""
+    if not firm_id:
+        import os
+        firm_id = os.getenv("FIRM_ID")
+        if not firm_id:
+            from case_phases import _detect_firm_id
+            firm_id = _detect_firm_id()
+    if not firm_id:
+        console.print("[red]Could not detect firm_id. Use --firm-id or set FIRM_ID env var.[/red]")
+        return
     console.print("\n[bold]Trust-to-Operating Transfer Report[/bold]")
     console.print(f"Firm: {firm_id} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
 
