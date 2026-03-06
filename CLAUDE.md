@@ -529,7 +529,7 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Fixed firm phone number**: Dunning email drafts now use correct firm phone (314) 561-9690
 - **Dunning notice deduplication**: Each dunning notice (invoice + stage) is now tracked in `dunning_notices` table to prevent sending the same notice twice. `get_dunning_preview()` LEFT JOINs `dunning_notices` via LATERAL subquery to detect already-sent notices. Draft button records sent notice via `POST /api/dunning/mark-sent`. Dunning page shows "Sent" badge with green checkmark for already-sent notices and "Pending" for unsent. Sent rows are dimmed. Button changes to "Resend" for already-sent notices. History section now queries actual `dunning_notices` table columns.
 - **NOIW Stage 4 requires 60 days + open case**: Stage 4 (Notice of Intent to Withdraw) changed from 45 to 60 days overdue, and only applies to open cases. Closed cases with 60+ day overdue invoices cap at Stage 3 (Final Warning) — they still receive payment dunning but not NOIW. Stage 3 range widened from 30-44 to 30-59 days. Stage 4 email updated with NOIW-specific language referencing Motion to Withdraw. `_compute_dunning_stage()` now takes `case_status` parameter; `get_dunning_summary()` joins `cached_cases` for status.
-- **Planned: Outlook SMTP batch dunning**: Batch email sending via firm's Outlook/Exchange SMTP server (replacing SendGrid for dunning notices), triggered by dashboard button
+- **SendGrid batch dunning from billing@jcsattorney.com**: "Send All Pending via Email" button on dunning page sends all unsent notices via SendGrid. Dry-run preview shows count by stage. Execute mode sends plain-text emails, records each in `dunning_notices` for dedup, then auto-reloads page. Requires `SENDGRID_API_KEY` env var. From address configurable via `DUNNING_FROM_EMAIL` (default: `billing@jcsattorney.com`). Individual notices still available via Outlook Draft button. Confirmation dialog prevents accidental batch sends.
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
@@ -778,7 +778,9 @@ MYCASE_CLIENT_SECRET=...      # MyCase OAuth
 DASHBOARD_ADMIN_USER=admin    # Dashboard admin username
 DASHBOARD_ADMIN_PASSWORD_HASH=...  # Werkzeug scrypt hash of admin password
 SLACK_WEBHOOK_URL=...         # Slack notifications
-SENDGRID_API_KEY=...          # Email notifications
+SENDGRID_API_KEY=...          # Email notifications (required for batch dunning)
+DUNNING_FROM_EMAIL=billing@jcsattorney.com  # Dunning notice sender address
+DUNNING_FROM_NAME=JCS Law Firm - Billing    # Dunning notice sender display name
 TWILIO_ACCOUNT_SID=...        # SMS notifications
 TWILIO_AUTH_TOKEN=...         # SMS notifications
 TWILIO_FROM_NUMBER=...        # SMS notifications

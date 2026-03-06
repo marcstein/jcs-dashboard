@@ -127,31 +127,214 @@ async def api_sync_status(request: Request):
 
 @router.post("/api/dunning/run")
 async def api_dunning_run(request: Request):
-    """Run dunning cycle in dry-run or execute mode."""
+    """Run dunning cycle — dry-run previews what would be sent, execute sends via SendGrid.
+
+    Sends from billing@jcsattorney.com. Only sends notices that haven't already
+    been sent at the current stage (dedup via dunning_notices table).
+    Optional 'stage' parameter to limit to a specific stage (1-4).
+    """
     if not is_authenticated(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     try:
         body = await request.json()
         mode = body.get("mode", "dry-run")
+        stage_filter = body.get("stage")  # optional: limit to one stage
 
-        # Import the dunning module
-        try:
-            from commands.collections import _run_dunning_cycle
-        except ImportError:
-            # Fallback: use the data model to get queue info
-            data = get_data(request)
-            queue = data.get_dunning_queue()
-            if mode == "execute":
-                return JSONResponse({"error": "Email sending is not yet configured via dashboard. Please contact admin."})
-            return JSONResponse({"would_send": len(queue), "mode": "dry-run"})
+        firm_id = request.session.get("firm_id", "")
+        if not firm_id:
+            return JSONResponse({"error": "No firm_id in session"}, status_code=400)
 
-        execute = (mode == "execute")
-        result = _run_dunning_cycle(execute=execute)
-        return JSONResponse(result)
+        data = get_data(request)
+        # Get only unsent notices
+        queue = data.get_dunning_preview(stage=stage_filter, include_sent=False)
+
+        # Filter to only invoices with a client email
+        sendable = [inv for inv in queue if inv.get('contact_email')]
+
+        if mode != "execute":
+            return JSONResponse({
+                "mode": "dry-run",
+                "would_send": len(sendable),
+                "no_email": len(queue) - len(sendable),
+                "by_stage": _count_by_stage(sendable),
+            })
+
+        # --- Execute mode: send via SendGrid ---
+        sendgrid_key = os.getenv("SENDGRID_API_KEY", "")
+        if not sendgrid_key:
+            return JSONResponse({
+                "error": "SENDGRID_API_KEY not configured. Set it in .env to enable batch sending."
+            }, status_code=500)
+
+        import httpx
+
+        from_email = os.getenv("DUNNING_FROM_EMAIL", "billing@jcsattorney.com")
+        from_name = os.getenv("DUNNING_FROM_NAME", "JCS Law Firm - Billing")
+        firm_name = "JCS Law Firm"
+        firm_phone = "(314) 561-9690"
+        firm_email = "info@jcslaw.com"
+
+        sent = 0
+        failed = 0
+        errors = []
+
+        for inv in sendable:
+            inv_num = inv.get('invoice_id', '')
+            stage = inv.get('stage', 1)
+            contact_email = inv['contact_email']
+            contact_name = inv.get('contact_name', 'Client')
+            case_name = inv.get('case_name', '')
+            days = inv.get('days_delinquent', 0)
+            balance = inv.get('balance_due', 0)
+            amount_now = inv.get('amount_now_due') or balance
+            total_bal = inv.get('total_remaining_balance', balance)
+            due_date = inv.get('last_notice_date', '')
+            invoice_db_id = inv.get('invoice_db_id', 0)
+
+            # Build amount section
+            if abs(amount_now - total_bal) < 0.01:
+                amount_section = f"Amount Due: ${amount_now:,.2f}"
+            else:
+                amount_section = f"Amount Now Due: ${amount_now:,.2f}\nTotal Remaining Balance: ${total_bal:,.2f}"
+
+            # Generate stage-appropriate email
+            subject, body_text = _generate_dunning_email(
+                stage, inv_num, contact_name, case_name, days,
+                amount_section, due_date, firm_name, firm_phone, firm_email)
+
+            # Send via SendGrid
+            payload = {
+                "personalizations": [{"to": [{"email": contact_email}], "subject": subject}],
+                "from": {"email": from_email, "name": from_name},
+                "content": [{"type": "text/plain", "value": body_text}],
+            }
+
+            try:
+                response = httpx.post(
+                    "https://api.sendgrid.com/v3/mail/send",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {sendgrid_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30,
+                )
+
+                if response.status_code in (200, 202):
+                    sent += 1
+                    # Record in dunning_notices for dedup
+                    with get_connection() as conn:
+                        cur = conn.cursor()
+                        cur.execute("""
+                            INSERT INTO dunning_notices
+                                (firm_id, invoice_id, contact_id, invoice_number,
+                                 days_overdue, notice_level, amount_due, template_used,
+                                 delivery_method, delivery_status, sent_at)
+                            VALUES (%s, %s, 0, %s, %s, %s, %s, %s, 'email', 'sent', CURRENT_TIMESTAMP)
+                            ON CONFLICT (firm_id, invoice_id, notice_level) DO UPDATE SET
+                                amount_due = EXCLUDED.amount_due,
+                                template_used = EXCLUDED.template_used,
+                                sent_at = CURRENT_TIMESTAMP,
+                                delivery_status = 'sent'
+                        """, (firm_id, invoice_db_id, inv_num, days, stage, amount_now,
+                              f"stage_{stage}_sendgrid_batch"))
+                else:
+                    failed += 1
+                    errors.append(f"Invoice {inv_num}: HTTP {response.status_code}")
+            except Exception as e:
+                failed += 1
+                errors.append(f"Invoice {inv_num}: {str(e)}")
+
+        return JSONResponse({
+            "mode": "execute",
+            "sent": sent,
+            "failed": failed,
+            "no_email": len(queue) - len(sendable),
+            "errors": errors[:10],  # limit error list
+        })
 
     except Exception as e:
-        return JSONResponse({"error": str(e)})
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _count_by_stage(queue: list) -> dict:
+    """Count sendable invoices by stage."""
+    counts = {}
+    for inv in queue:
+        s = inv.get('stage', 0)
+        counts[s] = counts.get(s, 0) + 1
+    return counts
+
+
+def _generate_dunning_email(stage, inv_num, contact_name, case_name, days,
+                            amount_section, due_date, firm_name, firm_phone, firm_email):
+    """Generate subject and body text for a dunning notice by stage."""
+    if stage == 1:
+        subject = f"Friendly Reminder - Invoice #{inv_num} Past Due"
+        body = (
+            f"Dear {contact_name},\n\n"
+            f"This is a friendly reminder that Invoice #{inv_num} "
+            f"is now {days} days past due.\n\n"
+            f"Case: {case_name}\n"
+            f"Original Due Date: {due_date}\n"
+            f"{amount_section}\n\n"
+            f"Please remit payment at your earliest convenience. If you have already "
+            f"sent payment, please disregard this notice.\n\n"
+            f"If you have any questions about this invoice, please don't hesitate "
+            f"to contact our office.\n\n"
+            f"Sincerely,\n{firm_name}\n{firm_phone}"
+        )
+    elif stage == 2:
+        subject = f"Past Due Notice - Invoice #{inv_num}"
+        body = (
+            f"Dear {contact_name},\n\n"
+            f"Our records indicate that Invoice #{inv_num} "
+            f"is now {days} days past due.\n\n"
+            f"Case: {case_name}\n"
+            f"Original Due Date: {due_date}\n"
+            f"{amount_section}\n\n"
+            f"We kindly request that you submit payment within the next 7 days "
+            f"to avoid any further collection activity.\n\n"
+            f"If you are experiencing financial difficulties, please contact our "
+            f"office to discuss payment arrangements.\n\n"
+            f"Sincerely,\n{firm_name}\n{firm_phone}"
+        )
+    elif stage == 3:
+        subject = f"URGENT: Payment Required - Invoice #{inv_num}"
+        body = (
+            f"URGENT: Payment Required\n\n"
+            f"Dear {contact_name},\n\n"
+            f"This is a formal notice that Invoice #{inv_num} remains unpaid "
+            f"and is now {days} days past due.\n\n"
+            f"Case: {case_name}\n"
+            f"{amount_section}\n\n"
+            f"Immediate payment is required to avoid further collection action. "
+            f"Please remit payment within 10 days of this notice.\n\n"
+            f"If you wish to discuss payment options, please contact our office "
+            f"immediately.\n\n"
+            f"{firm_name}\n{firm_phone}\n{firm_email}"
+        )
+    else:  # stage 4 — NOIW
+        subject = f"NOTICE OF INTENT TO WITHDRAW - Invoice #{inv_num}"
+        body = (
+            f"NOTICE OF INTENT TO WITHDRAW\n\n"
+            f"Dear {contact_name},\n\n"
+            f"Despite our previous communications, Invoice #{inv_num} remains "
+            f"unpaid and is now {days} days past due with no payment received "
+            f"in over 60 days.\n\n"
+            f"Case: {case_name}\n"
+            f"{amount_section}\n\n"
+            f"Please be advised that {firm_name} intends to file a Motion to Withdraw "
+            f"from representation in this matter if full payment or an acceptable payment "
+            f"arrangement is not received within 10 business days of this notice.\n\n"
+            f"We strongly encourage you to contact our office immediately to discuss "
+            f"your options and avoid any interruption in your legal representation.\n\n"
+            f"{firm_name}\n{firm_phone}\n{firm_email}"
+        )
+    return subject, body
 
 
 @router.post("/api/dunning/draft-email")

@@ -162,17 +162,20 @@
 <div class="dunning-actions-box">
     <div class="action-buttons-row">
         <button class="btn btn-secondary" id="btn-dry-run" onclick="runDunning('dry-run')">
-            <span class="btn-icon">&#128269;</span> Preview Notices (Dry Run)
+            <span class="btn-icon">&#128269;</span> Preview Batch (Dry Run)
         </button>
-        <button class="btn btn-primary" id="btn-send-notices" onclick="runDunning('execute')">
-            <span class="btn-icon">&#9993;</span> Send Notices
+        <button class="btn btn-primary" id="btn-send-notices" onclick="confirmBatchSend()">
+            <span class="btn-icon">&#9993;</span> Send All Pending via Email
         </button>
         <button class="btn btn-export" id="btn-export-queue" onclick="exportDunningQueue()">
             <span class="btn-icon">&#128196;</span> Export Queue to CSV
         </button>
     </div>
     <div id="dunning-action-status" class="action-status" style="display:none;"></div>
-    <p class="dunning-info-text">Preview will show exactly what would be sent without sending. Send Notices will email collection notices to clients.</p>
+    <p class="dunning-info-text">
+        <strong>Preview</strong> shows what would be sent. <strong>Send All Pending</strong> emails all unsent notices via SendGrid from billing@jcsattorney.com.
+        Use the <strong>Draft</strong> button on individual rows to send via Outlook instead.
+    </p>
 </div>
 
 <!-- Recent History -->
@@ -733,15 +736,19 @@ function showStatus(msg, type) {
 }
 
 function runDunning(mode) {
-    var btn = mode === 'execute' ? document.getElementById('btn-send-notices') : document.getElementById('btn-dry-run');
-    var label = mode === 'execute' ? 'Sending notices...' : 'Running preview...';
+    var btn = document.getElementById('btn-dry-run');
     btn.disabled = true;
-    showStatus(label, 'running');
+    showStatus('Running preview...', 'running');
+
+    var payload = {mode: 'dry-run'};
+    {% if current_stage %}
+    payload.stage = {{ current_stage }};
+    {% endif %}
 
     fetch('/api/dunning/run', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: mode})
+        body: JSON.stringify(payload)
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
@@ -749,10 +756,61 @@ function runDunning(mode) {
         if (data.error) {
             showStatus('Error: ' + data.error, 'error');
         } else {
-            var msg = mode === 'execute'
-                ? 'Notices sent: ' + (data.sent || 0) + ' emails dispatched.'
-                : 'Preview complete: ' + (data.would_send || 0) + ' notices would be sent.';
+            var msg = 'Preview: ' + (data.would_send || 0) + ' notices would be sent';
+            if (data.no_email) msg += ', ' + data.no_email + ' have no email on file';
+            if (data.by_stage) {
+                var stages = [];
+                for (var s in data.by_stage) {
+                    stages.push('Stage ' + s + ': ' + data.by_stage[s]);
+                }
+                if (stages.length) msg += ' (' + stages.join(', ') + ')';
+            }
             showStatus(msg, 'success');
+        }
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        showStatus('Error: ' + err.message, 'error');
+    });
+}
+
+function confirmBatchSend() {
+    var count = {{ unsent_count or 0 }};
+    if (count === 0) {
+        showStatus('No pending notices to send. All notices have already been sent.', 'success');
+        return;
+    }
+    if (!confirm('Send ' + count + ' pending dunning notices via email from billing@jcsattorney.com?\n\nThis will email clients directly. Already-sent notices will be skipped.')) {
+        return;
+    }
+    var btn = document.getElementById('btn-send-notices');
+    btn.disabled = true;
+    showStatus('Sending ' + count + ' notices via SendGrid...', 'running');
+
+    var payload = {mode: 'execute'};
+    {% if current_stage %}
+    payload.stage = {{ current_stage }};
+    {% endif %}
+
+    fetch('/api/dunning/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        if (data.error) {
+            showStatus('Error: ' + data.error, 'error');
+        } else {
+            var msg = 'Batch complete: ' + (data.sent || 0) + ' emails sent';
+            if (data.failed) msg += ', ' + data.failed + ' failed';
+            if (data.no_email) msg += ', ' + data.no_email + ' skipped (no email)';
+            showStatus(msg, data.failed ? 'error' : 'success');
+            // Reload page after short delay to refresh sent statuses
+            if (data.sent > 0) {
+                setTimeout(function() { window.location.reload(); }, 2000);
+            }
         }
     })
     .catch(function(err) {
