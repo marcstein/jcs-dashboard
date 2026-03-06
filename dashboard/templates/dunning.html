@@ -60,7 +60,9 @@
 
 {% if queue %}
 <div class="table-actions">
-    <span class="queue-count">{{ queue|length }} invoices ready for notices</span>
+    <span class="queue-count">{{ queue|length }} invoices in queue
+        {% if sent_count > 0 %} &mdash; <span class="sent-count-label">{{ sent_count }} already sent</span>, {{ unsent_count }} pending{% endif %}
+    </span>
 </div>
 
 <table class="data-table">
@@ -75,12 +77,14 @@
             <th class="text-center">Days Overdue</th>
             <th>Stage</th>
             <th>Due Date</th>
+            <th class="text-center">Status</th>
             <th class="text-center">Action</th>
         </tr>
     </thead>
     <tbody>
         {% for inv in queue %}
-        <tr class="{% if inv.dunning_stage == 4 %}row-critical{% elif inv.dunning_stage == 3 %}row-danger{% elif inv.dunning_stage == 2 %}row-warning{% endif %}">
+        <tr class="{% if inv.already_sent %}row-sent{% elif inv.dunning_stage == 4 %}row-critical{% elif inv.dunning_stage == 3 %}row-danger{% elif inv.dunning_stage == 2 %}row-warning{% endif %}"
+            id="row-{{ inv.invoice_number | e }}">
             <td>{{ inv.invoice_number }}</td>
             <td class="case-name" title="{{ inv.case_name or '' }}">
                 {{ (inv.case_name or 'N/A')[:30] }}{% if inv.case_name and inv.case_name|length > 30 %}...{% endif %}
@@ -104,11 +108,19 @@
             </td>
             <td>{{ inv.due_date }}</td>
             <td class="text-center">
+                {% if inv.already_sent %}
+                <span class="sent-badge" title="Sent {{ inv.sent_at or '' }}">&#10003; Sent</span>
+                {% else %}
+                <span class="pending-badge">Pending</span>
+                {% endif %}
+            </td>
+            <td class="text-center">
                 {% if inv.contact_email %}
-                <button class="btn-draft-email"
+                <button class="btn-draft-email {% if inv.already_sent %}draft-sent{% endif %}"
                     data-contact-name="{{ inv.contact_name | e }}"
                     data-contact-email="{{ inv.contact_email | e }}"
                     data-invoice-number="{{ inv.invoice_number | e }}"
+                    data-invoice-db-id="{{ inv.invoice_db_id }}"
                     data-case-name="{{ inv.case_name | e }}"
                     data-balance-due="{{ inv.balance_due }}"
                     data-amount-now-due="{{ inv.amount_now_due }}"
@@ -117,8 +129,8 @@
                     data-stage="{{ inv.dunning_stage }}"
                     data-due-date="{{ inv.due_date | e }}"
                     onclick="draftDunningEmail(this)"
-                    title="Draft email in Outlook for {{ inv.contact_name | e }}">
-                    &#9993; Draft
+                    title="{% if inv.already_sent %}Resend email in Outlook{% else %}Draft email in Outlook{% endif %} for {{ inv.contact_name | e }}">
+                    {% if inv.already_sent %}&#9993; Resend{% else %}&#9993; Draft{% endif %}
                 </button>
                 {% else %}
                 <span class="no-email-tag" title="No email on file">No email</span>
@@ -173,19 +185,23 @@
         <tr>
             <th>Sent</th>
             <th>Invoice</th>
-            <th>Level</th>
+            <th>Stage</th>
             <th class="text-right">Amount</th>
-            <th>Template</th>
+            <th>Status</th>
         </tr>
     </thead>
     <tbody>
         {% for h in history %}
         <tr>
-            <td>{{ h.sent_at }}</td>
+            <td>{{ h.sent_at[:19] if h.sent_at else '' }}</td>
             <td>{{ h.invoice_number }}</td>
-            <td>Level {{ h.notice_level }}</td>
+            <td>
+                <span class="stage-badge stage-badge-{{ h.notice_level }}">
+                    Stage {{ h.notice_level }}
+                </span>
+            </td>
             <td class="text-right">${{ "{:,.2f}".format(h.amount_due) }}</td>
-            <td>{{ h.template_used }}</td>
+            <td>{{ h.delivery_status }}</td>
         </tr>
         {% endfor %}
     </tbody>
@@ -320,6 +336,7 @@
 .stage-badge-4 { background: #f8d7da; color: #721c24; }
 
 /* Row colors */
+.row-sent { background-color: #f0f4f0; opacity: 0.7; }
 .row-warning { background-color: #fff8e1; }
 .row-danger { background-color: #fff3e0; }
 .row-critical { background-color: #ffebee; }
@@ -513,6 +530,31 @@
     font-size: 0.75rem;
     color: #999;
     font-style: italic;
+}
+
+.sent-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #d4edda;
+    color: #155724;
+}
+
+.pending-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: #e1e4e8;
+    color: #586069;
+}
+
+.sent-count-label {
+    color: #28a745;
+    font-weight: 600;
 }
 
 .email-indicator {
@@ -736,6 +778,7 @@ function draftDunningEmail(btn) {
         contact_name: btn.getAttribute('data-contact-name') || 'Client',
         contact_email: btn.getAttribute('data-contact-email') || '',
         invoice_number: btn.getAttribute('data-invoice-number') || '',
+        invoice_db_id: parseInt(btn.getAttribute('data-invoice-db-id')) || 0,
         case_name: btn.getAttribute('data-case-name') || '',
         balance_due: parseFloat(btn.getAttribute('data-balance-due')) || 0,
         amount_now_due: parseFloat(btn.getAttribute('data-amount-now-due')) || 0,
@@ -801,12 +844,55 @@ function openInOutlook() {
 
     window.location.href = mailtoUrl;
 
+    // Record that this notice was sent (deduplication)
+    if (_currentDraftInv && _currentDraftInv.invoice_db_id) {
+        fetch('/api/dunning/mark-sent', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                invoice_db_id: _currentDraftInv.invoice_db_id,
+                invoice_number: _currentDraftInv.invoice_number,
+                stage: _currentDraftInv.dunning_stage,
+                amount_due: _currentDraftInv.amount_now_due || _currentDraftInv.balance_due,
+                contact_name: _currentDraftInv.contact_name,
+                case_name: _currentDraftInv.case_name
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                // Update the row visually to show "Sent"
+                var invNum = _currentDraftInv.invoice_number;
+                var row = document.getElementById('row-' + invNum);
+                if (row) {
+                    row.classList.remove('row-warning', 'row-danger', 'row-critical');
+                    row.classList.add('row-sent');
+                    // Update status cell (second to last td)
+                    var cells = row.querySelectorAll('td');
+                    var statusCell = cells[cells.length - 2];
+                    if (statusCell) {
+                        statusCell.innerHTML = '<span class="sent-badge">&#10003; Sent</span>';
+                    }
+                    // Update button text
+                    var draftBtn = row.querySelector('.btn-draft-email');
+                    if (draftBtn) {
+                        draftBtn.classList.add('draft-sent');
+                        draftBtn.innerHTML = '&#9993; Resend';
+                    }
+                }
+            }
+        })
+        .catch(function(err) {
+            console.error('Failed to record sent notice:', err);
+        });
+    }
+
     // Reset button and close modal
     setTimeout(function() {
         btn.disabled = false;
         btn.textContent = 'Open in Outlook';
         closeDraftModal();
-        showStatus('Outlook opened for ' + (_currentDraftInv ? _currentDraftInv.contact_name : to), 'success');
+        showStatus('Outlook opened for ' + (_currentDraftInv ? _currentDraftInv.contact_name : to) + ' — notice recorded', 'success');
     }, 1000);
 }
 

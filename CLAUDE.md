@@ -527,6 +527,7 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Attorney name override for document signing**: When logged-in attorney has no row in `attorneys` table, `attorney_name_override` parameter overrides name-related fields (attorney_name, signing_attorney, service_signatory, etc.) while keeping firm details (address, phone, fax) from primary attorney profile
 - **Dunning emails switched to Outlook**: Draft button uses `mailto:` link instead of Gmail compose URL — opens pre-filled email in Outlook desktop
 - **Fixed firm phone number**: Dunning email drafts now use correct firm phone (314) 561-9690
+- **Dunning notice deduplication**: Each dunning notice (invoice + stage) is now tracked in `dunning_notices` table to prevent sending the same notice twice. `get_dunning_preview()` LEFT JOINs `dunning_notices` via LATERAL subquery to detect already-sent notices. Draft button records sent notice via `POST /api/dunning/mark-sent`. Dunning page shows "Sent" badge with green checkmark for already-sent notices and "Pending" for unsent. Sent rows are dimmed. Button changes to "Resend" for already-sent notices. History section now queries actual `dunning_notices` table columns.
 - **Planned: Outlook SMTP batch dunning**: Batch email sending via firm's Outlook/Exchange SMTP server (replacing SendGrid for dunning notices), triggered by dashboard button
 
 ### v1.x — Feature Build-Out (Completed)

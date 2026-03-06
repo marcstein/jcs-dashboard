@@ -396,12 +396,17 @@ class ARDataMixin:
             return 1
         return 0  # Not yet in dunning
 
-    def get_dunning_preview(self, stage: int = None) -> List[Dict]:
+    def get_dunning_preview(self, stage: int = None, include_sent: bool = True) -> List[Dict]:
         """Get dunning queue computed live from cached_invoices.
 
         All open invoices with balance > 0 and 5+ days overdue, across ALL years,
         dynamically assigned to dunning stages based on days overdue.
         LEFT JOINs with aging_invoice_uploads (latest batch) to get amount_now_due.
+        LEFT JOINs with dunning_notices to detect already-sent notices per stage.
+
+        Args:
+            stage: Filter to specific dunning stage (1-4). None = all stages.
+            include_sent: If True, include already-sent notices (with flag). If False, exclude them.
         """
         try:
             with get_connection() as conn:
@@ -426,7 +431,9 @@ class ARDataMixin:
                         i.due_date,
                         COALESCE(cl.email, ct.email) as contact_email,
                         ag.amount_overdue as aging_amount_due,
-                        ag.invoice_total as aging_invoice_total
+                        ag.invoice_total as aging_invoice_total,
+                        dn.notice_level as sent_notice_level,
+                        dn.sent_at as sent_at
                     FROM cached_invoices i
                     LEFT JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
                     LEFT JOIN cached_clients cl
@@ -437,6 +444,11 @@ class ARDataMixin:
                         ON ag.firm_id = i.firm_id
                         AND ag.invoice_number = i.invoice_number
                         AND ag.upload_batch_id = (SELECT upload_batch_id FROM latest_aging_batch)
+                    LEFT JOIN LATERAL (
+                        SELECT MAX(notice_level) AS notice_level, MAX(sent_at) AS sent_at
+                        FROM dunning_notices
+                        WHERE firm_id = i.firm_id AND invoice_id = i.id
+                    ) dn ON true
                     WHERE i.firm_id = %s
                       AND i.balance_due > 0
                       AND (CURRENT_DATE - i.due_date::date) >= 5
@@ -454,8 +466,18 @@ class ARDataMixin:
                         continue
                     balance_due = r[5] or 0
                     aging_amount = float(r[9]) if r[9] is not None else None
+
+                    # Check if notice was already sent at this stage level
+                    sent_level = r[11]  # notice_level from dunning_notices
+                    sent_at = r[12]     # sent_at timestamp
+                    already_sent = (sent_level is not None and sent_level >= s)
+
+                    if not include_sent and already_sent:
+                        continue
+
                     results.append({
                         'invoice_id': r[1] or str(r[0]),
+                        'invoice_db_id': r[0],  # numeric DB id for recording
                         'case_name': r[2] or '',
                         'attorney': r[3] or 'Unassigned',
                         'contact_name': r[4] or '',
@@ -466,6 +488,8 @@ class ARDataMixin:
                         'stage': s,
                         'last_notice_date': str(r[7]) if r[7] else '',
                         'contact_email': r[8] or '',
+                        'already_sent': already_sent,
+                        'sent_at': str(sent_at) if sent_at else None,
                     })
                 return results
         except Exception as e:
@@ -525,21 +549,22 @@ class ARDataMixin:
         return self.get_dunning_preview(stage=stage)
 
     def get_dunning_history(self, limit: int = 20) -> List[Dict]:
-        """Get recent dunning notice history."""
+        """Get recent dunning notice history from dunning_notices table."""
         try:
             with get_connection() as conn:
                 cursor = self._cursor(conn)
                 cursor.execute("""
-                    SELECT invoice_id, case_name, contact_name, balance_due,
-                           stage, status, last_notice_date, updated_at
-                    FROM dunning_notices
-                    WHERE firm_id = %s AND status != 'pending'
-                    ORDER BY updated_at DESC
+                    SELECT dn.invoice_number, dn.notice_level, dn.amount_due,
+                           dn.template_used, dn.sent_at, dn.delivery_status
+                    FROM dunning_notices dn
+                    WHERE dn.firm_id = %s
+                    ORDER BY dn.sent_at DESC
                     LIMIT %s
                 """, (self.firm_id, limit))
-                return [{'invoice_id': r[0], 'case_name': r[1], 'contact_name': r[2],
-                        'balance_due': r[3], 'stage': r[4], 'status': r[5],
-                        'last_notice_date': r[6], 'updated_at': r[7]}
+                return [{'invoice_number': r[0], 'notice_level': r[1],
+                        'amount_due': r[2] or 0, 'template_used': r[3] or '',
+                        'sent_at': str(r[4]) if r[4] else '',
+                        'delivery_status': r[5] or ''}
                        for r in cursor.fetchall()]
         except Exception:
             return []

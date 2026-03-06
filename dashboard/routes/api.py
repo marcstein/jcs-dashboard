@@ -259,6 +259,63 @@ async def api_dunning_draft_email(request: Request):
         return JSONResponse({"error": str(e)})
 
 
+@router.post("/api/dunning/mark-sent")
+async def api_dunning_mark_sent(request: Request):
+    """Record that a dunning notice was sent for an invoice at a given stage.
+
+    This prevents the same notice from being sent twice for the same invoice+stage.
+    """
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+        invoice_db_id = body.get("invoice_db_id")
+        invoice_number = body.get("invoice_number", "")
+        stage = body.get("stage", 1)
+        amount_due = body.get("amount_due", 0)
+        contact_name = body.get("contact_name", "")
+        case_name = body.get("case_name", "")
+
+        if not invoice_db_id:
+            return JSONResponse({"error": "invoice_db_id is required"}, status_code=400)
+
+        # Get firm_id from session
+        firm_id = request.session.get("firm_id", "")
+        if not firm_id:
+            return JSONResponse({"error": "No firm_id in session"}, status_code=400)
+
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO dunning_notices
+                    (firm_id, invoice_id, contact_id, invoice_number,
+                     days_overdue, notice_level, amount_due, template_used,
+                     delivery_method, delivery_status, sent_at)
+                VALUES (%s, %s, 0, %s, 0, %s, %s, %s, 'email', 'sent', CURRENT_TIMESTAMP)
+                ON CONFLICT (firm_id, invoice_id, notice_level) DO UPDATE SET
+                    amount_due = EXCLUDED.amount_due,
+                    template_used = EXCLUDED.template_used,
+                    sent_at = CURRENT_TIMESTAMP,
+                    delivery_status = 'sent'
+                RETURNING id
+            """, (firm_id, invoice_db_id, invoice_number, stage, amount_due,
+                  f"stage_{stage}_outlook"))
+            row = cur.fetchone()
+            notice_id = row[0] if row else 0
+
+        return JSONResponse({
+            "ok": True,
+            "notice_id": notice_id,
+            "message": f"Recorded: Stage {stage} notice for invoice {invoice_number}",
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/api/dunning/export")
 async def api_dunning_export(request: Request, stage: int = None):
     """Export dunning queue to CSV."""

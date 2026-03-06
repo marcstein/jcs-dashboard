@@ -162,6 +162,8 @@ async def dunning_preview(request: Request, stage: int = None):
 
     # Reshape queue items to match template field names
     queue = []
+    sent_count = 0
+    unsent_count = 0
     for inv in raw_queue:
         s = inv.get('stage', 1) or 1
         balance_due = inv.get('balance_due', 0) or 0
@@ -169,8 +171,14 @@ async def dunning_preview(request: Request, stage: int = None):
         total_balance = inv.get('total_remaining_balance', balance_due)  # fallback to balance_due
         if amount_now_due is None:
             amount_now_due = balance_due  # fallback if no aging data
+        already_sent = inv.get('already_sent', False)
+        if already_sent:
+            sent_count += 1
+        else:
+            unsent_count += 1
         queue.append({
             'invoice_number': inv.get('invoice_id', ''),
+            'invoice_db_id': inv.get('invoice_db_id', 0),
             'case_name': inv.get('case_name', ''),
             'attorney': inv.get('attorney', inv.get('contact_name', '')),
             'contact_name': inv.get('contact_name', ''),
@@ -182,6 +190,8 @@ async def dunning_preview(request: Request, stage: int = None):
             'dunning_stage': s,
             'stage_name': stage_names.get(s, f'Stage {s}'),
             'due_date': inv.get('last_notice_date', ''),
+            'already_sent': already_sent,
+            'sent_at': inv.get('sent_at', ''),
         })
 
     return templates.TemplateResponse("dunning.html", {
@@ -190,6 +200,8 @@ async def dunning_preview(request: Request, stage: int = None):
         "queue": queue,
         "history": history,
         "current_stage": stage,
+        "sent_count": sent_count,
+        "unsent_count": unsent_count,
         "username": request.session.get("username"),
         "role": role,
     })
