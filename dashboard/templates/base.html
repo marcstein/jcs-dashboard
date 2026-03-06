@@ -26,6 +26,7 @@
             <a href="/trends" class="{% if request.url.path == '/trends' %}active{% endif %}">Trends</a>
             <a href="/payments" class="{% if request.url.path == '/payments' %}active{% endif %}">Payments</a>
             {% if role != 'attorney' %}
+            <a href="/trust" class="{% if request.url.path == '/trust' %}active{% endif %}">Trust</a>
             <a href="/dunning" class="{% if request.url.path == '/dunning' %}active{% endif %}">Dunning</a>
             <a href="/aging-upload" class="{% if request.url.path == '/aging-upload' %}active{% endif %}">Aging Upload</a>
             <a href="/wonky" class="{% if request.url.path == '/wonky' %}active{% endif %}">Wonky</a>

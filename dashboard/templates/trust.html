@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}Trust Transfer Report - LawMetrics{% endblock %}
+
+{% block content %}
+<h1>Trust-to-Operating Transfer Report</h1>
+<p class="page-description">Phase-based calculation of earned fees for trust account management. Generated {{ generated_at }}.</p>
+
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.case_count }}</div>
+        <div class="stat-label">Open Cases with Fees</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_fees) }}</div>
+        <div class="stat-label">Total Flat Fees</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_earned) }}</div>
+        <div class="stat-label">Total Earned ({{ summary.earned_pct }}%)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_in_operating) }}</div>
+        <div class="stat-label">Already in Operating</div>
+    </div>
+    <div class="stat-card {% if summary.total_to_transfer > 0 %}stat-warning{% endif %}">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_to_transfer) }}</div>
+        <div class="stat-label">Recommended Transfer</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_remaining_trust) }}</div>
+        <div class="stat-label">Remaining in Trust</div>
+    </div>
+</div>
+
+<!-- Filters and Export -->
+<div style="display: flex; gap: 12px; align-items: center; margin: 20px 0; flex-wrap: wrap;">
+    <form method="get" action="/trust" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <select name="attorney" onchange="this.form.submit()" style="padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px;">
+            <option value="">All Attorneys</option>
+            {% for atty in all_attorneys %}
+            <option value="{{ atty }}" {% if atty == selected_attorney %}selected{% endif %}>{{ atty }}</option>
+            {% endfor %}
+        </select>
+        <select name="phase" onchange="this.form.submit()" style="padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px;">
+            <option value="">All Phases</option>
+            {% for p in all_phases %}
+            <option value="{{ p.code }}" {% if p.code == selected_phase %}selected{% endif %}>{{ p.label }}</option>
+            {% endfor %}
+        </select>
+        {% if selected_attorney or selected_phase %}
+        <a href="/trust" style="font-size: 13px; color: #6b7280;">Clear filters</a>
+        {% endif %}
+    </form>
+    <a href="/trust/export" class="btn btn-secondary" style="margin-left: auto; padding: 6px 14px; font-size: 13px; text-decoration: none; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; color: #374151;">Export CSV</a>
+</div>
+
+<!-- Breakdown by Case Type -->
+<div class="section-header">
+    <h2>By Case Type</h2>
+</div>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Schedule</th>
+            <th style="text-align:right">Cases</th>
+            <th style="text-align:right">Total Fees</th>
+            <th style="text-align:right">Earned</th>
+            <th style="text-align:right">To Transfer</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for label, data in summary.by_schedule.items() %}
+        <tr>
+            <td><strong>{{ label }}</strong></td>
+            <td style="text-align:right">{{ data.count }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(data.total_fee) }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(data.earned) }}</td>
+            <td style="text-align:right; {% if data.to_transfer > 0 %}color: #d97706; font-weight: 600;{% endif %}">${{ "{:,.0f}".format(data.to_transfer) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Breakdown by Phase -->
+<div class="section-header" style="margin-top: 24px;">
+    <h2>By Current Phase</h2>
+</div>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Phase</th>
+            <th style="text-align:right">Cases</th>
+            <th style="text-align:right">Total Fees</th>
+            <th style="text-align:right">Earned</th>
+            <th style="text-align:right">To Transfer</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pc in phase_order %}
+        {% set label = phase_labels.get(pc, pc) %}
+        {% if label in summary.by_phase %}
+        {% set data = summary.by_phase[label] %}
+        <tr>
+            <td><strong>{{ label }}</strong></td>
+            <td style="text-align:right">{{ data.count }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(data.total_fee) }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(data.earned) }}</td>
+            <td style="text-align:right; {% if data.to_transfer > 0 %}color: #d97706; font-weight: 600;{% endif %}">${{ "{:,.0f}".format(data.to_transfer) }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Fee Schedules Reference -->
+<div class="section-header" style="margin-top: 24px;">
+    <h2>Fee Allocation Schedules</h2>
+</div>
+<p style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">Percentage of flat fee earned at each phase. Cumulative — reaching a phase means all prior phases are also earned.</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+    {% for key, schedule in schedules.items() %}
+    <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px;">
+        <h3 style="margin: 0 0 8px 0; font-size: 14px;">{{ schedule.label }}</h3>
+        <table style="width: 100%; font-size: 13px;">
+            <tr style="color: #6b7280;"><th style="text-align:left; padding: 2px 0;">Phase</th><th style="text-align:right; padding: 2px 0;">This</th><th style="text-align:right; padding: 2px 0;">Cumul.</th></tr>
+            {% set ns = namespace(cumul=0) %}
+            {% for pc in phase_order %}
+            {% set pct = schedule.phases.get(pc, 0) %}
+            {% set ns.cumul = ns.cumul + pct %}
+            <tr>
+                <td style="padding: 2px 0;">{{ phase_labels.get(pc, pc) }}</td>
+                <td style="text-align:right; padding: 2px 0;">{% if pct > 0 %}{{ pct }}%{% else %}-{% endif %}</td>
+                <td style="text-align:right; padding: 2px 0; font-weight: 600;">{{ ns.cumul }}%</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Case Detail Table -->
+<div class="section-header" style="margin-top: 24px;">
+    <h2>Case Detail{% if selected_attorney %} — {{ selected_attorney }}{% endif %}{% if selected_phase %} — {{ phase_labels.get(selected_phase, selected_phase) }}{% endif %}</h2>
+</div>
+
+{% if lines %}
+<div style="overflow-x: auto;">
+<table class="data-table" style="font-size: 13px;">
+    <thead>
+        <tr>
+            <th>Case</th>
+            <th>Client</th>
+            <th>Attorney</th>
+            <th>Type</th>
+            <th>Phase</th>
+            <th style="text-align:right">Total Fee</th>
+            <th style="text-align:right">Earned %</th>
+            <th style="text-align:right">Earned $</th>
+            <th style="text-align:right">In Operating</th>
+            <th style="text-align:right">Transfer</th>
+            <th style="text-align:right">In Trust</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for l in lines %}
+        <tr>
+            <td title="{{ l.case_name }}">{{ l.case_name[:35] }}</td>
+            <td>{{ l.client_name[:20] }}</td>
+            <td>{{ l.lead_attorney[:18] }}</td>
+            <td>{{ l.case_type[:14] if l.case_type else "" }}</td>
+            <td>{{ l.phase_label }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(l.total_fee) }}</td>
+            <td style="text-align:right">{{ l.earned_pct }}%</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(l.earned_amount) }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(l.in_operating) }}</td>
+            <td style="text-align:right; {% if l.recommended_transfer > 0 %}color: #d97706; font-weight: 600;{% endif %}">{% if l.recommended_transfer > 0 %}${{ "{:,.0f}".format(l.recommended_transfer) }}{% else %}-{% endif %}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(l.remaining_in_trust) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p style="color: #6b7280; padding: 20px;">No cases match the current filters.</p>
+{% endif %}
+
+{% endblock %}

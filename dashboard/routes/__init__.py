@@ -26,6 +26,7 @@ def register_routes(app: FastAPI):
     from .payments import router as payments_router
     from .api import router as api_router
     from .firms import router as firms_router
+    from .trust import router as trust_router
 
     app.include_router(main_router)
     app.include_router(ar_router)
@@ -37,3 +38,4 @@ def register_routes(app: FastAPI):
     app.include_router(payments_router)
     app.include_router(api_router)
     app.include_router(firms_router)
+    app.include_router(trust_router)
