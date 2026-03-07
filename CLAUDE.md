@@ -40,7 +40,8 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 │   ├── sop.py             # Staff SOP reports
 │   ├── sync.py            # Data sync from MyCase
 │   ├── tasks.py           # Task SLA, overdue tracking
-│   └── trends.py          # KPI trend analysis
+│   ├── trends.py          # KPI trend analysis
+│   └── trust.py           # Trust-to-operating transfer reports
 ├── db/                    # Database layer (PostgreSQL only)
 │   ├── __init__.py
 │   ├── connection.py      # Connection pool, get_connection()
@@ -125,6 +126,7 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - `promises.py` - Payment promise tracking and monitoring
 - `notifications.py` - Multi-channel notifications (Slack, Email, SMS)
 - `trends.py` - Historical KPI trend analysis
+- `trust_transfer.py` - Phase-based trust-to-operating transfer report (report only, no money handling)
 - `case_phases.py` - Universal 7-phase case management framework
 - `scheduler.py` - Automated task scheduling and cron management
 
@@ -301,6 +303,13 @@ uv run python agent.py trends report             # Generate trend analysis repor
 uv run python agent.py trends analyze <metric>   # Analyze specific metric trend
 uv run python agent.py trends compare <metric>   # Week-over-week or month-over-month comparison
 
+# Trust Transfer Reports
+uv run python agent.py trust report              # Generate trust-to-operating transfer report
+uv run python agent.py trust report --export     # Export to CSV
+uv run python agent.py trust report --attorney "Name"  # Filter by lead attorney
+uv run python agent.py trust report --phase motions    # Filter by current phase
+uv run python agent.py trust schedules           # Show fee allocation schedules by case type
+
 # Case Phases (integrated into agent CLI)
 uv run python agent.py phases init           # Initialize phases, mappings, and workflows
 uv run python agent.py phases list           # List all 7 universal phases
@@ -374,6 +383,20 @@ Track and visualize KPI trends over time:
 - Trend direction detection (improving/declining/stable)
 - Gap-to-target analysis
 
+### Trust-to-Operating Transfer Report
+Phase-based report for managing trust account transfers on flat-fee cases:
+- Maps current case phase to cumulative earned percentage
+- Three case-type schedules with different allocation curves:
+  - DWI/Criminal: 15/20/25/15/10/10/5% across 7 phases
+  - Traffic/Municipal: 20/25/20/20/0/10/5% (skips Trial Prep)
+  - Expungement/License: 25/35/25/15% (compressed to 4 phases)
+- Uses `paid_amount` from invoices as proxy for "already in operating"
+- Recommended Transfer = Earned Amount - Already in Operating
+- Dashboard: `/trust` with attorney/phase filters and CSV export
+- CLI: `python agent.py trust report`, `trust schedules`
+- Report only — no money handling or bank integration
+- Key files: `trust_transfer.py`, `commands/trust.py`, `dashboard/routes/trust.py`, `dashboard/templates/trust.html`
+
 ### Case Phase Tracking
 Universal 7-phase framework mapping MyCase stages to standardized phases:
 
@@ -415,6 +438,7 @@ Production: https://jcs.lawmetrics.ai
 - `/phases` - Case phase distribution and stalled cases
 - `/trends` - Historical KPI trends with sparklines
 - `/promises` - Payment promise tracking and reliability
+- `/trust` - Trust-to-operating transfer report (phase-based fee allocation, CSV export)
 - `/payments` - Payment analytics: time-to-payment by attorney and case type
 - `/dunning` - Dunning notices preview and approval (two-amount columns: Amount Due Now + Total Balance)
 - `/aging-upload` - Aging invoice CSV upload (drag-and-drop, upload history)
@@ -425,7 +449,7 @@ Production: https://jcs.lawmetrics.ai
 - `dashboard/app.py` - FastAPI application
 - `dashboard/auth.py` - Authentication (multi-tenant, firm_id from login), role/attorney_name session management
 - `dashboard/config.py` - Configuration (env vars, admin credentials)
-- `dashboard/routes/` - Route handlers split by domain (main, ar, attorneys, noiw, phases, trends, promises, payments, api, documents) — each has role guards
+- `dashboard/routes/` - Route handlers split by domain (main, ar, attorneys, noiw, phases, trends, promises, payments, api, documents, trust) — each has role guards
 - `dashboard/models/` - Data access split by domain (base, ar, attorneys, tasks, etc.) — all support attorney data scoping
 - `dashboard/templates/` - Jinja2 templates (base.html has role-conditional navigation)
 - `dashboard/static/` - CSS styles
@@ -534,6 +558,7 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Per-firm subdomain routing**: `SubdomainResolutionMiddleware` extracts firm_id from Host header (e.g. `jcs.lawmetrics.ai` → `jcs_law`). Login form hides firm_id field when on a firm subdomain. `firms.subdomain` column with uniqueness constraint and verification flag. Reserved subdomains (www, app, api, etc.) skip firm resolution.
 - **Wildcard nginx configuration**: `deployment/lawmetrics.nginx.conf` with three server blocks: HTTP→HTTPS redirect, wildcard subdomain proxy to port 3000, www/apex marketing site. Rate limiting on `/login`. Security headers.
 - **Brochure site routing**: `www.lawmetrics.ai` serves static marketing site (Cloudflare Pages or local). Apex `lawmetrics.ai` redirects to www. `app.lawmetrics.ai` shows generic login with firm_id field.
+- **Trust-to-operating transfer report**: Phase-based fee allocation report for flat-fee cases. Maps each case's current phase to a cumulative earned percentage using case-type-specific schedules (DWI/Criminal, Traffic/Municipal, Expungement/License). Dashboard page at `/trust` with attorney/phase filters and CSV export. CLI: `python agent.py trust report`. Report only — no money handling. Uses `paid_amount` from invoices as proxy for "already in operating." Fee schedules defined in `trust_transfer.py` `FEE_SCHEDULES` dict.
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
@@ -1311,7 +1336,7 @@ These modules were written earlier and are ready to activate in Phase 4:
 | 4 | Firm management dashboard UI (`/firms`, `/firms/{id}`) | ✅ Complete |
 | 5 | Per-firm subdomain routing, wildcard nginx, brochure site routing | ✅ Complete |
 | 6 | Activate Celery infrastructure for per-firm automation | Pending |
-| 7 | Brochure/marketing site at www.lawmetrics.ai (Cloudflare Pages) | Pending |
+| 7 | Brochure/marketing site at lawmetrics.ai | ✅ Complete |
 
 ### Onboarding a New Firm
 
