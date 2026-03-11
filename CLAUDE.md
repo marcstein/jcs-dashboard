@@ -156,6 +156,26 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - **Invoices have NULL `contact_id`** - the `cached_invoices.contact_id` column is never populated by MyCase API. To find the client for an invoice, join through the case: `cached_invoices.case_id` → `cached_cases.data_json::jsonb -> 'billing_contact' ->> 'id'` → `cached_clients.id`. The case `data_json` also has `clients` and `contacts` arrays (all contain `{id: N}` objects).
 - **`cached_contacts` has no emails** - only `id` and `name` from MyCase API. Client emails are in `cached_clients.email` (2,247 of 2,475 have emails).
 
+### MyCase OAuth Token Management
+- **Auth module**: `auth.py` — `MyCaseAuth` class handles OAuth 2.0 flow, token storage, refresh
+- **Token storage**: `data/tokens.json` (file-based; DB storage in `firms` table for multi-tenant)
+- **Access token lifetime**: 24 hours (`expires_in: 86400`)
+- **Refresh token**: Issued with each token refresh; stays valid as long as it's used before expiry
+- **Credentials**: `MYCASE_CLIENT_ID` and `MYCASE_CLIENT_SECRET` must be in `.env` — without them the OAuth authorization URL has an empty `client_id` and the flow silently fails
+- **Redirect URI**: `https://legal.practical.ai/oauth/callback` (configured in MyCase app settings)
+- **MFA requirement**: Re-authorization requires John's email MFA (john@jcsattorney.com)
+- **Proactive refresh cron**: Token is refreshed every 6 hours via crontab to prevent expiration:
+  ```
+  0 */6 * * * cd /opt/jcs-mycase && export $(grep -v '^#' .env | xargs) && .venv/bin/python -c 'from auth import MyCaseAuth; MyCaseAuth().get_access_token()' >> /var/log/mycase-token-refresh.log 2>&1
+  ```
+- **Re-authorization flow** (if token dies):
+  1. `export $(grep -v '^#' .env | xargs)`
+  2. `.venv/bin/python -c "from auth import MyCaseAuth; print(MyCaseAuth().get_authorization_url())"`
+  3. Open URL in browser, login with John's credentials + MFA
+  4. Copy auth code from redirect page
+  5. `.venv/bin/python -c "from auth import MyCaseAuth; MyCaseAuth().exchange_code('CODE_HERE')"`
+  6. Verify: `.venv/bin/python agent.py sync`
+
 ## Cache & Sync Behavior
 
 ### How Sync Works
@@ -323,6 +343,11 @@ uv run python agent.py phases case <id>      # Show phase history for a case
 ```
 
 ## Scheduled Tasks
+
+### Continuous (Cron)
+| Interval | Task | Command |
+|----------|------|---------|
+| Every 6 hours | OAuth Token Refresh | `from auth import MyCaseAuth; MyCaseAuth().get_access_token()` |
 
 ### Daily Tasks (Weekdays)
 | Time | Task | Owner | Command |
