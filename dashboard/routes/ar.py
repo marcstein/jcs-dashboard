@@ -94,8 +94,8 @@ async def wonky_invoices(request: Request):
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
-    if role == 'attorney':
-        return RedirectResponse(url="/attorneys", status_code=303)
+    if role in ('attorney', 'collections'):
+        return RedirectResponse(url="/ar" if role == 'collections' else "/attorneys", status_code=303)
 
     data = get_data(request)
     invoices = data.get_wonky_invoices()

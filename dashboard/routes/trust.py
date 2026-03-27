@@ -12,7 +12,6 @@ import csv
 from dashboard.auth import is_authenticated, get_data, get_current_role
 from trust_transfer import (
     generate_trust_transfer_report,
-    FEE_SCHEDULES,
     PHASE_ORDER,
     PHASE_LABELS,
 )
@@ -28,8 +27,8 @@ async def trust_report_page(request: Request, attorney: str = None, phase: str =
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
-    if role == 'attorney':
-        return RedirectResponse(url="/attorneys", status_code=303)
+    if role != 'admin':
+        return RedirectResponse(url="/ar" if role == 'collections' else "/attorneys" if role == 'attorney' else "/", status_code=303)
 
     firm_id = request.session.get("firm_id")
     if not firm_id:
@@ -38,6 +37,7 @@ async def trust_report_page(request: Request, attorney: str = None, phase: str =
     report = generate_trust_transfer_report(firm_id)
     lines = report["lines"]
     summary = report["summary"]
+    schedules = report["schedules"]
 
     # Apply filters
     if attorney:
@@ -58,7 +58,7 @@ async def trust_report_page(request: Request, attorney: str = None, phase: str =
         "role": role,
         "lines": lines,
         "summary": summary,
-        "schedules": FEE_SCHEDULES,
+        "schedules": schedules,
         "phase_order": PHASE_ORDER,
         "phase_labels": PHASE_LABELS,
         "all_attorneys": all_attorneys,
@@ -76,8 +76,8 @@ async def trust_export_csv(request: Request):
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
-    if role == 'attorney':
-        return RedirectResponse(url="/attorneys", status_code=303)
+    if role != 'admin':
+        return RedirectResponse(url="/ar" if role == 'collections' else "/attorneys" if role == 'attorney' else "/", status_code=303)
 
     firm_id = request.session.get("firm_id")
     if not firm_id:

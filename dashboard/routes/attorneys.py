@@ -21,6 +21,10 @@ async def attorneys_dashboard(request: Request, year: int = None, view: str = No
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    role = get_current_role(request)
+    if role == 'collections':
+        return RedirectResponse(url="/ar", status_code=303)
+
     data = get_data(request)
     current_year = datetime.now().year
     available_years = [2025, 2026]
@@ -85,6 +89,8 @@ async def attorney_detail_view(request: Request, attorney_name: str, year: int =
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
+    if role == 'collections':
+        return RedirectResponse(url="/ar", status_code=303)
     if role == 'attorney':
         current_attorney = get_current_attorney_name(request)
         if current_attorney and current_attorney != attorney_name:

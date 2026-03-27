@@ -1219,6 +1219,11 @@ async def documents_page(request: Request):
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/login", status_code=303)
 
+    role = get_current_role(request)
+    if role == 'collections':
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/ar", status_code=303)
+
     return templates.TemplateResponse("documents.html", {
         "request": request,
         "username": request.session.get("username"),

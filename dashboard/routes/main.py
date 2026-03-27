@@ -26,6 +26,8 @@ async def index(request: Request, year: int = None, view: str = None):
     role = get_current_role(request)
     if role == 'attorney':
         return RedirectResponse(url="/attorneys", status_code=303)
+    if role == 'collections':
+        return RedirectResponse(url="/ar", status_code=303)
 
     # Default to current year if not specified
     current_year = datetime.now().year
@@ -175,8 +177,11 @@ async def login_submit(
     print(f"Login attempt: {username} @ firm_id={firm_id}")
     if login_user(request, username, password, firm_id=firm_id):
         print(f"Login SUCCESS - session: {dict(request.session)}")
-        if request.session.get("role") == "attorney":
+        role = request.session.get("role")
+        if role == "attorney":
             return RedirectResponse(url="/attorneys", status_code=303)
+        if role == "collections":
+            return RedirectResponse(url="/ar", status_code=303)
         return RedirectResponse(url="/", status_code=303)
 
     print(f"Login FAILED for {username} @ firm_id={firm_id}")
@@ -204,8 +209,8 @@ async def staff_tasks(request: Request, staff_name: str):
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
-    if role == 'attorney':
-        return RedirectResponse(url="/attorneys", status_code=303)
+    if role in ('attorney', 'collections'):
+        return RedirectResponse(url="/ar" if role == 'collections' else "/attorneys", status_code=303)
 
     data = get_data(request)
     staff = data.get_staff_tasks(staff_name, include_completed=False)
@@ -227,8 +232,8 @@ async def reports_list(request: Request):
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
-    if role == 'attorney':
-        return RedirectResponse(url="/attorneys", status_code=303)
+    if role in ('attorney', 'collections'):
+        return RedirectResponse(url="/ar" if role == 'collections' else "/attorneys", status_code=303)
 
     data = get_data(request)
     reports = data.get_recent_reports(limit=50)
@@ -248,8 +253,8 @@ async def view_report(request: Request, filename: str):
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
-    if role == 'attorney':
-        return RedirectResponse(url="/attorneys", status_code=303)
+    if role in ('attorney', 'collections'):
+        return RedirectResponse(url="/ar" if role == 'collections' else "/attorneys", status_code=303)
 
     data = get_data(request)
     content = data.get_report_content(filename)

@@ -44,6 +44,10 @@ async def phases_dashboard(request: Request, phase: str = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
+    role = get_current_role(request)
+    if role == 'collections':
+        return RedirectResponse(url="/ar", status_code=303)
+
     data = get_data(request)
     raw_summary = data.get_phases_summary()
     raw_stalled = data.get_stalled_cases(threshold_days=30)
