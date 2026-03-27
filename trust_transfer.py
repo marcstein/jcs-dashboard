@@ -9,6 +9,9 @@ Phase-based fee allocation schedules define what percentage of the total
 flat fee is "earned" at each phase. The managing partner uses this report
 to maintain trust and operating accounts.
 
+Fee schedules are loaded from the database (trust_fee_schedules table)
+per firm. If no DB schedules exist, falls back to hardcoded defaults.
+
 No money is moved by this system — it produces a report only.
 """
 
@@ -23,12 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Fee Schedules: percentage of flat fee earned at each phase
+# Hardcoded defaults — used as fallback if no DB schedules exist,
+# and as seed data for new firms.
 # =============================================================================
-# These are cumulative — reaching Phase 3 means the total earned is the sum
-# of Phase 1 + Phase 2 + Phase 3 percentages.
 
-FEE_SCHEDULES = {
+_HARDCODED_SCHEDULES = {
     "dwi_criminal": {
         "label": "DWI / Criminal",
         "case_type_patterns": ["DWI", "Criminal", "Drug", "Felony", "Misdemeanor", "Assault", "Theft", "DUI"],
@@ -70,8 +72,7 @@ FEE_SCHEDULES = {
     },
 }
 
-# Default schedule for case types that don't match any pattern
-DEFAULT_SCHEDULE = {
+_HARDCODED_DEFAULT = {
     "label": "Default",
     "phases": {
         "intake":           15,
@@ -102,20 +103,63 @@ PHASE_LABELS = {
 
 
 # =============================================================================
-# Schedule Resolution
+# Schedule Loading — DB first, hardcoded fallback
 # =============================================================================
 
-def get_schedule_for_case_type(case_type: str) -> Dict:
+def load_fee_schedules(firm_id: str) -> Tuple[Dict, Dict]:
+    """
+    Load fee schedules for a firm.
+
+    Returns (schedules_dict, default_schedule) where:
+    - schedules_dict maps schedule_key -> {label, case_type_patterns, phases}
+    - default_schedule is the fallback for unmatched case types
+
+    Tries DB first. If no rows found, returns hardcoded defaults.
+    """
+    try:
+        from db.trust import get_fee_schedules
+        db_schedules = get_fee_schedules(firm_id)
+    except Exception:
+        db_schedules = []
+
+    if not db_schedules:
+        return dict(_HARDCODED_SCHEDULES), dict(_HARDCODED_DEFAULT)
+
+    schedules = {}
+    default = None
+
+    for row in db_schedules:
+        entry = {
+            "label": row["label"],
+            "case_type_patterns": row["case_type_patterns"] or [],
+            "phases": row["phase_percentages"] or {},
+        }
+        if row["is_default"]:
+            default = entry
+        else:
+            schedules[row["schedule_key"]] = entry
+
+    if not default:
+        default = dict(_HARDCODED_DEFAULT)
+
+    return schedules, default
+
+
+def get_schedule_for_case_type(case_type: str, schedules: Dict, default: Dict) -> Dict:
     """Match a case type string to its fee schedule."""
     if not case_type:
-        return DEFAULT_SCHEDULE
+        return default
 
     ct = case_type.upper()
-    for key, schedule in FEE_SCHEDULES.items():
-        for pattern in schedule["case_type_patterns"]:
+    for key, schedule in schedules.items():
+        for pattern in schedule.get("case_type_patterns", []):
             if pattern.upper() in ct:
                 return schedule
-    return DEFAULT_SCHEDULE
+    return default
+
+
+# Public alias for backward compat — dashboard template reads this
+FEE_SCHEDULES = _HARDCODED_SCHEDULES
 
 
 def cumulative_earned_pct(schedule: Dict, current_phase: str) -> int:
@@ -165,12 +209,15 @@ def generate_trust_transfer_report(firm_id: str) -> Dict:
     - cached_invoices (total fee amount per case, summed)
     - cached_cases (client name, lead attorney, status)
 
-    Returns dict with 'lines' (list of TrustTransferLine), 'summary', and 'generated_at'.
+    Returns dict with 'lines' (list of TrustTransferLine), 'summary',
+    'schedules', 'default_schedule', and 'generated_at'.
     """
+    # Load schedules from DB (or hardcoded fallback)
+    schedules, default_schedule = load_fee_schedules(firm_id)
+
     with get_connection() as conn:
         cur = conn.cursor()
 
-        # Get current phase for each open case, with invoice totals
         cur.execute("""
             WITH latest_phase AS (
                 SELECT DISTINCT ON (case_id)
@@ -232,7 +279,7 @@ def generate_trust_transfer_report(firm_id: str) -> Dict:
         total_fee = float(row["total_fee"])
         total_paid = float(row["total_paid"])
 
-        schedule = get_schedule_for_case_type(case_type)
+        schedule = get_schedule_for_case_type(case_type, schedules, default_schedule)
         earned_pct = cumulative_earned_pct(schedule, phase_code)
         earned_amount = round(total_fee * earned_pct / 100, 2)
 
@@ -300,6 +347,8 @@ def generate_trust_transfer_report(firm_id: str) -> Dict:
             "by_schedule": by_schedule,
             "by_phase": by_phase,
         },
+        "schedules": schedules,
+        "default_schedule": default_schedule,
         "generated_at": datetime.now().isoformat(),
         "firm_id": firm_id,
     }

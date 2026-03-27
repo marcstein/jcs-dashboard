@@ -1,0 +1,559 @@
+{
+  "total": 55,
+  "passed": 55,
+  "failed": 0,
+  "skipped": 0,
+  "errors": 0,
+  "results": [
+    {
+      "template_name": "Admin Continuance Request",
+      "template_id": 1425,
+      "document_type_key": "admin_continuance_request",
+      "status": "PASS",
+      "file_size": 13803,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Admin_Continuance_Request_TEST.docx"
+    },
+    {
+      "template_name": "Admin Hearing Request",
+      "template_id": 1673,
+      "document_type_key": "admin_hearing_request",
+      "status": "PASS",
+      "file_size": 313943,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Admin_Hearing_Request_TEST.docx"
+    },
+    {
+      "template_name": "After Supplemental Disclosure Letter",
+      "template_id": 1750,
+      "document_type_key": "after_supplemental_disclosure_letter",
+      "status": "PASS",
+      "file_size": 21015,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/After_Supplemental_Disclosure_Letter_TEST.docx"
+    },
+    {
+      "template_name": "Answer for Request to Produce",
+      "template_id": 739,
+      "document_type_key": "answer_for_request_to_produce",
+      "status": "PASS",
+      "file_size": 20084,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Answer_for_Request_to_Produce_TEST.docx"
+    },
+    {
+      "template_name": "Available Court Dates for Trial",
+      "template_id": 1109,
+      "document_type_key": "available_court_dates",
+      "status": "PASS",
+      "file_size": 13933,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Available_Court_Dates_for_Trial_TEST.docx"
+    },
+    {
+      "template_name": "Bond Assignment",
+      "template_id": 1145,
+      "document_type_key": "bond_assignment",
+      "status": "PASS",
+      "file_size": 21333,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Bond_Assignment_TEST.docx"
+    },
+    {
+      "template_name": "Closing Letter",
+      "template_id": 1514,
+      "document_type_key": "closing_letter",
+      "status": "PASS",
+      "file_size": 37020,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Closing_Letter_TEST.docx"
+    },
+    {
+      "template_name": "DL Reinstatement Letter",
+      "template_id": 1770,
+      "document_type_key": "dl_reinstatement_letter",
+      "status": "PASS",
+      "file_size": 245958,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/DL_Reinstatement_Letter_TEST.docx"
+    },
+    {
+      "template_name": "DOR Motion to Dismiss",
+      "template_id": 1757,
+      "document_type_key": "dor_motion_to_dismiss",
+      "status": "PASS",
+      "file_size": 11926,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/DOR_Motion_to_Dismiss_TEST.docx"
+    },
+    {
+      "template_name": "Disposition Letter to Client",
+      "template_id": 1696,
+      "document_type_key": "disposition_letter",
+      "status": "PASS",
+      "file_size": 11837,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Disposition_Letter_to_Client_TEST.docx"
+    },
+    {
+      "template_name": "Entry (Generic)",
+      "template_id": 1840,
+      "document_type_key": "entry_generic",
+      "status": "PASS",
+      "file_size": 25916,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Entry__Generic__TEST.docx"
+    },
+    {
+      "template_name": "Entry of Appearance (Muni)",
+      "template_id": 1688,
+      "document_type_key": "entry_of_appearance_muni",
+      "status": "PASS",
+      "file_size": 16432,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Entry_of_Appearance__Muni__TEST.docx"
+    },
+    {
+      "template_name": "Entry of Appearance (State)",
+      "template_id": 1687,
+      "document_type_key": "entry_of_appearance_state",
+      "status": "PASS",
+      "file_size": 16206,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Entry_of_Appearance__State__TEST.docx"
+    },
+    {
+      "template_name": "Filing Fee Memo",
+      "template_id": 1478,
+      "document_type_key": "filing_fee_memo",
+      "status": "PASS",
+      "file_size": 17967,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Filing_Fee_Memo_TEST.docx"
+    },
+    {
+      "template_name": "Letter to Client with Discovery",
+      "template_id": 1766,
+      "document_type_key": "ltr_to_client_with_discovery",
+      "status": "PASS",
+      "file_size": 321632,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Letter_to_Client_with_Discovery_TEST.docx"
+    },
+    {
+      "template_name": "Letter to DOR with Judgment",
+      "template_id": 1760,
+      "document_type_key": "ltr_to_dor_with_judgment",
+      "status": "PASS",
+      "file_size": 11286,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Letter_to_DOR_with_Judgment_TEST.docx"
+    },
+    {
+      "template_name": "Letter to DOR with PFR",
+      "template_id": 1755,
+      "document_type_key": "ltr_to_dor_with_pfr",
+      "status": "PASS",
+      "file_size": 15197,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Letter_to_DOR_with_PFR_TEST.docx"
+    },
+    {
+      "template_name": "Letter to DOR with Stay Order",
+      "template_id": 1756,
+      "document_type_key": "ltr_to_dor_with_stay_order",
+      "status": "PASS",
+      "file_size": 14833,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Letter_to_DOR_with_Stay_Order_TEST.docx"
+    },
+    {
+      "template_name": "Motion for Bond Reduction",
+      "template_id": 1143,
+      "document_type_key": "motion_for_bond_reduction",
+      "status": "PASS",
+      "file_size": 14992,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_for_Bond_Reduction_TEST.docx"
+    },
+    {
+      "template_name": "Motion for Change of Judge",
+      "template_id": 1747,
+      "document_type_key": "motion_for_coj",
+      "status": "PASS",
+      "file_size": 17419,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_for_Change_of_Judge_TEST.docx"
+    },
+    {
+      "template_name": "Motion for Continuance",
+      "template_id": 445,
+      "document_type_key": "motion_for_continuance",
+      "status": "PASS",
+      "file_size": 18125,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_for_Continuance_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Amend Bond Conditions",
+      "template_id": 1140,
+      "document_type_key": "motion_to_amend_bond_conditions",
+      "status": "PASS",
+      "file_size": 28956,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Amend_Bond_Conditions_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Appear via WebEx",
+      "template_id": 131,
+      "document_type_key": "motion_to_appear_via_webex",
+      "status": "PASS",
+      "file_size": 17970,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Appear_via_WebEx_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Certify for Jury Trial",
+      "template_id": 1754,
+      "document_type_key": "motion_to_certify",
+      "status": "PASS",
+      "file_size": 12295,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Certify_for_Jury_Trial_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Compel Discovery",
+      "template_id": 803,
+      "document_type_key": "motion_to_compel",
+      "status": "PASS",
+      "file_size": 33376,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Compel_Discovery_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Dismiss (County)",
+      "template_id": 1842,
+      "document_type_key": "motion_to_dismiss_county",
+      "status": "PASS",
+      "file_size": 18442,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Dismiss__County__TEST.docx"
+    },
+    {
+      "template_name": "Motion to Place on Docket",
+      "template_id": 738,
+      "document_type_key": "motion_to_place_on_docket",
+      "status": "PASS",
+      "file_size": 12393,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Place_on_Docket_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Recall Warrant",
+      "template_id": 1415,
+      "document_type_key": "motion_to_recall_warrant",
+      "status": "PASS",
+      "file_size": 12889,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Recall_Warrant_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Shorten Time",
+      "template_id": 336,
+      "document_type_key": "motion_to_shorten_time",
+      "status": "PASS",
+      "file_size": 27751,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Shorten_Time_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Terminate Probation",
+      "template_id": 714,
+      "document_type_key": "motion_to_terminate_probation",
+      "status": "PASS",
+      "file_size": 20795,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Terminate_Probation_TEST.docx"
+    },
+    {
+      "template_name": "Motion to Withdraw",
+      "template_id": 1547,
+      "document_type_key": "motion_to_withdraw",
+      "status": "PASS",
+      "file_size": 12925,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Motion_to_Withdraw_TEST.docx"
+    },
+    {
+      "template_name": "NOH Bond Reduction",
+      "template_id": 2002,
+      "document_type_key": "noh_bond_reduction",
+      "status": "PASS",
+      "file_size": 19751,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/NOH_Bond_Reduction_TEST.docx"
+    },
+    {
+      "template_name": "Notice of Change of Address",
+      "template_id": 1763,
+      "document_type_key": "notice_of_change_of_address",
+      "status": "PASS",
+      "file_size": 15975,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Notice_of_Change_of_Address_TEST.docx"
+    },
+    {
+      "template_name": "Notice of Hearing",
+      "template_id": 1105,
+      "document_type_key": "notice_of_hearing",
+      "status": "PASS",
+      "file_size": 20019,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Notice_of_Hearing_TEST.docx"
+    },
+    {
+      "template_name": "Notice of Hearing - Motion to Withdraw",
+      "template_id": 1758,
+      "document_type_key": "notice_of_hearing_mtw",
+      "status": "PASS",
+      "file_size": 19187,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Notice_of_Hearing_-_Motion_to_Withdraw_TEST.docx"
+    },
+    {
+      "template_name": "Notice to Take Deposition",
+      "template_id": 756,
+      "document_type_key": "notice_to_take_deposition",
+      "status": "PASS",
+      "file_size": 17121,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Notice_to_Take_Deposition_TEST.docx"
+    },
+    {
+      "template_name": "OOP Entry",
+      "template_id": 2003,
+      "document_type_key": "oop_entry",
+      "status": "PASS",
+      "file_size": 17273,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/OOP_Entry_TEST.docx"
+    },
+    {
+      "template_name": "PH Waiver",
+      "template_id": 763,
+      "document_type_key": "ph_waiver",
+      "status": "PASS",
+      "file_size": 19797,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/PH_Waiver_TEST.docx"
+    },
+    {
+      "template_name": "Petition for Review (PFR)",
+      "template_id": 1749,
+      "document_type_key": "petition_for_review",
+      "status": "PASS",
+      "file_size": 24413,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Petition_for_Review__PFR__TEST.docx"
+    },
+    {
+      "template_name": "Petition for Trial De Novo",
+      "template_id": 1950,
+      "document_type_key": "petition_for_tdn",
+      "status": "PASS",
+      "file_size": 8164,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Petition_for_Trial_De_Novo_TEST.docx"
+    },
+    {
+      "template_name": "Plea of Guilty",
+      "template_id": 774,
+      "document_type_key": "plea_of_guilty",
+      "status": "PASS",
+      "file_size": 19241,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Plea_of_Guilty_TEST.docx"
+    },
+    {
+      "template_name": "Potential Prosecution Letter",
+      "template_id": 1674,
+      "document_type_key": "potential_prosecution_letter",
+      "status": "PASS",
+      "file_size": 14752,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Potential_Prosecution_Letter_TEST.docx"
+    },
+    {
+      "template_name": "Preservation Letter",
+      "template_id": 703,
+      "document_type_key": "preservation_letter",
+      "status": "PASS",
+      "file_size": 12807,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Preservation_Letter_TEST.docx"
+    },
+    {
+      "template_name": "Preservation/Supplemental Discovery Letter",
+      "template_id": 1692,
+      "document_type_key": "preservation_supplemental_letter",
+      "status": "PASS",
+      "file_size": 12965,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Preservation_Supplemental_Discovery_Letter_TEST.docx"
+    },
+    {
+      "template_name": "Proposed Order to Withdraw Guilty Plea",
+      "template_id": 88,
+      "document_type_key": "motion_to_withdraw_guilty_plea",
+      "status": "PASS",
+      "file_size": 17809,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Proposed_Order_to_Withdraw_Guilty_Plea_TEST.docx"
+    },
+    {
+      "template_name": "Proposed Stay Order",
+      "template_id": 1407,
+      "document_type_key": "proposed_stay_order",
+      "status": "PASS",
+      "file_size": 17929,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Proposed_Stay_Order_TEST.docx"
+    },
+    {
+      "template_name": "Request for Discovery",
+      "template_id": 1359,
+      "document_type_key": "request_for_discovery",
+      "status": "PASS",
+      "file_size": 22739,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Request_for_Discovery_TEST.docx"
+    },
+    {
+      "template_name": "Request for Jury Trial",
+      "template_id": 741,
+      "document_type_key": "request_for_jury_trial",
+      "status": "PASS",
+      "file_size": 14937,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Request_for_Jury_Trial_TEST.docx"
+    },
+    {
+      "template_name": "Request for Recommendation Letter to PA",
+      "template_id": 1839,
+      "document_type_key": "request_for_rec_letter",
+      "status": "PASS",
+      "file_size": 245875,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Request_for_Recommendation_Letter_to_PA_TEST.docx"
+    },
+    {
+      "template_name": "Request for Stay Order",
+      "template_id": 1843,
+      "document_type_key": "request_for_stay_order",
+      "status": "PASS",
+      "file_size": 13910,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Request_for_Stay_Order_TEST.docx"
+    },
+    {
+      "template_name": "Request for Supplemental Discovery",
+      "template_id": 735,
+      "document_type_key": "request_for_supplemental_discovery",
+      "status": "PASS",
+      "file_size": 27272,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Request_for_Supplemental_Discovery_TEST.docx"
+    },
+    {
+      "template_name": "Request for Transcripts",
+      "template_id": 6,
+      "document_type_key": "request_for_transcripts",
+      "status": "PASS",
+      "file_size": 322334,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Request_for_Transcripts_TEST.docx"
+    },
+    {
+      "template_name": "Requirements for Rec Letter to Client",
+      "template_id": 1850,
+      "document_type_key": "requirements_for_rec_letter",
+      "status": "PASS",
+      "file_size": 12710,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Requirements_for_Rec_Letter_to_Client_TEST.docx"
+    },
+    {
+      "template_name": "Waiver of Arraignment",
+      "template_id": 1119,
+      "document_type_key": "waiver_of_arraignment",
+      "status": "PASS",
+      "file_size": 35651,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Waiver_of_Arraignment_TEST.docx"
+    },
+    {
+      "template_name": "Waiver of Preliminary Hearing",
+      "template_id": 1844,
+      "document_type_key": "waiver_of_preliminary_hearing",
+      "status": "PASS",
+      "file_size": 19529,
+      "unfilled_placeholders": [],
+      "error_message": null,
+      "output_file": "data/generated/test_output/Waiver_of_Preliminary_Hearing_TEST.docx"
+    }
+  ]
+}

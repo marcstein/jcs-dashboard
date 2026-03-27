@@ -17,9 +17,16 @@ from rich.text import Text
 from trust_transfer import (
     generate_trust_transfer_report,
     export_trust_report_csv,
-    FEE_SCHEDULES,
+    load_fee_schedules,
     PHASE_ORDER,
     PHASE_LABELS,
+)
+from db.trust import (
+    ensure_trust_tables,
+    seed_default_schedules,
+    get_fee_schedules,
+    upsert_fee_schedule,
+    delete_fee_schedule,
 )
 
 console = Console()
@@ -161,12 +168,30 @@ def trust_report(firm_id, export_csv, attorney, phase, limit):
 
 
 @trust.command("schedules")
-def show_schedules():
-    """Show the fee allocation schedules by case type."""
-    console.print("\n[bold]Trust Transfer Fee Schedules[/bold]\n")
+@click.option("--firm-id", default=None, help="Firm ID")
+def show_schedules(firm_id):
+    """Show the fee allocation schedules by case type (from DB or defaults)."""
+    if not firm_id:
+        import os
+        firm_id = os.getenv("FIRM_ID")
+        if not firm_id:
+            from case_phases import _detect_firm_id
+            firm_id = _detect_firm_id()
+    if not firm_id:
+        console.print("[red]Could not detect firm_id. Use --firm-id or set FIRM_ID env var.[/red]")
+        return
+
+    schedules, default_schedule = load_fee_schedules(firm_id)
+
+    # Check if loaded from DB or hardcoded
+    db_schedules = get_fee_schedules(firm_id)
+    source = "database" if db_schedules else "hardcoded defaults"
+
+    console.print(f"\n[bold]Trust Transfer Fee Schedules[/bold] ({source})")
+    console.print(f"Firm: {firm_id}\n")
     console.print("Percentage of flat fee earned at each phase (cumulative):\n")
 
-    for key, schedule in FEE_SCHEDULES.items():
+    for key, schedule in schedules.items():
         table = Table(title=schedule["label"], show_lines=False, padding=(0, 1))
         table.add_column("Phase", style="cyan")
         table.add_column("This Phase %", justify="right")
@@ -183,5 +208,47 @@ def show_schedules():
             )
 
         console.print(table)
-        patterns = ", ".join(schedule["case_type_patterns"])
-        console.print(f"  Matches: {patterns}\n")
+        patterns = ", ".join(schedule.get("case_type_patterns", []))
+        if patterns:
+            console.print(f"  Matches: {patterns}")
+        console.print()
+
+    # Show default schedule
+    if default_schedule:
+        table = Table(title=f"{default_schedule['label']} (Default Fallback)", show_lines=False, padding=(0, 1))
+        table.add_column("Phase", style="cyan")
+        table.add_column("This Phase %", justify="right")
+        table.add_column("Cumulative %", justify="right", style="bold")
+
+        cumulative = 0
+        for phase_code in PHASE_ORDER:
+            pct = default_schedule["phases"].get(phase_code, 0)
+            cumulative += pct
+            table.add_row(
+                PHASE_LABELS.get(phase_code, phase_code),
+                f"{pct}%" if pct > 0 else "-",
+                f"{cumulative}%",
+            )
+        console.print(table)
+        console.print()
+
+    if not db_schedules:
+        console.print("[dim]Tip: Run 'trust seed --firm-id {firm_id}' to save these to the database.[/dim]\n")
+
+
+@trust.command("seed")
+@click.option("--firm-id", required=True, help="Firm ID to seed schedules for")
+def seed_schedules(firm_id):
+    """Seed default fee schedules into the database for a firm."""
+    ensure_trust_tables()
+
+    # Check if schedules already exist
+    existing = get_fee_schedules(firm_id)
+    if existing:
+        console.print(f"[yellow]Firm {firm_id} already has {len(existing)} schedules in the database.[/yellow]")
+        if not click.confirm("Overwrite with defaults?"):
+            return
+
+    count = seed_default_schedules(firm_id)
+    console.print(f"[green]Seeded {count} fee schedules for firm {firm_id}.[/green]")
+    console.print("Run 'trust schedules' to view them.")

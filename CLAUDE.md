@@ -21,6 +21,7 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - `dashboard_users` — Dashboard login accounts with roles (admin, collections, attorney)
 - `firms`, `templates`, `generated_documents` — Document engine
 - `attorneys` — Attorney profiles
+- `trust_fee_schedules` — Per-firm phase-based fee allocation schedules (DB-first, hardcoded fallback)
 - `jurisdictions`, `courts`, `document_type_taxonomy` — Multi-state jurisdiction layer
 - `jurisdiction_templates`, `court_forms`, `court_form_field_mappings` — Multi-state templates & PDF forms
 - `attorney_bar_admissions`, `firm_jurisdictions`, `firm_office_locations` — Multi-state attorney/firm profiles
@@ -328,7 +329,8 @@ uv run python agent.py trust report              # Generate trust-to-operating t
 uv run python agent.py trust report --export     # Export to CSV
 uv run python agent.py trust report --attorney "Name"  # Filter by lead attorney
 uv run python agent.py trust report --phase motions    # Filter by current phase
-uv run python agent.py trust schedules           # Show fee allocation schedules by case type
+uv run python agent.py trust schedules           # Show fee allocation schedules (DB or defaults)
+uv run python agent.py trust seed --firm-id jcs_law  # Seed default schedules into DB for a firm
 
 # Case Phases (integrated into agent CLI)
 uv run python agent.py phases init           # Initialize phases, mappings, and workflows
@@ -420,7 +422,9 @@ Phase-based report for managing trust account transfers on flat-fee cases:
 - Dashboard: `/trust` with attorney/phase filters and CSV export
 - CLI: `python agent.py trust report`, `trust schedules`
 - Report only — no money handling or bank integration
-- Key files: `trust_transfer.py`, `commands/trust.py`, `dashboard/routes/trust.py`, `dashboard/templates/trust.html`
+- Fee schedules stored per-firm in `trust_fee_schedules` table (DB-first, hardcoded fallback)
+- CLI: `trust seed --firm-id jcs_law` to populate DB schedules from defaults
+- Key files: `trust_transfer.py`, `db/trust.py`, `commands/trust.py`, `dashboard/routes/trust.py`, `dashboard/templates/trust.html`
 
 ### Case Phase Tracking
 Universal 7-phase framework mapping MyCase stages to standardized phases:
@@ -492,13 +496,18 @@ Three roles control what users see and access:
 
 | Role | Navigation | Data Scope | Home Page |
 |------|-----------|------------|-----------|
-| `admin` | Full: Home, Attorneys, AR, NOIW, Phases, Trends, Payments, Dunning, Documents | All firm data | `/` (main dashboard) |
-| `collections` | AR, NOIW, Dunning, Payments, Aging Upload | All firm financial data | `/ar` |
-| `attorney` | Attorneys, Documents, Phases, Trends, Payments | **Own cases only** (filtered by `lead_attorney_name`) | `/attorneys` |
+| `admin` | Full: Home, Documents, Attorneys, AR, NOIW, Phases, Trends, Payments, Trust, Dunning, Aging Upload, Wonky, Reports, Firms | All firm data | `/` (main dashboard) |
+| `collections` | AR, NOIW, Payments, Dunning, Aging Upload | All firm financial data | `/ar` |
+| `attorney` | Documents, Phases, Trends, Payments | **Own cases only** (filtered by `lead_attorney_name`) | `/attorneys` |
 
 **Session variables**: `role`, `attorney_name` (set at login from `dashboard_users` table)
 
-**Route guards**: Each route checks `request.session.get("role")` and returns 403 if unauthorized. Attorney role is blocked from: `/` (home), `/ar`, `/noiw`, `/promises`, `/dunning`, `/aging-upload`.
+**Route guards**: Each route checks `request.session.get("role")` and redirects unauthorized roles to their home page (`/ar` for collections, `/attorneys` for attorney).
+- **Collections blocked from**: `/` (home), `/documents`, `/attorneys`, `/attorney/{name}`, `/phases`, `/trends`, `/trust`, `/trust/export`, `/wonky`, `/staff/{name}`, `/reports`
+- **Attorney blocked from**: `/` (home), `/ar`, `/noiw`, `/dunning`, `/aging-upload`, `/trust`, `/trust/export`, `/wonky`, `/staff/{name}`, `/reports`
+- **Trust is admin-only**: Both `/trust` and `/trust/export` check `role != 'admin'`
+
+**Login redirect**: After successful login, collections → `/ar`, attorney → `/attorneys`, admin → `/`
 
 **Attorney data scoping**: When `attorney_name` is set in session, `DashboardData` passes it through to all model classes. The `_attorney_case_filter(table_alias)` helper in `dashboard/models/base.py` returns a `(sql_fragment, params)` tuple that appends `AND {table}.lead_attorney_name = %s` to queries. This filters:
 - Attorney productivity (active cases, invoices, aging buckets)
@@ -507,7 +516,7 @@ Three roles control what users see and access:
 - Trends (live-computed metrics instead of firm-wide KPI snapshots)
 - Cross-attorney page access is blocked (attorney can only view their own `/attorneys/{name}` page)
 
-**Navigation**: `base.html` uses `{% if role != 'attorney' %}` to conditionally show/hide nav items. Promises tab removed from all roles.
+**Navigation**: `base.html` uses `{% if role not in ('attorney', 'collections') %}` and `{% if role == 'admin' %}` to conditionally show/hide nav items. Trust and Firms are admin-only. Promises tab removed from all roles.
 
 ### Dashboard Users
 - Login: `dashboard_users` table checked first, then env-based admin fallback
@@ -522,7 +531,8 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 ```
 - Discovers lead attorneys from `cached_cases` (only those with open cases)
 - Creates one `attorney` account per lead attorney (username = lowercase first name, e.g. `anthony`)
-- Creates `collections` account for Melissa Scarlett (username = `melissa`)
+- Creates `collections` account for Melissa Scarlett (username = `melissa.scarlett`)
+- Additional collections account: Tiffany Willis (username = `tiffany@jcsattorney.com`, created manually)
 - Updates admin password if specified
 - Prints credential table — save output since passwords are randomly generated
 - Uses upsert logic — safe to re-run (updates existing users, adds new ones)
@@ -564,7 +574,7 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **FIRM_ID env var**: SyncManager reads `FIRM_ID` env var first (e.g. `jcs_law`), avoiding the MyCase API UUID (`d5AgNpGZZvZ9Lgpce7ri4Q`) as firm_id
 - **Fixed INTERVAL parameterization**: Rolling 6-month attorney queries used `INTERVAL '%s months'` which psycopg2 doesn't substitute inside quotes; changed to `INTERVAL '1 month' * %s`
 - **Fixed dunning due_date casting**: Added `::date` cast in dunning queries to handle timestamp columns; handle both int and timedelta returns from date subtraction
-- **Role-based access control**: Three roles (admin, collections, attorney) with role-conditional navigation, route guards, and attorney-scoped data filtering via `lead_attorney_name` on `cached_cases`
+- **Role-based access control**: Three roles (admin, collections, attorney) with role-conditional navigation, route guards, and attorney-scoped data filtering via `lead_attorney_name` on `cached_cases`. Collections role restricted to financial pages only (AR, NOIW, Payments, Dunning, Aging Upload). Trust is admin-only. Route guards redirect unauthorized roles to their home page instead of returning 403.
 - **Attorney data scoping**: `_attorney_case_filter()` helper in `dashboard/models/base.py` provides reusable SQL fragment for attorney isolation across all model classes (attorneys, AR, phases, trends, payments)
 - **Attorney live metrics**: Trends page computes attorney-specific KPIs live (total_ar, ar_over_60_pct, overdue_tasks) instead of using firm-wide `kpi_snapshots`
 - **User provisioning script**: `setup_users.py` auto-discovers attorneys from caseload and creates dashboard accounts with appropriate roles
@@ -583,7 +593,8 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Per-firm subdomain routing**: `SubdomainResolutionMiddleware` extracts firm_id from Host header (e.g. `jcs.lawmetrics.ai` → `jcs_law`). Login form hides firm_id field when on a firm subdomain. `firms.subdomain` column with uniqueness constraint and verification flag. Reserved subdomains (www, app, api, etc.) skip firm resolution.
 - **Wildcard nginx configuration**: `deployment/lawmetrics.nginx.conf` with three server blocks: HTTP→HTTPS redirect, wildcard subdomain proxy to port 3000, www/apex marketing site. Rate limiting on `/login`. Security headers.
 - **Brochure site routing**: `www.lawmetrics.ai` serves static marketing site (Cloudflare Pages or local). Apex `lawmetrics.ai` redirects to www. `app.lawmetrics.ai` shows generic login with firm_id field.
-- **Trust-to-operating transfer report**: Phase-based fee allocation report for flat-fee cases. Maps each case's current phase to a cumulative earned percentage using case-type-specific schedules (DWI/Criminal, Traffic/Municipal, Expungement/License). Dashboard page at `/trust` with attorney/phase filters and CSV export. CLI: `python agent.py trust report`. Report only — no money handling. Uses `paid_amount` from invoices as proxy for "already in operating." Fee schedules defined in `trust_transfer.py` `FEE_SCHEDULES` dict.
+- **Trust-to-operating transfer report**: Phase-based fee allocation report for flat-fee cases. Maps each case's current phase to a cumulative earned percentage using case-type-specific schedules (DWI/Criminal, Traffic/Municipal, Expungement/License). Dashboard page at `/trust` with attorney/phase filters and CSV export. CLI: `python agent.py trust report`. Report only — no money handling. Uses `paid_amount` from invoices as proxy for "already in operating."
+- **Trust fee schedules in database**: Fee schedules stored per-firm in `trust_fee_schedules` table (`db/trust.py`). DB-first loading with hardcoded fallback — `load_fee_schedules(firm_id)` checks DB, returns defaults if no rows. CLI: `trust seed --firm-id jcs_law` to populate DB from defaults, `trust schedules` to view (shows source: database vs hardcoded). Dashboard route reads schedules from report dict (DB-loaded). CRUD functions: `get_fee_schedules()`, `upsert_fee_schedule()`, `delete_fee_schedule()`, `seed_default_schedules()`.
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table
