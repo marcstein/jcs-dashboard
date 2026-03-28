@@ -298,7 +298,7 @@
                 <span>{{ perf.trend|capitalize }} {% if perf.momentum > 0 %}(+{{ perf.momentum }}%){% elif perf.momentum < 0 %}({{ perf.momentum }}%){% endif %}</span>
             </div>
             <div class="trend-item">
-                <span>Current pace: {{ perf.annualized_pace_pct|int }}% of annual target</span>
+                <span>Current pace: {% if perf.annualized_pace_pct >= 100 %}100%+{% else %}{{ perf.annualized_pace_pct|int }}%{% endif %} of annual target</span>
             </div>
         </div>
     </div>
@@ -314,7 +314,7 @@
             <div class="stat-label">Closed (12 Months)</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{{ perf.annualized_pace_pct|int }}%</div>
+            <div class="stat-value">{% if perf.annualized_pace_pct >= 100 %}100%+{% else %}{{ perf.annualized_pace_pct|int }}%{% endif %}</div>
             <div class="stat-label">Current 3-Month Pace</div>
         </div>
     </div>
@@ -331,7 +331,7 @@
             <div class="spark-bar-wrapper">
                 {% set bar_height = (pct / max_spark_pct * 100) if max_spark_pct > 0 else 0 %}
                 {% set bar_height = [bar_height, 2]|max %}
-                <div class="spark-bar" data-pct="{{ pct|int }}"
+                <div class="spark-bar" data-pct="{% if pct >= 100 %}100+{% else %}{{ pct|int }}{% endif %}"
                      style="height: {{ bar_height }}%;
                             background: {% if pct >= 100 %}#22c55e{% elif pct >= 70 %}#eab308{% else %}#ef4444{% endif %};">
                 </div>
@@ -350,7 +350,7 @@
             <div class="pace-bar-bg">
                 <div class="pace-bar-fill" style="width: {{ [perf.pct_of_target, 100]|min }}%; background: {{ perf.tier_color }};"></div>
             </div>
-            <span class="pace-value">{{ perf.pct_of_target|int }}%</span>
+            <span class="pace-value">{% if perf.pct_of_target >= 100 %}100%+{% else %}{{ perf.pct_of_target|int }}%{% endif %}</span>
         </div>
         <div class="pace-row">
             <span class="pace-label">6-Month Annualized</span>
@@ -358,14 +358,14 @@
                 {% set six_mo_pct = ((perf.pct_of_target + perf.annualized_pace_pct) / 2)|int %}
                 <div class="pace-bar-fill" style="width: {{ [six_mo_pct, 100]|min }}%; background: {% if six_mo_pct >= 100 %}#22c55e{% elif six_mo_pct >= 70 %}#eab308{% else %}#ef4444{% endif %};"></div>
             </div>
-            <span class="pace-value">{{ six_mo_pct }}%</span>
+            <span class="pace-value">{% if six_mo_pct >= 100 %}100%+{% else %}{{ six_mo_pct }}%{% endif %}</span>
         </div>
         <div class="pace-row">
             <span class="pace-label">3-Month Pace (Current)</span>
             <div class="pace-bar-bg">
                 <div class="pace-bar-fill" style="width: {{ [perf.annualized_pace_pct, 100]|min }}%; background: {% if perf.annualized_pace_pct >= 100 %}#22c55e{% elif perf.annualized_pace_pct >= 70 %}#eab308{% else %}#ef4444{% endif %};"></div>
             </div>
-            <span class="pace-value">{{ perf.annualized_pace_pct|int }}%</span>
+            <span class="pace-value">{% if perf.annualized_pace_pct >= 100 %}100%+{% else %}{{ perf.annualized_pace_pct|int }}%{% endif %}</span>
         </div>
     </div>
 
