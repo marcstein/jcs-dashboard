@@ -3,7 +3,8 @@ Attorney productivity routes
 """
 import csv
 import io
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -14,16 +15,27 @@ from dashboard.auth import is_authenticated, get_data, get_current_role, get_cur
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
+# Month abbreviations for sparkline labels
+_MONTH_ABBRS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
 
 @router.get("/attorneys", response_class=HTMLResponse)
 async def attorneys_dashboard(request: Request, year: int = None, view: str = None):
-    """Attorney productivity dashboard."""
+    """Attorney productivity dashboard.
+    Attorney role gets redirected to their own performance page."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
     role = get_current_role(request)
     if role == 'collections':
         return RedirectResponse(url="/ar", status_code=303)
+
+    # Attorney role: redirect to their personal performance page
+    if role == 'attorney':
+        attorney_name = get_current_attorney_name(request)
+        if attorney_name:
+            return RedirectResponse(url=f"/attorney/{attorney_name}", status_code=303)
 
     data = get_data(request)
     current_year = datetime.now().year
@@ -84,7 +96,8 @@ async def attorneys_dashboard(request: Request, year: int = None, view: str = No
 
 @router.get("/attorney/{attorney_name}", response_class=HTMLResponse)
 async def attorney_detail_view(request: Request, attorney_name: str, year: int = None):
-    """Attorney detail page with call list."""
+    """Attorney detail page — gamified performance view for attorney role,
+    full billing detail for admin."""
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
@@ -96,13 +109,20 @@ async def attorney_detail_view(request: Request, attorney_name: str, year: int =
         if current_attorney and current_attorney != attorney_name:
             return RedirectResponse(url=f"/attorney/{current_attorney}", status_code=303)
 
-    # Default to current year if not specified
+    data = get_data(request)
+
+    # For attorney role: show gamified performance view (no billing numbers)
+    if role == 'attorney':
+        perf = data.get_single_attorney_performance(attorney_name)
+        if perf:
+            return _render_performance_page(request, role, perf, data, attorney_name)
+
+    # For admin role (or no target data): show full billing detail
     current_year = datetime.now().year
     if year is None:
         year = current_year
     available_years = [2025, 2026]
 
-    data = get_data(request)
     detail = data.get_attorney_detail(attorney_name, year=year)
 
     return templates.TemplateResponse("attorney_detail.html", {
@@ -113,6 +133,58 @@ async def attorney_detail_view(request: Request, attorney_name: str, year: int =
         "attorney": detail,
         "username": request.session.get("username"),
         "role": role,
+    })
+
+
+def _render_performance_page(request, role, perf, data, attorney_name):
+    """Render the gamified performance template with gauge calculations."""
+    # SVG gauge math: circumference of circle r=96
+    circumference = 2 * math.pi * 96  # ~603.19
+    # Cap the fill at 120% for visual (don't wrap around)
+    fill_pct = min(perf["pct_of_target"] / 100, 1.2)
+    dasharray = circumference
+    dashoffset = circumference * (1 - fill_pct)
+
+    # Monthly sparkline: generate month labels for last 12 months
+    today = datetime.now()
+    months = []
+    for i in range(12):
+        dt = today - timedelta(days=30 * (11 - i))
+        months.append(_MONTH_ABBRS[dt.month - 1])
+
+    # Max value for sparkline scaling (at least 120 so target line at 100 looks right)
+    max_spark_pct = max(max(perf["monthly_pcts"], default=0), 120)
+
+    # Get active cases list for the attorney
+    try:
+        from db.connection import get_connection
+        import psycopg2.extensions
+        firm_id = request.session.get("firm_id", "jcs_law")
+        with get_connection() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extensions.cursor)
+            cur.execute("""
+                SELECT id, name, practice_area, case_number, status, created_at
+                FROM cached_cases
+                WHERE firm_id = %s AND lead_attorney_name = %s AND status = 'open'
+                ORDER BY created_at DESC
+            """, (firm_id, attorney_name))
+            active_cases = [{
+                'id': r[0], 'name': r[1], 'practice_area': r[2],
+                'case_number': r[3], 'status': r[4], 'date_opened': r[5],
+            } for r in cur.fetchall()]
+    except Exception:
+        active_cases = []
+
+    return templates.TemplateResponse("attorney_performance.html", {
+        "request": request,
+        "role": role,
+        "perf": perf,
+        "gauge_dasharray": f"{circumference:.1f}",
+        "gauge_dashoffset": f"{dashoffset:.1f}",
+        "months": months,
+        "max_spark_pct": max_spark_pct,
+        "active_cases": active_cases,
+        "username": request.session.get("username"),
     })
 
 

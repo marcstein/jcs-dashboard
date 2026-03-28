@@ -24,6 +24,7 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - `trust_fee_schedules` — Per-firm phase-based fee allocation schedules (DB-first, hardcoded fallback)
 - `jurisdictions`, `courts`, `document_type_taxonomy` — Multi-state jurisdiction layer
 - `jurisdiction_templates`, `court_forms`, `court_form_field_mappings` — Multi-state templates & PDF forms
+- `attorney_targets` — Per-attorney salary and billing target config (gamified performance metrics)
 - `attorney_bar_admissions`, `firm_jurisdictions`, `firm_office_locations` — Multi-state attorney/firm profiles
 
 ### Project Structure
@@ -426,6 +427,19 @@ Phase-based report for managing trust account transfers on flat-fee cases:
 - CLI: `trust seed --firm-id jcs_law` to populate DB schedules from defaults
 - Key files: `trust_transfer.py`, `db/trust.py`, `commands/trust.py`, `dashboard/routes/trust.py`, `dashboard/templates/trust.html`
 
+### Attorney Performance Metrics (Gamified)
+Attorney-role users see a gamified performance dashboard instead of billing numbers:
+- Target formula: `salary × (1 + marketing_overhead%) × multiplier` (default: salary × 3.6)
+- Rolling 12-month billings measured as percentage of annual target
+- Performance tiers with color-coded gauge: On Target (green, 100%+), Near Target (lime, 85%+), Building (yellow, 70%+), Developing (orange, 50%+), Needs Attention (red, <50%)
+- Monthly sparkline showing % of monthly target with 100% target line
+- Momentum indicator: compares annualized 3-month pace vs 12-month rolling
+- Pace projections: 12-month, 6-month annualized, 3-month pace bars
+- Active cases list (no dollar amounts shown)
+- Admin role still sees full billing detail on attorney pages
+- Salary/target data stored in `attorney_targets` table per firm (effective_date for historical tracking)
+- Key files: `db/attorney_targets.py`, `dashboard/models/attorneys.py`, `dashboard/routes/attorneys.py`, `dashboard/templates/attorney_performance.html`
+
 ### Case Phase Tracking
 Universal 7-phase framework mapping MyCase stages to standardized phases:
 
@@ -595,6 +609,7 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Brochure site routing**: `www.lawmetrics.ai` serves static marketing site (Cloudflare Pages or local). Apex `lawmetrics.ai` redirects to www. `app.lawmetrics.ai` shows generic login with firm_id field.
 - **Trust-to-operating transfer report**: Phase-based fee allocation report for flat-fee cases. Maps each case's current phase to a cumulative earned percentage using case-type-specific schedules (DWI/Criminal, Traffic/Municipal, Expungement/License). Dashboard page at `/trust` with attorney/phase filters and CSV export. CLI: `python agent.py trust report`. Report only — no money handling. Uses `paid_amount` from invoices as proxy for "already in operating."
 - **Trust fee schedules in database**: Fee schedules stored per-firm in `trust_fee_schedules` table (`db/trust.py`). DB-first loading with hardcoded fallback — `load_fee_schedules(firm_id)` checks DB, returns defaults if no rows. CLI: `trust seed --firm-id jcs_law` to populate DB from defaults, `trust schedules` to view (shows source: database vs hardcoded). Dashboard route reads schedules from report dict (DB-loaded). CRUD functions: `get_fee_schedules()`, `upsert_fee_schedule()`, `delete_fee_schedule()`, `seed_default_schedules()`.
+- **Gamified attorney performance metrics**: Attorney-role users no longer see billing numbers. Instead they see a percentage-of-target gauge based on rolling 12-month billings vs a target derived from `salary × (1 + marketing_pct/100) × multiplier` (default: salary × 3.6). `attorney_targets` table stores per-attorney salary, marketing overhead %, and multiplier per firm. Performance tiers: On Target (100%+), Near Target (85%+), Building (70%+), Developing (50%+), Needs Attention (<50%). Monthly sparkline bar chart shows % of monthly target. Momentum indicator compares annualized 3-month pace to 12-month rolling. Admin role still sees full billing detail. Key files: `db/attorney_targets.py`, `dashboard/models/attorneys.py`, `dashboard/routes/attorneys.py`, `dashboard/templates/attorney_performance.html`.
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table

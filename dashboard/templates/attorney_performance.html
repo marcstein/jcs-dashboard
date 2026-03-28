@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+
+{% block title %}My Performance - LawMetrics{% endblock %}
+
+{% block content %}
+<style>
+    .perf-page { max-width: 900px; margin: 0 auto; }
+
+    /* Hero gauge card */
+    .hero-gauge {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border-radius: 16px;
+        padding: 40px;
+        text-align: center;
+        color: #fff;
+        margin-bottom: 24px;
+        position: relative;
+        overflow: hidden;
+    }
+    .hero-gauge::before {
+        content: '';
+        position: absolute;
+        top: -50%; left: -50%;
+        width: 200%; height: 200%;
+        background: radial-gradient(circle at 50% 120%, {{ perf.tier_color }}22 0%, transparent 50%);
+    }
+    .hero-gauge h2 {
+        font-size: 18px;
+        font-weight: 400;
+        color: #94a3b8;
+        margin: 0 0 8px 0;
+        position: relative;
+    }
+    .hero-gauge .attorney-name {
+        font-size: 28px;
+        font-weight: 700;
+        margin: 0 0 32px 0;
+        position: relative;
+    }
+
+    /* Circular progress ring */
+    .gauge-container {
+        position: relative;
+        width: 220px;
+        height: 220px;
+        margin: 0 auto 24px;
+    }
+    .gauge-svg {
+        transform: rotate(-90deg);
+        width: 220px;
+        height: 220px;
+    }
+    .gauge-bg {
+        fill: none;
+        stroke: #334155;
+        stroke-width: 14;
+    }
+    .gauge-fill {
+        fill: none;
+        stroke: {{ perf.tier_color }};
+        stroke-width: 14;
+        stroke-linecap: round;
+        stroke-dasharray: {{ gauge_dasharray }};
+        stroke-dashoffset: {{ gauge_dashoffset }};
+        transition: stroke-dashoffset 1.5s ease-out;
+    }
+    .gauge-center {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+    }
+    .gauge-pct {
+        font-size: 48px;
+        font-weight: 800;
+        color: {{ perf.tier_color }};
+        line-height: 1;
+    }
+    .gauge-pct-sign { font-size: 24px; font-weight: 400; }
+    .gauge-subtitle {
+        font-size: 13px;
+        color: #94a3b8;
+        margin-top: 4px;
+    }
+
+    /* Tier badge */
+    .tier-badge {
+        display: inline-block;
+        padding: 6px 20px;
+        border-radius: 20px;
+        font-size: 14px;
+        font-weight: 600;
+        background: {{ perf.tier_color }}22;
+        color: {{ perf.tier_color }};
+        border: 1px solid {{ perf.tier_color }}44;
+        position: relative;
+    }
+
+    /* Momentum & Trend */
+    .trend-row {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 24px;
+        margin-top: 20px;
+        position: relative;
+    }
+    .trend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        color: #cbd5e1;
+    }
+    .trend-icon {
+        font-size: 18px;
+        {% if perf.momentum > 0 %}color: #22c55e;{% elif perf.momentum < -5 %}color: #ef4444;{% else %}color: #94a3b8;{% endif %}
+    }
+
+    /* Stats cards */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    .stat-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+    }
+    .stat-value {
+        font-size: 32px;
+        font-weight: 700;
+        color: #1e293b;
+    }
+    .stat-label {
+        font-size: 13px;
+        color: #64748b;
+        margin-top: 4px;
+    }
+
+    /* Monthly sparkline bar chart */
+    .sparkline-section {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 24px;
+    }
+    .sparkline-section h3 {
+        font-size: 16px;
+        margin: 0 0 16px 0;
+        color: #1e293b;
+    }
+    .spark-bars {
+        display: flex;
+        align-items: flex-end;
+        gap: 4px;
+        height: 120px;
+        padding-bottom: 24px;
+        position: relative;
+    }
+    .spark-bar-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        height: 100%;
+        justify-content: flex-end;
+    }
+    .spark-bar {
+        width: 100%;
+        max-width: 48px;
+        border-radius: 4px 4px 0 0;
+        min-height: 2px;
+        position: relative;
+        transition: height 0.5s ease-out;
+    }
+    .spark-bar:hover::after {
+        content: attr(data-pct) '%';
+        position: absolute;
+        top: -22px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px;
+        font-weight: 600;
+        color: #1e293b;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 1px 6px;
+        white-space: nowrap;
+    }
+    .spark-month {
+        font-size: 10px;
+        color: #94a3b8;
+        margin-top: 6px;
+    }
+    .target-line {
+        position: absolute;
+        bottom: calc(100% * 100 / {{ max_spark_pct }});
+        left: 0;
+        right: 0;
+        border-top: 2px dashed #22c55e44;
+    }
+    .target-line-label {
+        position: absolute;
+        right: 0;
+        top: -16px;
+        font-size: 10px;
+        color: #22c55e;
+        font-weight: 600;
+    }
+
+    /* Pace projections */
+    .pace-section {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 24px;
+    }
+    .pace-section h3 {
+        font-size: 16px;
+        margin: 0 0 16px 0;
+        color: #1e293b;
+    }
+    .pace-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    .pace-row:last-child { border-bottom: none; }
+    .pace-label {
+        font-size: 14px;
+        color: #64748b;
+    }
+    .pace-value {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1e293b;
+    }
+    .pace-bar-bg {
+        flex: 1;
+        height: 8px;
+        background: #f1f5f9;
+        border-radius: 4px;
+        margin: 0 16px;
+        overflow: hidden;
+    }
+    .pace-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 1s ease-out;
+    }
+
+    /* Active cases section */
+    .cases-section {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 24px;
+    }
+    .cases-section h3 {
+        font-size: 16px;
+        margin: 0 0 16px 0;
+        color: #1e293b;
+    }
+</style>
+
+<div class="perf-page">
+    <!-- Hero Gauge -->
+    <div class="hero-gauge">
+        <h2>Performance Dashboard</h2>
+        <div class="attorney-name">{{ perf.attorney_name }}</div>
+
+        <div class="gauge-container">
+            <svg class="gauge-svg" viewBox="0 0 220 220">
+                <circle class="gauge-bg" cx="110" cy="110" r="96" />
+                <circle class="gauge-fill" cx="110" cy="110" r="96" />
+            </svg>
+            <div class="gauge-center">
+                <div class="gauge-pct">{{ perf.pct_of_target|int }}<span class="gauge-pct-sign">%</span></div>
+                <div class="gauge-subtitle">of target</div>
+            </div>
+        </div>
+
+        <div class="tier-badge">{{ perf.tier_label }}</div>
+
+        <div class="trend-row">
+            <div class="trend-item">
+                <span class="trend-icon">{{ perf.trend_icon }}</span>
+                <span>{{ perf.trend|capitalize }} {% if perf.momentum > 0 %}(+{{ perf.momentum }}%){% elif perf.momentum < 0 %}({{ perf.momentum }}%){% endif %}</span>
+            </div>
+            <div class="trend-item">
+                <span>Current pace: {{ perf.annualized_pace_pct|int }}% of annual target</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ perf.active_cases }}</div>
+            <div class="stat-label">Active Cases</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ perf.closed_12m }}</div>
+            <div class="stat-label">Closed (12 Months)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ perf.annualized_pace_pct|int }}%</div>
+            <div class="stat-label">Current 3-Month Pace</div>
+        </div>
+    </div>
+
+    <!-- Monthly Performance Sparkline -->
+    {% if perf.monthly_pcts %}
+    <div class="sparkline-section">
+        <h3>Monthly Performance (% of Monthly Target)</h3>
+        <div class="spark-bars">
+            <div class="target-line">
+                <span class="target-line-label">100% Target</span>
+            </div>
+            {% for pct in perf.monthly_pcts %}
+            <div class="spark-bar-wrapper">
+                {% set bar_height = (pct / max_spark_pct * 100) if max_spark_pct > 0 else 0 %}
+                {% set bar_height = [bar_height, 2]|max %}
+                <div class="spark-bar" data-pct="{{ pct|int }}"
+                     style="height: {{ bar_height }}%;
+                            background: {% if pct >= 100 %}#22c55e{% elif pct >= 70 %}#eab308{% else %}#ef4444{% endif %};">
+                </div>
+                <div class="spark-month">{{ months[loop.index0] }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Pace Projections -->
+    <div class="pace-section">
+        <h3>Target Progress</h3>
+        <div class="pace-row">
+            <span class="pace-label">12-Month Rolling</span>
+            <div class="pace-bar-bg">
+                <div class="pace-bar-fill" style="width: {{ [perf.pct_of_target, 100]|min }}%; background: {{ perf.tier_color }};"></div>
+            </div>
+            <span class="pace-value">{{ perf.pct_of_target|int }}%</span>
+        </div>
+        <div class="pace-row">
+            <span class="pace-label">6-Month Annualized</span>
+            <div class="pace-bar-bg">
+                {% set six_mo_pct = ((perf.pct_of_target + perf.annualized_pace_pct) / 2)|int %}
+                <div class="pace-bar-fill" style="width: {{ [six_mo_pct, 100]|min }}%; background: {% if six_mo_pct >= 100 %}#22c55e{% elif six_mo_pct >= 70 %}#eab308{% else %}#ef4444{% endif %};"></div>
+            </div>
+            <span class="pace-value">{{ six_mo_pct }}%</span>
+        </div>
+        <div class="pace-row">
+            <span class="pace-label">3-Month Pace (Current)</span>
+            <div class="pace-bar-bg">
+                <div class="pace-bar-fill" style="width: {{ [perf.annualized_pace_pct, 100]|min }}%; background: {% if perf.annualized_pace_pct >= 100 %}#22c55e{% elif perf.annualized_pace_pct >= 70 %}#eab308{% else %}#ef4444{% endif %};"></div>
+            </div>
+            <span class="pace-value">{{ perf.annualized_pace_pct|int }}%</span>
+        </div>
+    </div>
+
+    <!-- Active Cases -->
+    {% if active_cases %}
+    <div class="cases-section">
+        <h3>Active Cases ({{ active_cases|length }})</h3>
+        <table class="cases-table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>Case Name</th>
+                    <th>Case Number</th>
+                    <th>Practice Area</th>
+                    <th>Opened</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for case in active_cases %}
+                <tr>
+                    <td>{{ case.name[:60] }}{% if case.name|length > 60 %}...{% endif %}</td>
+                    <td>{{ case.case_number or '-' }}</td>
+                    <td>{{ case.practice_area or '-' }}</td>
+                    <td>{{ case.date_opened or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

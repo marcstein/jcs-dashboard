@@ -2,10 +2,11 @@
 Attorney Productivity Data Access
 """
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import psycopg2.extensions
 from db.connection import get_connection
+from db.attorney_targets import get_all_attorney_targets, get_attorney_target, compute_annual_target
 
 
 class AttorneyDataMixin:
@@ -544,3 +545,186 @@ class AttorneyDataMixin:
         except Exception as e:
             print(f"get_attorney_detail error for {attorney_name}: {e}")
             return empty_result
+
+    def get_attorney_performance_metrics(self) -> List[Dict]:
+        """Get gamified performance metrics for all attorneys with targets.
+
+        Returns rolling 12-month billings as a percentage of target.
+        No dollar amounts exposed — only percentages and trend data.
+        """
+        try:
+            targets = get_all_attorney_targets(self.firm_id)
+            if not targets:
+                return []
+
+            target_map = {}
+            for t in targets:
+                annual_target = compute_annual_target(t)
+                target_map[t["attorney_name"]] = {
+                    "annual_target": annual_target,
+                    "salary": float(t["annual_salary"]),
+                    "marketing_pct": float(t["marketing_pct"]),
+                    "multiplier": float(t["target_multiplier"]),
+                }
+
+            with get_connection() as conn:
+                cursor = self._cursor(conn)
+                results = []
+
+                for attorney_name, target_info in target_map.items():
+                    # If attorney role, only show their own data
+                    if self.attorney_name and self.attorney_name != attorney_name:
+                        continue
+
+                    annual_target = target_info["annual_target"]
+
+                    # Rolling 12-month billings
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(i.total_amount), 0)
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s AND c.lead_attorney_name = %s
+                          AND i.invoice_date >= CURRENT_DATE - INTERVAL '12 months'
+                    """, (self.firm_id, attorney_name))
+                    rolling_12m = float(cursor.fetchone()[0] or 0)
+
+                    # Rolling 6-month billings (annualized for trend)
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(i.total_amount), 0)
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s AND c.lead_attorney_name = %s
+                          AND i.invoice_date >= CURRENT_DATE - INTERVAL '6 months'
+                    """, (self.firm_id, attorney_name))
+                    rolling_6m = float(cursor.fetchone()[0] or 0)
+                    annualized_6m = rolling_6m * 2  # project to annual pace
+
+                    # Last 3 months (for current momentum)
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(i.total_amount), 0)
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s AND c.lead_attorney_name = %s
+                          AND i.invoice_date >= CURRENT_DATE - INTERVAL '3 months'
+                    """, (self.firm_id, attorney_name))
+                    rolling_3m = float(cursor.fetchone()[0] or 0)
+                    annualized_3m = rolling_3m * 4  # project to annual pace
+
+                    # Monthly breakdown for sparkline (last 12 months)
+                    cursor.execute("""
+                        SELECT DATE_TRUNC('month', i.invoice_date) AS month,
+                               COALESCE(SUM(i.total_amount), 0) AS billed
+                        FROM cached_invoices i
+                        JOIN cached_cases c ON i.case_id = c.id AND i.firm_id = c.firm_id
+                        WHERE i.firm_id = %s AND c.lead_attorney_name = %s
+                          AND i.invoice_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+                        GROUP BY DATE_TRUNC('month', i.invoice_date)
+                        ORDER BY month
+                    """, (self.firm_id, attorney_name))
+                    monthly_data = cursor.fetchall()
+
+                    monthly_target = annual_target / 12
+                    monthly_pcts = []
+                    for row in monthly_data:
+                        m_billed = float(row[1] or 0)
+                        m_pct = round(m_billed / monthly_target * 100, 1) if monthly_target > 0 else 0
+                        monthly_pcts.append(m_pct)
+
+                    # Active cases
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s AND status = 'open'
+                    """, (self.firm_id, attorney_name))
+                    active_cases = cursor.fetchone()[0] or 0
+
+                    # Cases closed in last 12 months
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM cached_cases
+                        WHERE firm_id = %s AND lead_attorney_name = %s
+                          AND status = 'closed'
+                          AND updated_at >= CURRENT_DATE - INTERVAL '12 months'
+                    """, (self.firm_id, attorney_name))
+                    closed_12m = cursor.fetchone()[0] or 0
+
+                    # Performance percentage
+                    pct_of_target = round(rolling_12m / annual_target * 100, 1) if annual_target > 0 else 0
+
+                    # Trend: compare annualized 3-month pace vs 12-month actual
+                    if rolling_12m > 0:
+                        momentum = round((annualized_3m / annual_target * 100) - pct_of_target, 1)
+                    else:
+                        momentum = 0
+
+                    # Determine performance tier
+                    if pct_of_target >= 100:
+                        tier = "on_target"
+                        tier_label = "On Target"
+                        tier_color = "#22c55e"  # green
+                    elif pct_of_target >= 85:
+                        tier = "near_target"
+                        tier_label = "Near Target"
+                        tier_color = "#84cc16"  # lime
+                    elif pct_of_target >= 70:
+                        tier = "building"
+                        tier_label = "Building"
+                        tier_color = "#eab308"  # yellow
+                    elif pct_of_target >= 50:
+                        tier = "developing"
+                        tier_label = "Developing"
+                        tier_color = "#f97316"  # orange
+                    else:
+                        tier = "attention"
+                        tier_label = "Needs Attention"
+                        tier_color = "#ef4444"  # red
+
+                    # Trend direction
+                    if momentum > 5:
+                        trend = "accelerating"
+                        trend_icon = "↑↑"
+                    elif momentum > 0:
+                        trend = "improving"
+                        trend_icon = "↑"
+                    elif momentum > -5:
+                        trend = "steady"
+                        trend_icon = "→"
+                    elif momentum > -15:
+                        trend = "slowing"
+                        trend_icon = "↓"
+                    else:
+                        trend = "declining"
+                        trend_icon = "↓↓"
+
+                    results.append({
+                        "attorney_name": attorney_name,
+                        "pct_of_target": pct_of_target,
+                        "tier": tier,
+                        "tier_label": tier_label,
+                        "tier_color": tier_color,
+                        "trend": trend,
+                        "trend_icon": trend_icon,
+                        "momentum": momentum,
+                        "active_cases": active_cases,
+                        "closed_12m": closed_12m,
+                        "monthly_pcts": monthly_pcts,
+                        "annualized_pace_pct": round(annualized_3m / annual_target * 100, 1) if annual_target > 0 else 0,
+                    })
+
+                return sorted(results, key=lambda x: x["pct_of_target"], reverse=True)
+
+        except Exception as e:
+            print(f"get_attorney_performance_metrics error: {e}")
+            return []
+
+    def get_single_attorney_performance(self, attorney_name: str) -> Optional[Dict]:
+        """Get performance metric for a single attorney. Used by detail page."""
+        target = get_attorney_target(self.firm_id, attorney_name)
+        if not target:
+            return None
+
+        # Temporarily set attorney_name filter to fetch just this one
+        saved = self.attorney_name
+        self.attorney_name = attorney_name
+        results = self.get_attorney_performance_metrics()
+        self.attorney_name = saved
+
+        return results[0] if results else None
