@@ -285,7 +285,7 @@
                 <circle class="gauge-fill" cx="110" cy="110" r="96" />
             </svg>
             <div class="gauge-center">
-                <div class="gauge-pct">{{ perf.pct_of_target|int }}<span class="gauge-pct-sign">%</span></div>
+                <div class="gauge-pct">{% if perf.pct_of_target >= 100 %}100<span class="gauge-pct-sign">%+</span>{% else %}{{ perf.pct_of_target|int }}<span class="gauge-pct-sign">%</span>{% endif %}</div>
                 <div class="gauge-subtitle">of target</div>
             </div>
         </div>

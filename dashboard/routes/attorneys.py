@@ -140,8 +140,8 @@ def _render_performance_page(request, role, perf, data, attorney_name):
     """Render the gamified performance template with gauge calculations."""
     # SVG gauge math: circumference of circle r=96
     circumference = 2 * math.pi * 96  # ~603.19
-    # Cap the fill at 120% for visual (don't wrap around)
-    fill_pct = min(perf["pct_of_target"] / 100, 1.2)
+    # Cap the fill at 100% for visual (shows full ring at target)
+    fill_pct = min(perf["pct_of_target"] / 100, 1.0)
     dasharray = circumference
     dashoffset = circumference * (1 - fill_pct)
 
