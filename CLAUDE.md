@@ -26,6 +26,9 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 - `jurisdiction_templates`, `court_forms`, `court_form_field_mappings` — Multi-state templates & PDF forms
 - `attorney_targets` — Per-attorney salary and billing target config (gamified performance metrics)
 - `attorney_bar_admissions`, `firm_jurisdictions`, `firm_office_locations` — Multi-state attorney/firm profiles
+- `phone_integrations` — Per-firm VoIP provider config (webhooks, API keys)
+- `call_events` — Incoming call event log (caller ID, matched client, screen pop delivery)
+- `phone_extensions` — Extension-to-dashboard-user mapping for targeted screen pops
 
 ### Project Structure
 ```
@@ -43,7 +46,8 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 │   ├── sync.py            # Data sync from MyCase
 │   ├── tasks.py           # Task SLA, overdue tracking
 │   ├── trends.py          # KPI trend analysis
-│   └── trust.py           # Trust-to-operating transfer reports
+│   ├── trust.py           # Trust-to-operating transfer reports
+│   └── phone.py           # Phone integration (caller ID, screen pop)
 ├── db/                    # Database layer (PostgreSQL only)
 │   ├── __init__.py
 │   ├── connection.py      # Connection pool, get_connection()
@@ -53,7 +57,8 @@ All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. Ther
 │   ├── promises.py        # Payment promise schema and queries
 │   ├── trends.py          # KPI snapshot schema and queries
 │   ├── documents.py       # Template storage, FTS
-│   └── attorneys.py       # Attorney profile schema and queries
+│   ├── attorneys.py       # Attorney profile schema and queries
+│   └── phone.py           # Phone integration schema (integrations, call events, extensions)
 ├── dashboard/             # FastAPI web dashboard
 │   ├── app.py
 │   ├── routes/            # Route handlers split by domain
@@ -343,6 +348,15 @@ uv run python agent.py phases sync --stages-only  # Sync stages from MyCase API
 uv run python agent.py phases report         # Generate phase distribution report
 uv run python agent.py phases stalled        # List cases stalled in current phase
 uv run python agent.py phases case <id>      # Show phase history for a case
+
+# Phone Integration (Caller ID Screen Pop)
+uv run python agent.py phone setup --firm-id jcs_law --provider ringcentral  # Configure VoIP integration
+uv run python agent.py phone list --firm-id jcs_law            # List active integrations
+uv run python agent.py phone normalize --firm-id jcs_law       # Normalize phone numbers in cached_clients
+uv run python agent.py phone coverage --firm-id jcs_law        # Check phone number coverage
+uv run python agent.py phone test-lookup --firm-id jcs_law "+13145551234"  # Test client lookup
+uv run python agent.py phone events --firm-id jcs_law          # Show recent call events
+uv run python agent.py phone stats --firm-id jcs_law           # Call event statistics
 ```
 
 ## Scheduled Tasks
@@ -440,6 +454,22 @@ Attorney-role users see a gamified performance dashboard instead of billing numb
 - Salary/target data stored in `attorney_targets` table per firm (effective_date for historical tracking)
 - Key files: `db/attorney_targets.py`, `dashboard/models/attorneys.py`, `dashboard/routes/attorneys.py`, `dashboard/templates/attorney_performance.html`
 
+### Caller ID Screen Pop (VoIP Integration)
+Real-time caller identification for incoming phone calls:
+- Multi-provider VoIP webhook support: RingCentral (Phase 1), Quo/OpenPhone (Phase 1), Vonage (Phase 1)
+- Provider adapter pattern: each VoIP provider has a thin adapter that normalizes to internal CallEvent format
+- E.164 phone number normalization across all client phone fields (cell, work, home)
+- Client lookup by normalized phone number with indexed queries (92.6% phone coverage at JCS)
+- Screen pop data: client name, active cases with phase/attorney, last payment, balance due
+- Real-time delivery via Server-Sent Events (SSE) to all logged-in dashboard users
+- Extension-to-user mapping for targeted screen pops (optional)
+- Call event logging for analytics (match rate, volume, delivery stats)
+- RBAC: financial info hidden from attorney role in screen pop; phone settings page admin-only
+- Webhook URL per firm per provider: `POST /api/phone/webhook/{firm_id}/{provider}`
+- Dashboard page: `/phone` with stats cards, integration config, recent call events
+- Key files: `phone/` package (normalize, lookup, events, delivery, adapters/), `db/phone.py`, `dashboard/routes/phone.py`, `dashboard/templates/phone.html`, `dashboard/templates/components/screen_pop.html`, `commands/phone.py`
+- Feature spec: `CALLER_ID_SCREEN_POP_SPEC.md`
+
 ### Case Phase Tracking
 Universal 7-phase framework mapping MyCase stages to standardized phases:
 
@@ -482,6 +512,7 @@ Production: https://jcs.lawmetrics.ai
 - `/trends` - Historical KPI trends with sparklines
 - `/promises` - Payment promise tracking and reliability
 - `/trust` - Trust-to-operating transfer report (phase-based fee allocation, CSV export)
+- `/phone` - Phone integration settings, call events log, connection status (admin only)
 - `/payments` - Payment analytics: time-to-payment by attorney and case type
 - `/dunning` - Dunning notices preview and approval (two-amount columns: Amount Due Now + Total Balance)
 - `/aging-upload` - Aging invoice CSV upload (drag-and-drop, upload history)
@@ -610,6 +641,8 @@ python setup_users.py --firm-id jcs_law --admin-password <password>
 - **Trust-to-operating transfer report**: Phase-based fee allocation report for flat-fee cases. Maps each case's current phase to a cumulative earned percentage using case-type-specific schedules (DWI/Criminal, Traffic/Municipal, Expungement/License). Dashboard page at `/trust` with attorney/phase filters and CSV export. CLI: `python agent.py trust report`. Report only — no money handling. Uses `paid_amount` from invoices as proxy for "already in operating."
 - **Trust fee schedules in database**: Fee schedules stored per-firm in `trust_fee_schedules` table (`db/trust.py`). DB-first loading with hardcoded fallback — `load_fee_schedules(firm_id)` checks DB, returns defaults if no rows. CLI: `trust seed --firm-id jcs_law` to populate DB from defaults, `trust schedules` to view (shows source: database vs hardcoded). Dashboard route reads schedules from report dict (DB-loaded). CRUD functions: `get_fee_schedules()`, `upsert_fee_schedule()`, `delete_fee_schedule()`, `seed_default_schedules()`.
 - **Gamified attorney performance metrics**: Attorney-role users no longer see billing numbers. Instead they see a percentage-of-target gauge based on rolling 12-month billings vs a target derived from `salary × (1 + marketing_pct/100) × multiplier` (default: salary × 3.6). `attorney_targets` table stores per-attorney salary, marketing overhead %, and multiplier per firm. Performance tiers: On Target (100%+), Near Target (85%+), Building (70%+), Developing (50%+), Needs Attention (<50%). Monthly sparkline bar chart shows % of monthly target. Momentum indicator compares annualized 3-month pace to 12-month rolling. Admin role still sees full billing detail. Key files: `db/attorney_targets.py`, `dashboard/models/attorneys.py`, `dashboard/routes/attorneys.py`, `dashboard/templates/attorney_performance.html`.
+
+- **Caller ID Screen Pop (VoIP integration)**: Real-time caller identification for incoming phone calls. Multi-provider webhook support (RingCentral, Quo/OpenPhone, Vonage) with provider adapter pattern. E.164 phone normalization on all client phone fields (92.6% coverage at JCS). Client lookup returns name, active cases with phase/attorney, last payment, balance due. SSE-based delivery to dashboard with auto-reconnect. Screen pop UI slides in from right side with 30s auto-dismiss. Extension-to-user mapping for targeted pops (optional). Call event logging with match rate analytics. Admin-only `/phone` settings page. Key files: `phone/` package, `db/phone.py`, `dashboard/routes/phone.py`, `dashboard/templates/phone.html`, `dashboard/templates/components/screen_pop.html`, `commands/phone.py`. Feature spec: `CALLER_ID_SCREEN_POP_SPEC.md`.
 
 ### v1.x — Feature Build-Out (Completed)
 1. Fixed task assignee display - now uses staff lookup table

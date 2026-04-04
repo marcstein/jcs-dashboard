@@ -30,6 +30,7 @@ from commands.overrides import overrides
 from commands.dashboard import dashboard_cmd
 from commands.firms import firms
 from commands.trust import trust
+from commands.phone import phone
 
 # AI and Document Generation Commands
 from ai_commands import (
@@ -77,6 +78,7 @@ cli.add_command(overrides)
 cli.add_command(dashboard_cmd, name="dashboard")
 cli.add_command(firms)
 cli.add_command(trust)
+cli.add_command(phone)
 
 # ── Register AI / Document Generation groups ────────────────────────────
 

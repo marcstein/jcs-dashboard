@@ -31,6 +31,7 @@ def ensure_all_tables():
     from db.firms import ensure_firms_tables
     from db.documents import ensure_documents_tables
     from db.attorneys import ensure_attorneys_tables
+    from db.phone import ensure_phone_tables
 
     ensure_firms_tables()
     ensure_cache_tables()
@@ -41,6 +42,7 @@ def ensure_all_tables():
     ensure_collections_tables()
     ensure_documents_tables()
     ensure_attorneys_tables()
+    ensure_phone_tables()
 
 
 __all__ = [

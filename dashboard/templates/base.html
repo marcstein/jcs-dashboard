@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/style.css?v=9">
     {% block head %}{% endblock %}
 </head>
-<body>
+<body {% if username %}data-authenticated="true" data-role="{{ role or '' }}"{% endif %}>
     {% if username %}
     <nav class="navbar">
         <div class="nav-brand">
@@ -46,6 +46,7 @@
             {% endif %}
             {% if role == 'admin' %}
             <a href="/firms" class="{% if '/firms' in request.url.path %}active{% endif %}">Firms</a>
+            <a href="/phone" class="{% if '/phone' in request.url.path %}active{% endif %}">Phone</a>
             {% endif %}
         </div>
         <div class="nav-user">
@@ -387,6 +388,11 @@
         }
     });
     </script>
+
+    <!-- Screen Pop Component (SSE-powered caller ID) -->
+    {% if username %}
+    {% include "components/screen_pop.html" %}
+    {% endif %}
 
     {% block scripts %}{% endblock %}
 </body>

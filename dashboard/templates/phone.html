@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}Phone Integration — LawMetrics{% endblock %}
+
+{% block content %}
+<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <div>
+            <h1 style="font-size: 24px; font-weight: 700; color: #1e293b; margin: 0;">Phone Integration</h1>
+            <p style="color: #64748b; margin-top: 4px;">Caller ID screen pop for incoming calls</p>
+        </div>
+        <button onclick="testScreenPop()" style="
+            background: #2563eb; color: white; border: none; padding: 10px 20px;
+            border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px;
+        ">Test Screen Pop</button>
+    </div>
+
+    <!-- Stats Cards -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px;">
+        <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Total Calls (30d)</div>
+            <div style="font-size: 28px; font-weight: 700; color: #1e293b; margin-top: 4px;">{{ stats.total_calls or 0 }}</div>
+        </div>
+        <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Match Rate</div>
+            <div style="font-size: 28px; font-weight: 700; color: {% if (stats.match_rate_pct or 0) >= 80 %}#16a34a{% else %}#dc2626{% endif %}; margin-top: 4px;">
+                {{ stats.match_rate_pct or 0 }}%
+            </div>
+        </div>
+        <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Matched</div>
+            <div style="font-size: 28px; font-weight: 700; color: #16a34a; margin-top: 4px;">{{ stats.matched_calls or 0 }}</div>
+        </div>
+        <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Unmatched</div>
+            <div style="font-size: 28px; font-weight: 700; color: #f59e0b; margin-top: 4px;">{{ stats.unmatched_calls or 0 }}</div>
+        </div>
+        <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Pops Delivered</div>
+            <div style="font-size: 28px; font-weight: 700; color: #2563eb; margin-top: 4px;">{{ stats.pops_delivered or 0 }}</div>
+        </div>
+    </div>
+
+    <!-- Two Column Layout -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+
+        <!-- Active Integrations -->
+        <div style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+            <div style="padding: 16px 20px; border-bottom: 1px solid #f1f5f9;">
+                <h2 style="font-size: 16px; font-weight: 600; color: #1e293b; margin: 0;">Active Integrations</h2>
+            </div>
+            <div style="padding: 20px;">
+                {% if integrations %}
+                    {% for int in integrations %}
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f8fafc;">
+                        <div>
+                            <span style="font-weight: 600; color: #1e293b; text-transform: capitalize;">{{ int.provider }}</span>
+                            <span style="
+                                display: inline-block; margin-left: 8px;
+                                background: #dcfce7; color: #16a34a;
+                                font-size: 11px; font-weight: 600;
+                                padding: 2px 8px; border-radius: 10px;
+                            ">Active</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div style="text-align: center; padding: 32px 0; color: #94a3b8;">
+                        <div style="font-size: 36px; margin-bottom: 8px;">&#128222;</div>
+                        <p>No integrations configured yet.</p>
+                        <p style="font-size: 13px;">Contact support to connect your VoIP provider.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Webhook URLs -->
+            <div style="padding: 16px 20px; background: #f8fafc; border-top: 1px solid #f1f5f9;">
+                <div style="font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 8px;">Webhook URLs</div>
+                {% for provider in ['ringcentral', 'quo', 'vonage'] %}
+                <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px; font-family: monospace;">
+                    {{ provider }}: <span style="color: #475569;">{{ webhook_base_url }}/{{ provider }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- SSE Connection Status -->
+        <div style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+            <div style="padding: 16px 20px; border-bottom: 1px solid #f1f5f9;">
+                <h2 style="font-size: 16px; font-weight: 600; color: #1e293b; margin: 0;">Connection Status</h2>
+            </div>
+            <div style="padding: 20px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                    <div id="sse-status-dot" style="
+                        width: 10px; height: 10px; border-radius: 50%;
+                        background: #94a3b8;
+                    "></div>
+                    <span id="sse-status-text" style="font-size: 14px; color: #64748b;">Connecting...</span>
+                </div>
+                <div id="connected-users-section" style="display: none;">
+                    <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px;">Connected Users:</div>
+                    <div id="connected-users-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Call Events -->
+    <div style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; margin-top: 24px;">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #f1f5f9;">
+            <h2 style="font-size: 16px; font-weight: 600; color: #1e293b; margin: 0;">Recent Calls</h2>
+        </div>
+        {% if recent_events %}
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                    <th style="text-align: left; padding: 10px 16px; font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Time</th>
+                    <th style="text-align: left; padding: 10px 16px; font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Caller</th>
+                    <th style="text-align: left; padding: 10px 16px; font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Client</th>
+                    <th style="text-align: left; padding: 10px 16px; font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Provider</th>
+                    <th style="text-align: center; padding: 10px 16px; font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Pop</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in recent_events %}
+                <tr style="border-bottom: 1px solid #f8fafc;">
+                    <td style="padding: 10px 16px; font-size: 13px; color: #64748b;">{{ event.created_at_display }}</td>
+                    <td style="padding: 10px 16px; font-size: 13px; font-family: monospace; color: #1e293b;">{{ event.caller_number or '' }}</td>
+                    <td style="padding: 10px 16px; font-size: 13px;">
+                        {% if event.matched_client_name %}
+                            <span style="color: #1e293b; font-weight: 500;">{{ event.matched_client_name }}</span>
+                            {% if event.matched_case_count %}
+                                <span style="color: #94a3b8; font-size: 11px;">({{ event.matched_case_count }} case{{ 's' if event.matched_case_count != 1 }})</span>
+                            {% endif %}
+                        {% else %}
+                            <span style="color: #94a3b8;">Unknown</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 10px 16px; font-size: 13px; color: #64748b; text-transform: capitalize;">{{ event.provider or '' }}</td>
+                    <td style="padding: 10px 16px; text-align: center;">
+                        {% if event.pop_delivered %}
+                            <span style="color: #16a34a;">&#10003;</span>
+                        {% else %}
+                            <span style="color: #94a3b8;">&mdash;</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div style="text-align: center; padding: 48px 0; color: #94a3b8;">
+            <p>No call events yet. Events will appear here once your VoIP provider is connected.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function testScreenPop() {
+    fetch('/api/phone/test-pop', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'sent') {
+                console.log('Test pop sent:', data);
+            } else {
+                alert('Could not send test pop. Make sure SSE is connected.');
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
+}
+
+// Update SSE status indicator
+function updateSSEStatus() {
+    const dot = document.getElementById('sse-status-dot');
+    const text = document.getElementById('sse-status-text');
+
+    if (screenPopEventSource && screenPopEventSource.readyState === EventSource.OPEN) {
+        dot.style.background = '#16a34a';
+        text.textContent = 'Connected';
+        text.style.color = '#16a34a';
+    } else if (screenPopEventSource && screenPopEventSource.readyState === EventSource.CONNECTING) {
+        dot.style.background = '#f59e0b';
+        text.textContent = 'Connecting...';
+        text.style.color = '#f59e0b';
+    } else {
+        dot.style.background = '#dc2626';
+        text.textContent = 'Disconnected';
+        text.style.color = '#dc2626';
+    }
+}
+
+// Poll SSE status
+setInterval(updateSSEStatus, 2000);
+
+// Load connected users
+function loadConnectedUsers() {
+    fetch('/api/phone/stats')
+        .then(r => r.json())
+        .then(data => {
+            const section = document.getElementById('connected-users-section');
+            const list = document.getElementById('connected-users-list');
+            if (data.connected_usernames && data.connected_usernames.length > 0) {
+                section.style.display = 'block';
+                list.innerHTML = data.connected_usernames.map(u =>
+                    `<span style="display: inline-block; background: #e0e7ff; color: #3730a3; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; margin: 2px 4px 2px 0;">${u}</span>`
+                ).join('');
+            } else {
+                section.style.display = 'none';
+            }
+        })
+        .catch(() => {});
+}
+setInterval(loadConnectedUsers, 10000);
+loadConnectedUsers();
+</script>
+{% endblock %}
