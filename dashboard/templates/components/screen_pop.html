@@ -266,7 +266,7 @@ function showScreenPop(data) {
         // MyCase deep link
         const mycaseLink = document.getElementById('pop-mycase-link');
         if (data.client_id) {
-            mycaseLink.href = `https://app.mycase.com/contacts/${data.client_id}`;
+            mycaseLink.href = data.mycase_url || `https://app.mycase.com/contacts/clients/${data.client_id}`;
             mycaseLink.style.display = 'block';
         } else {
             mycaseLink.style.display = 'none';

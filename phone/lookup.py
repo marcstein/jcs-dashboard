@@ -132,6 +132,31 @@ def get_client_balance_due(firm_id: str, client_id: int) -> float:
         return float(row['total_balance']) if row else 0.0
 
 
+def _get_mycase_client_url(firm_id: str, client_id: int) -> Optional[str]:
+    """
+    Build a MyCase deep link URL for a client.
+
+    URL format: https://{mycase_subdomain}.mycase.com/contacts/clients/{client_id}
+
+    The MyCase subdomain is stored in the firm's settings JSONB
+    (key: mycase_subdomain). Falls back to None if not configured.
+    """
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT settings->>'mycase_subdomain' as mycase_subdomain
+                FROM firms
+                WHERE id = %s
+            """, (firm_id,))
+            row = cur.fetchone()
+            if row and row.get('mycase_subdomain'):
+                return f"https://{row['mycase_subdomain']}.mycase.com/contacts/clients/{client_id}"
+    except Exception:
+        pass
+    return None
+
+
 def build_screen_pop(
     firm_id: str,
     caller_number: str,
@@ -164,6 +189,9 @@ def build_screen_pop(
 
     client_id = client['id']
     client_name = client.get('name') or f"{client.get('first_name', '')} {client.get('last_name', '')}".strip()
+
+    # Build MyCase deep link URL
+    mycase_url = _get_mycase_client_url(firm_id, client_id)
 
     # Get active cases
     cases = get_client_active_cases(firm_id, client_id)
@@ -198,6 +226,7 @@ def build_screen_pop(
         } for c in cases],
         last_payment=last_payment,
         balance_due=balance_due,
+        mycase_url=mycase_url,
         target_username=target_username,
         timestamp=datetime.utcnow().isoformat(),
     )

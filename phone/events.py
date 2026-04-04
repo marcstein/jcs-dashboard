@@ -44,6 +44,7 @@ class ScreenPopPayload:
     cases: list = field(default_factory=list)  # List of active case dicts
     last_payment: Optional[dict] = None      # {date, amount} or None
     balance_due: Optional[float] = None
+    mycase_url: Optional[str] = None         # Deep link to client in MyCase
     target_username: Optional[str] = None    # If extension-mapped, target this user
     timestamp: str = ""
 
