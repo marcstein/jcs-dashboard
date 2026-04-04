@@ -275,11 +275,7 @@ async def test_screen_pop(request: Request):
                 target_username=username,
             )
     except Exception as e:
-        import traceback
-        logger.warning("Could not build real test pop, falling back to demo: %s\n%s", e, traceback.format_exc())
-        test_pop_error = f"{type(e).__name__}: {e}"
-    else:
-        test_pop_error = None
+        logger.warning("Could not build real test pop, falling back to demo: %s", e)
 
     # Fallback to demo data if no real client found
     if not test_pop:
@@ -311,10 +307,6 @@ async def test_screen_pop(request: Request):
     result = await deliver_screen_pop(test_pop)
     return JSONResponse({
         "status": "sent",
-        "used_real_client": test_pop_error is None if test_pop_error is not None else (test_pop.client_id != 99999),
-        "test_pop_error": test_pop_error,
-        "client_id": test_pop.client_id,
-        "mycase_url": test_pop.mycase_url,
         "delivery": result,
     })
 
