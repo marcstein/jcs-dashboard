@@ -265,8 +265,15 @@ function showScreenPop(data) {
 
         // MyCase deep link
         const mycaseLink = document.getElementById('pop-mycase-link');
+        console.log('[ScreenPop] MyCase URL debug:', {
+            client_id: data.client_id,
+            mycase_url: data.mycase_url,
+            mycase_url_type: typeof data.mycase_url,
+        });
         if (data.client_id) {
-            mycaseLink.href = data.mycase_url || `https://app.mycase.com/contacts/clients/${data.client_id}`;
+            const finalUrl = data.mycase_url || `https://app.mycase.com/contacts/clients/${data.client_id}`;
+            console.log('[ScreenPop] Setting MyCase link to:', finalUrl);
+            mycaseLink.href = finalUrl;
             mycaseLink.style.display = 'block';
         } else {
             mycaseLink.style.display = 'none';
