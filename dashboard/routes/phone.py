@@ -270,6 +270,7 @@ async def test_screen_pop(request: Request):
         ],
         last_payment={"amount": 500.00, "date": "Mar 15, 2026"},
         balance_due=2500.00,
+        mycase_url=f"https://jcs-law1.mycase.com/contacts/clients/99999",
         target_username=username,
         timestamp=datetime.utcnow().isoformat(),
     )
