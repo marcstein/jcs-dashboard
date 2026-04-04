@@ -362,6 +362,7 @@ async def phone_settings_page(request: Request):
     return templates.TemplateResponse("phone.html", {
         "request": request,
         "role": role,
+        "username": request.session.get("username", ""),
         "firm_id": firm_id,
         "integrations": integrations,
         "recent_events": recent_events,

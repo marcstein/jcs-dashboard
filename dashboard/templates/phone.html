@@ -171,6 +171,7 @@ function testScreenPop() {
 
 // Update SSE status indicator
 function updateSSEStatus() {
+    if (typeof screenPopEventSource === 'undefined') return;
     const dot = document.getElementById('sse-status-dot');
     const text = document.getElementById('sse-status-text');
 
