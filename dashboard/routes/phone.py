@@ -247,33 +247,62 @@ async def test_screen_pop(request: Request):
 
     from phone.events import ScreenPopPayload
     from phone.delivery import deliver_screen_pop
+    from phone.lookup import build_screen_pop
+    from db.connection import get_connection
 
-    # Build a test screen pop
-    test_pop = ScreenPopPayload(
-        firm_id=firm_id,
-        call_event_id=0,
-        caller_number="(314) 555-0100",
-        caller_number_normalized="+13145550100",
-        matched=True,
-        client_id=99999,
-        client_name="Test Client (Demo)",
-        client_email="test@example.com",
-        cases=[
-            {
-                "id": 1,
-                "name": "Test v. State",
-                "case_number": "26XX-CR00001",
-                "practice_area": "DWI",
-                "lead_attorney": "Demo Attorney",
-                "phase": "Discovery",
-            }
-        ],
-        last_payment={"amount": 500.00, "date": "Mar 15, 2026"},
-        balance_due=2500.00,
-        mycase_url=f"https://jcs-law1.mycase.com/contacts/clients/99999",
-        target_username=username,
-        timestamp=datetime.utcnow().isoformat(),
-    )
+    # Try to find a real client with a phone number for a realistic test
+    test_pop = None
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, first_name, last_name, email,
+                       cell_phone, cell_phone_normalized
+                FROM cached_clients
+                WHERE firm_id = %s
+                  AND cell_phone_normalized IS NOT NULL
+                LIMIT 1
+            """, (firm_id,))
+            row = cur.fetchone()
+
+        if row:
+            # Build a real screen pop using the actual lookup pipeline
+            test_pop = build_screen_pop(
+                firm_id=firm_id,
+                caller_number=row.get('cell_phone', '(314) 555-0100'),
+                caller_number_normalized=row['cell_phone_normalized'],
+                call_event_id=0,
+                target_username=username,
+            )
+    except Exception as e:
+        logger.warning("Could not build real test pop, falling back to demo: %s", e)
+
+    # Fallback to demo data if no real client found
+    if not test_pop:
+        test_pop = ScreenPopPayload(
+            firm_id=firm_id,
+            call_event_id=0,
+            caller_number="(314) 555-0100",
+            caller_number_normalized="+13145550100",
+            matched=True,
+            client_id=99999,
+            client_name="Test Client (Demo)",
+            client_email="test@example.com",
+            cases=[
+                {
+                    "id": 1,
+                    "name": "Test v. State",
+                    "case_number": "26XX-CR00001",
+                    "practice_area": "DWI",
+                    "lead_attorney": "Demo Attorney",
+                    "phase": "Discovery",
+                }
+            ],
+            last_payment={"amount": 500.00, "date": "Mar 15, 2026"},
+            balance_due=2500.00,
+            target_username=username,
+            timestamp=datetime.utcnow().isoformat(),
+        )
 
     result = await deliver_screen_pop(test_pop)
     return JSONResponse({
