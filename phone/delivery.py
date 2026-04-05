@@ -128,12 +128,21 @@ async def deliver_screen_pop(pop: ScreenPopPayload) -> dict:
     }
 
     if pop.target_username:
-        # Targeted delivery to specific user
+        # Targeted delivery to a single user (extension mapping)
         delivered = await registry.push_to_user(pop.firm_id, pop.target_username, payload)
         return {
             "mode": "targeted",
             "target": pop.target_username,
             "delivered": delivered,
+        }
+    elif pop.target_usernames:
+        # Attorney-routed: broadcast to all, but log attorney targets
+        # (Future: optionally restrict to only matched attorneys + admin)
+        count = await registry.broadcast_to_firm(pop.firm_id, payload)
+        return {
+            "mode": "attorney_routed",
+            "attorneys": pop.target_usernames,
+            "delivered_count": count,
         }
     else:
         # Broadcast to all firm users

@@ -157,6 +157,49 @@ def _get_mycase_client_url(firm_id: str, client_id: int) -> Optional[str]:
     return None
 
 
+def _resolve_attorney_usernames(firm_id: str, cases: list) -> list:
+    """
+    Given a list of case dicts with 'lead_attorney' (name), resolve
+    to dashboard usernames for targeted screen pop delivery.
+
+    Looks up dashboard_users where role='attorney' and attorney_name
+    matches the lead attorney on each case.
+
+    Returns deduplicated list of usernames.
+    """
+    attorney_names = list(set(
+        c.get('lead_attorney') or c.get('lead_attorney_name', '')
+        for c in cases
+        if c.get('lead_attorney') or c.get('lead_attorney_name')
+    ))
+
+    if not attorney_names:
+        return []
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            placeholders = ','.join(['%s'] * len(attorney_names))
+            cur.execute(f"""
+                SELECT username, attorney_name
+                FROM dashboard_users
+                WHERE firm_id = %s
+                  AND role = 'attorney'
+                  AND attorney_name IN ({placeholders})
+            """, [firm_id] + attorney_names)
+            rows = cur.fetchall()
+            usernames = [row['username'] for row in rows]
+            if usernames:
+                logger.info(
+                    "Attorney routing: %s → %s",
+                    attorney_names, usernames,
+                )
+            return usernames
+    except Exception as e:
+        logger.warning("Could not resolve attorney usernames: %s", e)
+        return []
+
+
 def build_screen_pop(
     firm_id: str,
     caller_number: str,
@@ -202,9 +245,26 @@ def build_screen_pop(
     # Get total balance
     balance_due = get_client_balance_due(firm_id, client_id)
 
+    # Build case list for payload
+    case_list = [{
+        "id": c['id'],
+        "name": c['name'],
+        "case_number": c['case_number'],
+        "practice_area": c['practice_area'],
+        "lead_attorney": c['lead_attorney_name'],
+        "phase": c.get('current_phase', 'Unknown'),
+    } for c in cases]
+
+    # Resolve lead attorneys to dashboard usernames for targeted delivery
+    # (only if no explicit target_username was set via extension mapping)
+    target_usernames = []
+    if not target_username and case_list:
+        target_usernames = _resolve_attorney_usernames(firm_id, case_list)
+
     logger.info(
-        "Screen pop: %s (%s) → %s, %d cases, balance $%.2f",
+        "Screen pop: %s (%s) → %s, %d cases, balance $%.2f, targets=%s",
         caller_number_normalized, client_name, firm_id, len(cases), balance_due,
+        target_usernames or target_username or "broadcast",
     )
 
     return ScreenPopPayload(
@@ -216,17 +276,11 @@ def build_screen_pop(
         client_id=client_id,
         client_name=client_name,
         client_email=client.get('email'),
-        cases=[{
-            "id": c['id'],
-            "name": c['name'],
-            "case_number": c['case_number'],
-            "practice_area": c['practice_area'],
-            "lead_attorney": c['lead_attorney_name'],
-            "phase": c.get('current_phase', 'Unknown'),
-        } for c in cases],
+        cases=case_list,
         last_payment=last_payment,
         balance_due=balance_due,
         mycase_url=mycase_url,
         target_username=target_username,
+        target_usernames=target_usernames,
         timestamp=datetime.utcnow().isoformat(),
     )

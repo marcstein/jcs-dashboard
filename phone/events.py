@@ -46,6 +46,7 @@ class ScreenPopPayload:
     balance_due: Optional[float] = None
     mycase_url: Optional[str] = None         # Deep link to client in MyCase
     target_username: Optional[str] = None    # If extension-mapped, target this user
+    target_usernames: list = field(default_factory=list)  # Attorney-routed targets
     timestamp: str = ""
 
     def to_dict(self) -> dict:

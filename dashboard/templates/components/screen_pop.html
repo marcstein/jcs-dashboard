@@ -76,7 +76,20 @@
                         font-weight: 700; font-size: 18px;
                     "></div>
                     <div>
-                        <div id="pop-name" style="font-size: 18px; font-weight: 600; color: #1e293b;"></div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div id="pop-name" style="font-size: 18px; font-weight: 600; color: #1e293b;"></div>
+                            <span id="pop-your-client" style="
+                                display: none;
+                                background: #16a34a;
+                                color: white;
+                                font-size: 10px;
+                                font-weight: 700;
+                                padding: 2px 8px;
+                                border-radius: 10px;
+                                text-transform: uppercase;
+                                letter-spacing: 0.5px;
+                            ">Your Client</span>
+                        </div>
                         <div id="pop-email" style="font-size: 13px; color: #64748b;"></div>
                     </div>
                 </div>
@@ -179,6 +192,7 @@
 
 let screenPopEventSource = null;
 let screenPopDismissTimer = null;
+let screenPopUsername = null;  // Set on SSE connect
 const SCREEN_POP_TIMEOUT_MS = 30000; // Auto-dismiss after 30 seconds
 
 function initScreenPopSSE() {
@@ -190,6 +204,7 @@ function initScreenPopSSE() {
 
     screenPopEventSource.addEventListener('system', function(e) {
         const data = JSON.parse(e.data);
+        screenPopUsername = data.username || null;
         console.log('[ScreenPop] SSE connected:', data);
     });
 
@@ -224,6 +239,15 @@ function showScreenPop(data) {
         // Name and email
         document.getElementById('pop-name').textContent = name;
         document.getElementById('pop-email').textContent = data.client_email || '';
+
+        // "Your Client" badge — show if logged-in user is a target attorney
+        const yourClientBadge = document.getElementById('pop-your-client');
+        const targets = data.target_usernames || [];
+        if (screenPopUsername && targets.includes(screenPopUsername)) {
+            yourClientBadge.style.display = 'inline-block';
+        } else {
+            yourClientBadge.style.display = 'none';
+        }
 
         // Cases
         const casesList = document.getElementById('pop-cases-list');
