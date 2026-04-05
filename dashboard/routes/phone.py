@@ -72,16 +72,24 @@ async def phone_webhook(request: Request, firm_id: str, provider: str):
     body = await request.body()
     headers = {k.lower(): v for k, v in request.headers.items()}
 
+    # Check for RingCentral validation token BEFORE parsing JSON
+    # (validation requests may have empty or non-JSON bodies)
+    validation_token = headers.get("validation-token")
+    if validation_token:
+        logger.info("Webhook validation request from %s/%s — echoing token", firm_id, provider)
+        resp = Response(status_code=200)
+        resp.headers["Validation-Token"] = validation_token
+        return resp
+
     # Parse JSON payload
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
-    # Check for validation/challenge request (e.g. RingCentral)
+    # Check for other validation/challenge requests
     validation_response = adapter.get_validation_response(payload, headers)
     if validation_response:
-        # RingCentral validation: return the token in the response header
         if "validation_token" in validation_response:
             resp = Response(status_code=200)
             resp.headers["Validation-Token"] = validation_response["validation_token"]
