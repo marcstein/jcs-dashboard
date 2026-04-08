@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}Revenue - LawMetrics{% endblock %}
+
+{% block content %}
+<style>
+    .revenue-page h1 { margin-bottom: 4px; }
+    .page-description { color: #64748b; margin-bottom: 24px; }
+
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin-bottom: 28px;
+    }
+    .kpi-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 20px 22px;
+    }
+    .kpi-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .kpi-value {
+        font-size: 30px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-top: 6px;
+        line-height: 1.1;
+    }
+    .kpi-sub {
+        font-size: 13px;
+        color: #64748b;
+        margin-top: 6px;
+    }
+    .kpi-delta {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 8px;
+        padding: 3px 10px;
+        border-radius: 999px;
+    }
+    .kpi-delta.up    { background: #dcfce7; color: #166534; }
+    .kpi-delta.down  { background: #fee2e2; color: #991b1b; }
+    .kpi-delta.flat  { background: #f1f5f9; color: #475569; }
+
+    .chart-section {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 24px;
+    }
+    .chart-section h2 {
+        font-size: 16px;
+        margin: 0 0 4px 0;
+        color: #0f172a;
+    }
+    .chart-section .chart-sub {
+        font-size: 13px;
+        color: #64748b;
+        margin-bottom: 18px;
+    }
+
+    .bar-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        height: 220px;
+        padding-bottom: 28px;
+        position: relative;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .bar-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+        height: 100%;
+        position: relative;
+    }
+    .bar {
+        width: 100%;
+        max-width: 56px;
+        background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+        border-radius: 6px 6px 0 0;
+        min-height: 2px;
+        position: relative;
+        cursor: pointer;
+        transition: filter 0.15s ease;
+    }
+    .bar:hover {
+        filter: brightness(1.1);
+    }
+    .bar-tooltip {
+        visibility: hidden;
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: #0f172a;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 6px 10px;
+        border-radius: 6px;
+        white-space: nowrap;
+        z-index: 10;
+        pointer-events: none;
+    }
+    .bar:hover .bar-tooltip { visibility: visible; }
+    .bar-month {
+        position: absolute;
+        bottom: -22px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 10px;
+        color: #94a3b8;
+        white-space: nowrap;
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .data-table th, .data-table td {
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 14px;
+    }
+    .data-table th {
+        background: #f8fafc;
+        font-size: 12px;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table .text-right { text-align: right; }
+    .data-table .text-muted { color: #94a3b8; }
+
+    .two-column {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+    }
+    @media (max-width: 900px) {
+        .two-column { grid-template-columns: 1fr; }
+    }
+</style>
+
+<div class="revenue-page">
+    <h1>Revenue</h1>
+    <p class="page-description">New monthly revenue and case intake. Revenue is the sum of invoice totals for cases created in each month, attributed to the month the case was opened.</p>
+
+    {% set max_value = namespace(v=1) %}
+    {% set max_count = namespace(v=1) %}
+    {% for row in series %}
+        {% if row.new_case_value > max_value.v %}{% set max_value.v = row.new_case_value %}{% endif %}
+        {% if row.new_case_count > max_count.v %}{% set max_count.v = row.new_case_count %}{% endif %}
+    {% endfor %}
+
+    <!-- KPI Cards -->
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-label">{{ summary.current.month_label }} New Revenue</div>
+            <div class="kpi-value">${{ "{:,.0f}".format(summary.current.new_case_value) }}</div>
+            <div class="kpi-sub">Prior month: ${{ "{:,.0f}".format(summary.previous.new_case_value) }}</div>
+            {% if summary.mom_value_pct is none %}
+                <div class="kpi-delta flat">— vs prior</div>
+            {% elif summary.mom_value_pct > 0 %}
+                <div class="kpi-delta up">▲ {{ "%.1f"|format(summary.mom_value_pct) }}% MoM</div>
+            {% elif summary.mom_value_pct < 0 %}
+                <div class="kpi-delta down">▼ {{ "%.1f"|format(summary.mom_value_pct|abs) }}% MoM</div>
+            {% else %}
+                <div class="kpi-delta flat">Flat MoM</div>
+            {% endif %}
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-label">{{ summary.current.month_label }} New Cases</div>
+            <div class="kpi-value">{{ "{:,}".format(summary.current.new_case_count) }}</div>
+            <div class="kpi-sub">Prior month: {{ "{:,}".format(summary.previous.new_case_count) }}</div>
+            {% if summary.mom_count_pct is none %}
+                <div class="kpi-delta flat">— vs prior</div>
+            {% elif summary.mom_count_pct > 0 %}
+                <div class="kpi-delta up">▲ {{ "%.1f"|format(summary.mom_count_pct) }}% MoM</div>
+            {% elif summary.mom_count_pct < 0 %}
+                <div class="kpi-delta down">▼ {{ "%.1f"|format(summary.mom_count_pct|abs) }}% MoM</div>
+            {% else %}
+                <div class="kpi-delta flat">Flat MoM</div>
+            {% endif %}
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-label">YTD New Revenue</div>
+            <div class="kpi-value">${{ "{:,.0f}".format(summary.ytd_total_value) }}</div>
+            <div class="kpi-sub">{{ summary.ytd_total_count }} new cases YTD</div>
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-label">12-Month Avg / Month</div>
+            <div class="kpi-value">${{ "{:,.0f}".format(summary.avg_monthly_value) }}</div>
+            <div class="kpi-sub">{{ "%.1f"|format(summary.avg_monthly_count) }} cases/month avg</div>
+        </div>
+    </div>
+
+    <!-- New Revenue Chart -->
+    <div class="chart-section">
+        <h2>New Revenue by Month</h2>
+        <div class="chart-sub">Sum of invoice totals for cases created each month — last 12 months</div>
+        <div class="bar-chart">
+            {% for row in series %}
+            {% set pct = (row.new_case_value / max_value.v * 100) if max_value.v > 0 else 0 %}
+            <div class="bar-col">
+                <div class="bar" style="height: {{ pct }}%;">
+                    <div class="bar-tooltip">${{ "{:,.0f}".format(row.new_case_value) }}</div>
+                </div>
+                <div class="bar-month">{{ row.month_start.strftime("%b") }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- New Cases Chart -->
+    <div class="chart-section">
+        <h2>New Cases by Month</h2>
+        <div class="chart-sub">Cases opened each month — last 12 months</div>
+        <div class="bar-chart">
+            {% for row in series %}
+            {% set pct = (row.new_case_count / max_count.v * 100) if max_count.v > 0 else 0 %}
+            <div class="bar-col">
+                <div class="bar" style="height: {{ pct }}%; background: linear-gradient(180deg, #16a34a 0%, #15803d 100%);">
+                    <div class="bar-tooltip">{{ row.new_case_count }} cases</div>
+                </div>
+                <div class="bar-month">{{ row.month_start.strftime("%b") }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="two-column">
+        <!-- Monthly Detail Table -->
+        <div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Month</th>
+                        <th class="text-right">New Cases</th>
+                        <th class="text-right">New Revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in series|reverse %}
+                    <tr>
+                        <td>{{ row.month_label }}</td>
+                        <td class="text-right">{{ row.new_case_count }}</td>
+                        <td class="text-right">${{ "{:,.0f}".format(row.new_case_value) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Practice Area Breakdown -->
+        <div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Practice Area</th>
+                        <th class="text-right">New Cases</th>
+                        <th class="text-right">New Revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in by_practice_area %}
+                    <tr>
+                        <td>{{ row.practice_area }}</td>
+                        <td class="text-right">{{ row.new_case_count }}</td>
+                        <td class="text-right">${{ "{:,.0f}".format(row.new_case_value) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3" class="text-muted">No data</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

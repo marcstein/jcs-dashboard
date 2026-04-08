@@ -9,6 +9,7 @@ from dashboard.models.tasks import TaskDataMixin
 from dashboard.models.sop import SOPDataMixin
 from dashboard.models.phases import PhasesDataMixin
 from dashboard.models.trends import TrendsDataMixin
+from dashboard.models.revenue import RevenueDataMixin
 
 
 class DashboardData(
@@ -19,6 +20,7 @@ class DashboardData(
     SOPDataMixin,
     PhasesDataMixin,
     TrendsDataMixin,
+    RevenueDataMixin,
 ):
     """
     Unified DashboardData class combining all domain-specific mixins.

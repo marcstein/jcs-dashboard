@@ -34,6 +34,7 @@
             <a href="/payments" class="{% if request.url.path == '/payments' %}active{% endif %}">Payments</a>
             {% endif %}
             {% if role == 'admin' %}
+            <a href="/revenue" class="{% if request.url.path == '/revenue' %}active{% endif %}">Revenue</a>
             <a href="/trust" class="{% if request.url.path == '/trust' %}active{% endif %}">Trust</a>
             {% endif %}
             {% if role != 'attorney' %}
