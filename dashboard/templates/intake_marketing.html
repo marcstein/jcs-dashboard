@@ -1,0 +1,460 @@
+{% extends "base.html" %}
+{% block title %}Marketing Analytics — LawMetrics.ai{% endblock %}
+
+{% block head %}
+<style>
+.btn-back {
+    color: #2E5090;
+    text-decoration: none;
+    font-size: 15px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 16px;
+}
+
+/* ── KPI Cards ── */
+.mkt-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+}
+.mkt-kpi {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    text-align: center;
+}
+.mkt-kpi .kpi-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1B3A5C;
+}
+.mkt-kpi .kpi-label {
+    font-size: 13px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+.mkt-kpi .kpi-sub {
+    font-size: 14px;
+    color: #666;
+    margin-top: 4px;
+}
+
+/* ── Cards ── */
+.mkt-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.mkt-card h3 {
+    margin: 0 0 16px;
+    color: #1B3A5C;
+    font-size: 18px;
+}
+
+/* ── Source Breakdown Table ── */
+.source-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+}
+.source-table th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 2px solid #eee;
+    color: #888;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.source-table th.num { text-align: right; }
+.source-table td {
+    padding: 12px;
+    border-bottom: 1px solid #f5f5f5;
+    color: #333;
+}
+.source-table td.num {
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.source-table tr:hover { background: #f8f9fa; }
+.source-table .source-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.badge-google_ads { background: #E8F0FE; color: #1A73E8; }
+.badge-facebook_ads { background: #E7F3FF; color: #1877F2; }
+.badge-google_lsa { background: #E6F4EA; color: #137333; }
+.badge-referral { background: #FFF3E0; color: #E65100; }
+.badge-organic { background: #F3E8FD; color: #7B1FA2; }
+.badge-direct { background: #F0F0F0; color: #555; }
+.badge-other { background: #F0F0F0; color: #888; }
+
+.cpl-good { color: #2E7D32; }
+.cpl-ok { color: #E65100; }
+.cpl-bad { color: #C62828; }
+
+/* ── Trend Chart ── */
+.trend-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 160px;
+    padding: 16px 0;
+    border-bottom: 1px solid #eee;
+}
+.trend-bar-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+.trend-bar {
+    width: 100%;
+    max-width: 40px;
+    border-radius: 4px 4px 0 0;
+    min-height: 2px;
+    position: relative;
+}
+.trend-bar.spend { background: #2E5090; }
+.trend-bar.cpl { background: #FF9800; }
+.trend-bar-label {
+    font-size: 10px;
+    color: #888;
+    writing-mode: vertical-lr;
+    text-orientation: mixed;
+    transform: rotate(180deg);
+    max-height: 50px;
+    overflow: hidden;
+}
+.trend-month-label {
+    font-size: 11px;
+    color: #666;
+    margin-top: 6px;
+    text-align: center;
+}
+.trend-legend {
+    display: flex;
+    gap: 20px;
+    margin-top: 12px;
+    font-size: 13px;
+    color: #666;
+}
+.trend-legend-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+/* ── Spend Form ── */
+.spend-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr auto;
+    gap: 10px;
+    align-items: end;
+}
+@media (max-width: 900px) {
+    .spend-form { grid-template-columns: 1fr 1fr; }
+}
+.spend-form label {
+    display: block;
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.spend-form input, .spend-form select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+.btn-add-spend {
+    background: #2E5090;
+    color: #fff;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.btn-add-spend:hover { background: #1B3A5C; }
+
+/* ── Spend History ── */
+.spend-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-top: 16px;
+}
+.spend-history-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 2px solid #eee;
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+}
+.spend-history-table th.num { text-align: right; }
+.spend-history-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f5f5f5;
+}
+.spend-history-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.btn-delete-spend {
+    background: none;
+    border: none;
+    color: #C62828;
+    cursor: pointer;
+    font-size: 16px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/intake" class="btn-back">&larr; Back to Pipeline</a>
+
+<div class="page-header">
+    <h1>Marketing Analytics & ROI</h1>
+</div>
+
+<!-- KPI Cards -->
+<div class="mkt-kpis">
+    <div class="mkt-kpi">
+        <div class="kpi-value">${{ "{:,.0f}".format(roi.total_spend) }}</div>
+        <div class="kpi-label">Total Ad Spend</div>
+        <div class="kpi-sub">{{ roi.period_start[:7] }} – {{ roi.period_end[:7] }}</div>
+    </div>
+    <div class="mkt-kpi">
+        <div class="kpi-value">{{ roi.total_leads }}</div>
+        <div class="kpi-label">Total Leads</div>
+        <div class="kpi-sub">{{ roi.unattributed_leads }} unattributed</div>
+    </div>
+    <div class="mkt-kpi">
+        <div class="kpi-value">
+            {% if roi.avg_cost_per_lead %}${{ "{:,.0f}".format(roi.avg_cost_per_lead) }}{% else %}—{% endif %}
+        </div>
+        <div class="kpi-label">Avg Cost per Lead</div>
+    </div>
+    <div class="mkt-kpi">
+        <div class="kpi-value">{{ roi.total_retained }}</div>
+        <div class="kpi-label">Retained Clients</div>
+        <div class="kpi-sub">{{ "{:.1f}".format(roi.overall_conversion_rate) }}% conversion</div>
+    </div>
+    <div class="mkt-kpi">
+        <div class="kpi-value">
+            {% if roi.avg_cost_per_retained %}${{ "{:,.0f}".format(roi.avg_cost_per_retained) }}{% else %}—{% endif %}
+        </div>
+        <div class="kpi-label">Cost per Retained Client</div>
+    </div>
+</div>
+
+<!-- Source Breakdown -->
+<div class="mkt-card">
+    <h3>Performance by Source</h3>
+    {% if roi.sources %}
+    <table class="source-table">
+        <thead>
+            <tr>
+                <th>Source</th>
+                <th class="num">Spend</th>
+                <th class="num">Leads</th>
+                <th class="num">Retained</th>
+                <th class="num">CPL</th>
+                <th class="num">Cost/Retained</th>
+                <th class="num">Conv %</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in roi.sources %}
+            <tr>
+                <td><span class="source-badge badge-{{ s.source }}">{{ s.label }}</span></td>
+                <td class="num">${{ "{:,.0f}".format(s.spend) }}</td>
+                <td class="num">{{ s.leads }}</td>
+                <td class="num">{{ s.retained }}</td>
+                <td class="num {% if s.cost_per_lead and s.cost_per_lead < 100 %}cpl-good{% elif s.cost_per_lead and s.cost_per_lead < 300 %}cpl-ok{% elif s.cost_per_lead %}cpl-bad{% endif %}">
+                    {% if s.cost_per_lead %}${{ "{:,.0f}".format(s.cost_per_lead) }}{% else %}—{% endif %}
+                </td>
+                <td class="num">
+                    {% if s.cost_per_retained %}${{ "{:,.0f}".format(s.cost_per_retained) }}{% else %}—{% endif %}
+                </td>
+                <td class="num">{{ "{:.1f}".format(s.conversion_rate) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#888;">No data yet. Add spend entries below and leads will be attributed automatically via UTM parameters.</p>
+    {% endif %}
+</div>
+
+<!-- Trend Chart -->
+{% if trends %}
+<div class="mkt-card">
+    <h3>Monthly Trends</h3>
+
+    <!-- Spend bars -->
+    <div style="margin-bottom:8px;font-size:13px;color:#888;">Monthly Spend & Cost per Lead</div>
+    <div class="trend-chart" id="trendChart">
+        {% set max_spend = [] %}
+        {% for t in trends %}
+            {% if t.spend > (max_spend[0] if max_spend else 0) %}
+                {% if max_spend %}{% set _ = max_spend.pop() %}{% endif %}
+                {% set _ = max_spend.append(t.spend) %}
+            {% endif %}
+        {% endfor %}
+        {% set ms = max_spend[0] if max_spend else 1 %}
+        {% for t in trends %}
+        <div class="trend-bar-group">
+            <div class="trend-bar spend" style="height: {{ (t.spend / ms * 120) if ms > 0 else 0 }}px;"
+                 title="${{ '{:,.0f}'.format(t.spend) }}"></div>
+            <div class="trend-month-label">{{ t.month_label[:3] }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="trend-legend">
+        <span><span class="trend-legend-dot" style="background:#2E5090;"></span>Spend</span>
+        <span><span class="trend-legend-dot" style="background:#FF9800;"></span>Cost per Lead</span>
+    </div>
+
+    <!-- Summary table -->
+    <table class="source-table" style="margin-top:20px;">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th class="num">Spend</th>
+                <th class="num">Leads</th>
+                <th class="num">Retained</th>
+                <th class="num">CPL</th>
+                <th class="num">Cost/Retained</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in trends|reverse %}
+            <tr>
+                <td>{{ t.month_label }}</td>
+                <td class="num">${{ "{:,.0f}".format(t.spend) }}</td>
+                <td class="num">{{ t.leads }}</td>
+                <td class="num">{{ t.retained }}</td>
+                <td class="num">{% if t.cost_per_lead %}${{ "{:,.0f}".format(t.cost_per_lead) }}{% else %}—{% endif %}</td>
+                <td class="num">{% if t.cost_per_retained %}${{ "{:,.0f}".format(t.cost_per_retained) }}{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Add Spend -->
+<div class="mkt-card">
+    <h3>Record Monthly Ad Spend</h3>
+    <div class="spend-form" id="spendForm">
+        <div>
+            <label>Platform</label>
+            <select id="spendSource">
+                <option value="google_ads">Google Ads</option>
+                <option value="facebook_ads">Facebook/Meta Ads</option>
+                <option value="google_lsa">Google LSA</option>
+                <option value="referral">Referral</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div>
+            <label>Month</label>
+            <input type="month" id="spendPeriod" value="{{ '{:04d}-{:02d}'.format(roi.period_end[:4]|int, roi.period_end[5:7]|int) }}">
+        </div>
+        <div>
+            <label>Spend Amount ($)</label>
+            <input type="number" id="spendAmount" step="0.01" min="0" placeholder="5000.00">
+        </div>
+        <div>
+            <label>Campaign (optional)</label>
+            <input type="text" id="spendCampaign" placeholder="e.g. DUI Brand">
+        </div>
+        <button class="btn-add-spend" onclick="addSpend()">+ Add</button>
+    </div>
+
+    <!-- Existing spend entries -->
+    {% if spend_entries %}
+    <table class="spend-history-table">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th>Source</th>
+                <th>Campaign</th>
+                <th class="num">Amount</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in spend_entries %}
+            <tr>
+                <td>{{ e.period_start.strftime('%b %Y') }}</td>
+                <td><span class="source-badge badge-{{ e.source }}">{{ source_labels.get(e.source, e.source) }}</span></td>
+                <td>{{ e.campaign_name or '—' }}</td>
+                <td class="num">${{ "{:,.2f}".format(e.spend_amount) }}</td>
+                <td><button class="btn-delete-spend" onclick="deleteSpend({{ e.id }})" title="Delete">&times;</button></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+<script>
+function addSpend() {
+    const source = document.getElementById('spendSource').value;
+    const period = document.getElementById('spendPeriod').value;
+    const amount = document.getElementById('spendAmount').value;
+    const campaign = document.getElementById('spendCampaign').value;
+
+    if (!period || !amount) {
+        alert('Month and amount are required');
+        return;
+    }
+
+    fetch('/api/intake/marketing/spend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, period, amount, campaign })
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.success) window.location.reload();
+        else alert('Error: ' + (resp.error || 'Unknown'));
+    })
+    .catch(() => alert('Connection error'));
+}
+
+function deleteSpend(id) {
+    if (!confirm('Delete this spend entry?')) return;
+    fetch(`/api/intake/marketing/spend/${id}/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.success) window.location.reload();
+    });
+}
+</script>
+{% endblock %}

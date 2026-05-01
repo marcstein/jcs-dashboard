@@ -283,6 +283,44 @@ CREATE TABLE IF NOT EXISTS intake_custom_fields (
 );
 CREATE INDEX IF NOT EXISTS idx_intake_custom_fields_firm
     ON intake_custom_fields(firm_id);
+
+-- Marketing spend tracking (manual monthly entry)
+CREATE TABLE IF NOT EXISTS intake_marketing_spend (
+    id SERIAL PRIMARY KEY,
+    firm_id VARCHAR(36) NOT NULL,
+    source TEXT NOT NULL,           -- google_ads, facebook_ads, google_lsa, referral, other
+    campaign_name TEXT,             -- optional campaign label
+    period_start DATE NOT NULL,     -- first day of month
+    period_end DATE NOT NULL,       -- last day of month
+    spend_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+    impressions INTEGER,
+    clicks INTEGER,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(firm_id, source, campaign_name, period_start)
+);
+CREATE INDEX IF NOT EXISTS idx_marketing_spend_firm_period
+    ON intake_marketing_spend(firm_id, period_start);
+
+-- Lead attribution (UTM tracking)
+CREATE TABLE IF NOT EXISTS intake_lead_attribution (
+    id SERIAL PRIMARY KEY,
+    firm_id VARCHAR(36) NOT NULL,
+    lead_id INTEGER NOT NULL REFERENCES intake_leads(id),
+    utm_source TEXT,       -- google, facebook, bing
+    utm_medium TEXT,        -- cpc, social, organic
+    utm_campaign TEXT,      -- campaign name
+    utm_content TEXT,       -- ad variation
+    utm_term TEXT,          -- keyword
+    landing_page TEXT,      -- URL they landed on
+    referrer TEXT,          -- HTTP referer
+    platform TEXT,          -- resolved: google_ads, facebook_ads, google_lsa, organic, referral, direct
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(firm_id, lead_id)
+);
+CREATE INDEX IF NOT EXISTS idx_lead_attribution_firm
+    ON intake_lead_attribution(firm_id, platform);
 """
 
 
@@ -788,6 +826,25 @@ def record_form_submission(form_id: int, firm_id: str, submission_data: dict,
             UPDATE intake_forms SET submissions_count = submissions_count + 1
             WHERE id = %s
         """, (form_id,))
+
+    # Save UTM attribution if any UTM params present
+    utm_fields = {k: v for k, v in submission_data.items()
+                  if k.startswith('utm_') and v}
+    if utm_fields or referrer_url:
+        try:
+            save_lead_attribution(
+                firm_id, lead_id,
+                utm_source=submission_data.get('utm_source'),
+                utm_medium=submission_data.get('utm_medium'),
+                utm_campaign=submission_data.get('utm_campaign'),
+                utm_content=submission_data.get('utm_content'),
+                utm_term=submission_data.get('utm_term'),
+                landing_page=submission_data.get('landing_page'),
+                referrer=referrer_url,
+                source_field='website_form',
+            )
+        except Exception as e:
+            logger.warning(f"Attribution save failed for lead {lead_id}: {e}")
 
     return lead_id
 
@@ -1652,3 +1709,349 @@ def set_lead_custom_field(firm_id: str, lead_id: int,
             WHERE firm_id = %s AND id = %s
         """, (f'{{{field_key}}}', json.dumps(value), firm_id, lead_id))
     return True
+
+
+# ============================================================
+# Marketing Spend & ROI Tracking
+# ============================================================
+
+MARKETING_SOURCES = [
+    'google_ads', 'facebook_ads', 'google_lsa',
+    'referral', 'organic', 'direct', 'other'
+]
+
+SOURCE_LABELS = {
+    'google_ads': 'Google Ads',
+    'facebook_ads': 'Facebook/Meta Ads',
+    'google_lsa': 'Google LSA',
+    'referral': 'Referral',
+    'organic': 'Organic Search',
+    'direct': 'Direct / Walk-in',
+    'other': 'Other',
+}
+
+
+def _resolve_platform(utm_source: str = None, utm_medium: str = None,
+                       source_field: str = None) -> str:
+    """Resolve UTM params or lead source to a marketing platform."""
+    src = (utm_source or '').lower()
+    med = (utm_medium or '').lower()
+    lead_src = (source_field or '').lower()
+
+    if 'google' in src and 'lsa' in (med + src + lead_src):
+        return 'google_lsa'
+    if 'google' in src and med in ('cpc', 'ppc', 'paid'):
+        return 'google_ads'
+    if src in ('google', 'bing', 'yahoo') and med == 'organic':
+        return 'organic'
+    if any(x in src for x in ('facebook', 'fb', 'instagram', 'ig', 'meta')):
+        return 'facebook_ads'
+    if med in ('cpc', 'ppc', 'paid') and 'google' in src:
+        return 'google_ads'
+    if lead_src == 'referral' or med == 'referral':
+        return 'referral'
+    if lead_src in ('website', 'organic') or med == 'organic':
+        return 'organic'
+    if lead_src in ('phone', 'walk_in'):
+        return 'direct'
+    if src or med:
+        return 'other'
+    return 'direct'
+
+
+def save_lead_attribution(firm_id: str, lead_id: int,
+                           utm_source: str = None, utm_medium: str = None,
+                           utm_campaign: str = None, utm_content: str = None,
+                           utm_term: str = None, landing_page: str = None,
+                           referrer: str = None, source_field: str = None) -> int:
+    """Save UTM attribution for a lead."""
+    platform = _resolve_platform(utm_source, utm_medium, source_field)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO intake_lead_attribution
+                (firm_id, lead_id, utm_source, utm_medium, utm_campaign,
+                 utm_content, utm_term, landing_page, referrer, platform)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (firm_id, lead_id) DO UPDATE SET
+                utm_source = EXCLUDED.utm_source,
+                utm_medium = EXCLUDED.utm_medium,
+                utm_campaign = EXCLUDED.utm_campaign,
+                utm_content = EXCLUDED.utm_content,
+                utm_term = EXCLUDED.utm_term,
+                landing_page = EXCLUDED.landing_page,
+                referrer = EXCLUDED.referrer,
+                platform = EXCLUDED.platform
+            RETURNING id
+        """, (firm_id, lead_id, utm_source, utm_medium, utm_campaign,
+              utm_content, utm_term, landing_page, referrer, platform))
+        row = cur.fetchone()
+        return row['id'] if isinstance(row, dict) else row[0]
+
+
+def get_lead_attribution(firm_id: str, lead_id: int) -> Optional[Dict]:
+    """Get attribution data for a lead."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM intake_lead_attribution
+            WHERE firm_id = %s AND lead_id = %s
+        """, (firm_id, lead_id))
+        return dict(cur.fetchone()) if cur.rowcount else None
+
+
+# ── Marketing Spend CRUD ──
+
+def add_marketing_spend(firm_id: str, source: str, period_start: date,
+                         spend_amount: float, campaign_name: str = None,
+                         impressions: int = None, clicks: int = None,
+                         notes: str = None) -> int:
+    """Add or update a monthly marketing spend entry."""
+    import calendar
+    # Normalize period_start to 1st of month, period_end to last
+    ps = period_start.replace(day=1)
+    _, last_day = calendar.monthrange(ps.year, ps.month)
+    pe = ps.replace(day=last_day)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO intake_marketing_spend
+                (firm_id, source, campaign_name, period_start, period_end,
+                 spend_amount, impressions, clicks, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (firm_id, source, campaign_name, period_start) DO UPDATE SET
+                spend_amount = EXCLUDED.spend_amount,
+                impressions = EXCLUDED.impressions,
+                clicks = EXCLUDED.clicks,
+                notes = EXCLUDED.notes,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+        """, (firm_id, source, campaign_name, ps, pe,
+              spend_amount, impressions, clicks, notes))
+        row = cur.fetchone()
+        return row['id'] if isinstance(row, dict) else row[0]
+
+
+def get_marketing_spend(firm_id: str, start_date: date = None,
+                         end_date: date = None) -> List[Dict]:
+    """Get marketing spend entries for a firm, optionally filtered by date range."""
+    sql = "SELECT * FROM intake_marketing_spend WHERE firm_id = %s"
+    params = [firm_id]
+    if start_date:
+        sql += " AND period_start >= %s"
+        params.append(start_date)
+    if end_date:
+        sql += " AND period_end <= %s"
+        params.append(end_date)
+    sql += " ORDER BY period_start DESC, source"
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+
+
+def delete_marketing_spend(firm_id: str, spend_id: int) -> bool:
+    """Delete a spend entry."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM intake_marketing_spend
+            WHERE firm_id = %s AND id = %s
+        """, (firm_id, spend_id))
+        return cur.rowcount > 0
+
+
+# ── ROI Calculations ──
+
+def get_marketing_roi_summary(firm_id: str, start_date: date = None,
+                               end_date: date = None) -> Dict:
+    """Get cost-per-lead and cost-per-retained-client by source."""
+    # Default to last 12 months
+    if not end_date:
+        end_date = date.today()
+    if not start_date:
+        start_date = date(end_date.year - 1, end_date.month, 1)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        # Total spend by platform
+        cur.execute("""
+            SELECT source, SUM(spend_amount) as total_spend
+            FROM intake_marketing_spend
+            WHERE firm_id = %s AND period_start >= %s AND period_end <= %s
+            GROUP BY source
+        """, (firm_id, start_date, end_date))
+        spend_by_source = {r['source']: float(r['total_spend']) for r in cur.fetchall()}
+
+        # Lead count by platform
+        cur.execute("""
+            SELECT a.platform, COUNT(*) as lead_count
+            FROM intake_lead_attribution a
+            JOIN intake_leads l ON a.lead_id = l.id AND a.firm_id = l.firm_id
+            WHERE a.firm_id = %s
+              AND l.created_at >= %s AND l.created_at < %s
+              AND l.archived = FALSE
+            GROUP BY a.platform
+        """, (firm_id, start_date, end_date + timedelta(days=1)))
+        leads_by_source = {r['platform']: r['lead_count'] for r in cur.fetchall()}
+
+        # Retained count by platform
+        cur.execute("""
+            SELECT a.platform, COUNT(*) as retained_count
+            FROM intake_lead_attribution a
+            JOIN intake_leads l ON a.lead_id = l.id AND a.firm_id = l.firm_id
+            WHERE a.firm_id = %s
+              AND l.created_at >= %s AND l.created_at < %s
+              AND l.archived = FALSE
+              AND l.stage_id IN (
+                  SELECT id FROM intake_pipeline_stages
+                  WHERE firm_id = %s AND stage_name = 'Retained'
+              )
+            GROUP BY a.platform
+        """, (firm_id, start_date, end_date + timedelta(days=1), firm_id))
+        retained_by_source = {r['platform']: r['retained_count'] for r in cur.fetchall()}
+
+        # Also get leads WITHOUT attribution (phone/walk-in)
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM intake_leads l
+            WHERE l.firm_id = %s
+              AND l.created_at >= %s AND l.created_at < %s
+              AND l.archived = FALSE
+              AND l.id NOT IN (
+                  SELECT lead_id FROM intake_lead_attribution WHERE firm_id = %s
+              )
+        """, (firm_id, start_date, end_date + timedelta(days=1), firm_id))
+        unattributed = cur.fetchone()['cnt']
+
+    # Build per-source summary
+    all_sources = set(list(spend_by_source.keys()) + list(leads_by_source.keys()))
+    sources = []
+    total_spend = 0
+    total_leads = 0
+    total_retained = 0
+
+    for src in sorted(all_sources):
+        spend = spend_by_source.get(src, 0)
+        leads = leads_by_source.get(src, 0)
+        retained = retained_by_source.get(src, 0)
+        cpl = spend / leads if leads > 0 else None
+        cprc = spend / retained if retained > 0 else None
+
+        sources.append({
+            'source': src,
+            'label': SOURCE_LABELS.get(src, src),
+            'spend': spend,
+            'leads': leads,
+            'retained': retained,
+            'cost_per_lead': cpl,
+            'cost_per_retained': cprc,
+            'conversion_rate': (retained / leads * 100) if leads > 0 else 0,
+        })
+        total_spend += spend
+        total_leads += leads
+        total_retained += retained
+
+    return {
+        'sources': sources,
+        'total_spend': total_spend,
+        'total_leads': total_leads,
+        'total_retained': total_retained,
+        'unattributed_leads': unattributed,
+        'avg_cost_per_lead': total_spend / total_leads if total_leads > 0 else None,
+        'avg_cost_per_retained': total_spend / total_retained if total_retained > 0 else None,
+        'overall_conversion_rate': (total_retained / total_leads * 100) if total_leads > 0 else 0,
+        'period_start': start_date.isoformat(),
+        'period_end': end_date.isoformat(),
+    }
+
+
+def get_marketing_trends(firm_id: str, months: int = 12) -> List[Dict]:
+    """Get month-over-month marketing metrics."""
+    end = date.today().replace(day=1)
+    start = date(end.year - 1, end.month, 1) if months >= 12 else \
+            date(end.year, end.month - months + 1, 1) if end.month > months else \
+            date(end.year - 1, 12 - (months - end.month), 1)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        # Monthly spend
+        cur.execute("""
+            SELECT DATE_TRUNC('month', period_start) as month,
+                   SUM(spend_amount) as spend
+            FROM intake_marketing_spend
+            WHERE firm_id = %s AND period_start >= %s AND period_start < %s
+            GROUP BY month ORDER BY month
+        """, (firm_id, start, end))
+        spend_by_month = {r['month'].date(): float(r['spend']) for r in cur.fetchall()}
+
+        # Monthly leads by platform
+        cur.execute("""
+            SELECT DATE_TRUNC('month', l.created_at) as month,
+                   COALESCE(a.platform, 'direct') as platform,
+                   COUNT(*) as cnt
+            FROM intake_leads l
+            LEFT JOIN intake_lead_attribution a
+                ON a.lead_id = l.id AND a.firm_id = l.firm_id
+            WHERE l.firm_id = %s AND l.created_at >= %s AND l.created_at < %s
+              AND l.archived = FALSE
+            GROUP BY month, platform ORDER BY month
+        """, (firm_id, start, end))
+        leads_data = cur.fetchall()
+
+        # Monthly retained
+        cur.execute("""
+            SELECT DATE_TRUNC('month', l.created_at) as month,
+                   COUNT(*) as cnt
+            FROM intake_leads l
+            WHERE l.firm_id = %s AND l.created_at >= %s AND l.created_at < %s
+              AND l.archived = FALSE
+              AND l.stage_id IN (
+                  SELECT id FROM intake_pipeline_stages
+                  WHERE firm_id = %s AND stage_name = 'Retained'
+              )
+            GROUP BY month ORDER BY month
+        """, (firm_id, start, end, firm_id))
+        retained_by_month = {r['month'].date(): r['cnt'] for r in cur.fetchall()}
+
+    # Build monthly lead counts
+    leads_by_month = {}
+    for r in leads_data:
+        m = r['month'].date()
+        if m not in leads_by_month:
+            leads_by_month[m] = {'total': 0, 'by_platform': {}}
+        leads_by_month[m]['total'] += r['cnt']
+        leads_by_month[m]['by_platform'][r['platform']] = r['cnt']
+
+    # Assemble trend rows
+    trends = []
+    current = start
+    while current < end:
+        spend = spend_by_month.get(current, 0)
+        leads_info = leads_by_month.get(current, {'total': 0, 'by_platform': {}})
+        leads = leads_info['total']
+        retained = retained_by_month.get(current, 0)
+
+        trends.append({
+            'month': current.isoformat(),
+            'month_label': current.strftime('%b %Y'),
+            'spend': spend,
+            'leads': leads,
+            'retained': retained,
+            'cost_per_lead': spend / leads if leads > 0 else None,
+            'cost_per_retained': spend / retained if retained > 0 else None,
+            'conversion_rate': (retained / leads * 100) if leads > 0 else 0,
+            'leads_by_platform': leads_info['by_platform'],
+        })
+
+        # Next month
+        if current.month == 12:
+            current = date(current.year + 1, 1, 1)
+        else:
+            current = date(current.year, current.month + 1, 1)
+
+    return trends

@@ -33,6 +33,10 @@ from db.intake import (
     # Custom fields
     get_custom_fields, create_custom_field, update_custom_field,
     delete_custom_field, set_lead_custom_field,
+    # Marketing & ROI
+    save_lead_attribution, get_marketing_spend, add_marketing_spend,
+    delete_marketing_spend, get_marketing_roi_summary, get_marketing_trends,
+    MARKETING_SOURCES, SOURCE_LABELS,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,18 +169,28 @@ async def api_create_lead(request: Request):
     data = result
 
     body = await request.json()
+    source = body.get("source", "manual")
     lead_id = data.create_intake_lead(
         first_name=body.get("first_name", ""),
         last_name=body.get("last_name", ""),
         email=body.get("email"),
         phone=body.get("phone"),
         case_type=body.get("case_type"),
-        source=body.get("source", "manual"),
+        source=source,
         assigned_to=body.get("assigned_to"),
         notes=body.get("notes"),
         priority=body.get("priority", "normal"),
         created_by=request.session.get("username", "system"),
     )
+
+    # Save attribution for manual leads too
+    try:
+        from db.intake import save_lead_attribution
+        firm_id = request.session.get("firm_id")
+        save_lead_attribution(firm_id, lead_id, source_field=source)
+    except Exception:
+        pass
+
     return JSONResponse({"id": lead_id, "success": True})
 
 
@@ -444,6 +458,13 @@ async def embed_script(request: Request, form_token: str):
       if (el) data[f.name] = el.value;
     }});
 
+    // Capture UTM params from page URL
+    var params = new URLSearchParams(window.location.search);
+    ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(function(k) {{
+      if (params.get(k)) data[k] = params.get(k);
+    }});
+    data['landing_page'] = window.location.href.split('?')[0];
+
     fetch(baseUrl + "/api/intake/form/" + formToken + "/submit", {{
       method: "POST",
       headers: {{ "Content-Type": "application/json" }},
@@ -691,3 +712,76 @@ async def api_set_lead_custom_field(request: Request, lead_id: int):
 
     data.set_intake_lead_custom_field(lead_id, field_key, value)
     return JSONResponse({"success": True})
+
+
+# ============================================================
+# Marketing Analytics & ROI
+# ============================================================
+
+@router.get("/intake/marketing")
+async def intake_marketing(request: Request):
+    """Marketing analytics dashboard — admin only."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return result
+    if role != "admin":
+        return RedirectResponse(url="/intake", status_code=303)
+    data = result
+    firm_id = request.session.get("firm_id")
+
+    roi = get_marketing_roi_summary(firm_id)
+    trends = get_marketing_trends(firm_id, months=12)
+    spend_entries = get_marketing_spend(firm_id)
+
+    return templates.TemplateResponse("intake_marketing.html", {
+        "request": request,
+        "role": role,
+        "roi": roi,
+        "trends": trends,
+        "spend_entries": spend_entries,
+        "sources": MARKETING_SOURCES,
+        "source_labels": SOURCE_LABELS,
+    })
+
+
+@router.post("/api/intake/marketing/spend")
+async def api_add_spend(request: Request):
+    """Add or update a monthly spend entry."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if role != "admin":
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+
+    firm_id = request.session.get("firm_id")
+    body = await request.json()
+
+    try:
+        period = datetime.strptime(body["period"], "%Y-%m").date()
+        spend_id = add_marketing_spend(
+            firm_id=firm_id,
+            source=body["source"],
+            period_start=period,
+            spend_amount=float(body["amount"]),
+            campaign_name=body.get("campaign") or None,
+            impressions=int(body["impressions"]) if body.get("impressions") else None,
+            clicks=int(body["clicks"]) if body.get("clicks") else None,
+            notes=body.get("notes"),
+        )
+        return JSONResponse({"success": True, "id": spend_id})
+    except (KeyError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@router.post("/api/intake/marketing/spend/{spend_id}/delete")
+async def api_delete_spend(request: Request, spend_id: int):
+    """Delete a spend entry."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if role != "admin":
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+
+    firm_id = request.session.get("firm_id")
+    ok = delete_marketing_spend(firm_id, spend_id)
+    return JSONResponse({"success": ok})
