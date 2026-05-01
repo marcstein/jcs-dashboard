@@ -1,0 +1,550 @@
+{% extends "base.html" %}
+{% block title %}Intake Pipeline — LawMetrics.ai{% endblock %}
+
+{% block head %}
+<style>
+/* ── Intake KPI Cards ── */
+.intake-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.intake-kpi {
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    text-align: center;
+}
+.intake-kpi .kpi-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #1B3A5C;
+}
+.intake-kpi .kpi-label {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+.intake-kpi .kpi-sub {
+    font-size: 13px;
+    color: #666;
+    margin-top: 2px;
+}
+
+/* ── Pipeline Board ── */
+.pipeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+.pipeline-header h2 {
+    margin: 0;
+    color: #1B3A5C;
+}
+.pipeline-actions {
+    display: flex;
+    gap: 8px;
+}
+.btn-add-lead {
+    background: #2E5090;
+    color: #fff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+}
+.btn-add-lead:hover { background: #1B3A5C; }
+
+.pipeline-board {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 16px;
+    min-height: 500px;
+}
+.pipeline-column {
+    min-width: 260px;
+    max-width: 300px;
+    flex: 1;
+    background: #f4f5f7;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+}
+.column-header {
+    padding: 12px 16px;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.column-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+}
+.column-count {
+    background: rgba(255,255,255,0.3);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+}
+.column-body {
+    padding: 8px;
+    flex: 1;
+    overflow-y: auto;
+    max-height: 600px;
+    min-height: 100px;
+}
+.column-body.drag-over {
+    background: rgba(46,80,144,0.08);
+    border: 2px dashed #2E5090;
+    border-radius: 0 0 8px 8px;
+}
+
+/* ── Lead Cards ── */
+.lead-card {
+    background: #fff;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    cursor: grab;
+    transition: box-shadow 0.2s, transform 0.1s;
+    border-left: 3px solid transparent;
+}
+.lead-card:hover {
+    box-shadow: 0 3px 8px rgba(0,0,0,0.12);
+}
+.lead-card.dragging {
+    opacity: 0.5;
+    transform: rotate(2deg);
+}
+.lead-card.priority-high { border-left-color: #E65100; }
+.lead-card.priority-urgent { border-left-color: #C62828; }
+.lead-card .lead-name {
+    font-weight: 700;
+    font-size: 14px;
+    color: #333;
+    margin-bottom: 4px;
+}
+.lead-card .lead-name a {
+    color: #333;
+    text-decoration: none;
+}
+.lead-card .lead-name a:hover {
+    color: #2E5090;
+    text-decoration: underline;
+}
+.lead-card .lead-meta {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 4px;
+}
+.lead-card .lead-type {
+    display: inline-block;
+    background: #EAF2F8;
+    color: #2E5090;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.lead-card .lead-assigned {
+    font-size: 11px;
+    color: #666;
+    margin-top: 4px;
+}
+.lead-card .lead-time {
+    font-size: 11px;
+    color: #aaa;
+    margin-top: 4px;
+}
+
+/* ── Consultations Panel ── */
+.consult-panel {
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.consult-panel h3 {
+    margin: 0 0 12px;
+    color: #1B3A5C;
+    font-size: 16px;
+}
+.consult-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 13px;
+}
+.consult-item:last-child { border-bottom: none; }
+.consult-client { font-weight: 600; color: #333; }
+.consult-time { color: #2E5090; font-weight: 600; }
+.consult-type {
+    background: #f0f0f0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    color: #666;
+}
+
+/* ── Add Lead Modal ── */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+.modal-overlay.active { display: flex; }
+.modal-content {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    width: 500px;
+    max-width: 90vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.modal-content h2 {
+    margin: 0 0 16px;
+    color: #1B3A5C;
+}
+.modal-content .form-group {
+    margin-bottom: 12px;
+}
+.modal-content label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+.modal-content input,
+.modal-content select,
+.modal-content textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+.modal-content textarea { resize: vertical; }
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+}
+.btn-cancel {
+    background: #f0f0f0;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+.btn-save {
+    background: #2E5090;
+    color: #fff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+}
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Intake Pipeline</h1>
+</div>
+
+<!-- KPI Cards -->
+<div class="intake-kpis">
+    <div class="intake-kpi">
+        <div class="kpi-value">{{ stats.total }}</div>
+        <div class="kpi-label">Total Leads</div>
+    </div>
+    <div class="intake-kpi">
+        <div class="kpi-value">{{ stats.this_week }}</div>
+        <div class="kpi-label">This Week</div>
+    </div>
+    <div class="intake-kpi">
+        <div class="kpi-value">{{ stats.this_month }}</div>
+        <div class="kpi-label">This Month</div>
+    </div>
+    <div class="intake-kpi">
+        <div class="kpi-value">{{ stats.retained }}</div>
+        <div class="kpi-label">Retained</div>
+    </div>
+    <div class="intake-kpi">
+        <div class="kpi-value">{{ stats.conversion_rate }}%</div>
+        <div class="kpi-label">Conversion Rate</div>
+    </div>
+    {% if metrics %}
+    <div class="intake-kpi">
+        <div class="kpi-value">{{ metrics.avg_response_hours or '—' }}h</div>
+        <div class="kpi-label">Avg Response Time</div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Pipeline Header -->
+<div class="pipeline-header">
+    <h2>Pipeline Board</h2>
+    <div class="pipeline-actions">
+        <button class="btn-add-lead" onclick="openAddLeadModal()">+ Add Lead</button>
+    </div>
+</div>
+
+<!-- Kanban Board -->
+<div class="pipeline-board">
+    {% for stage in stages %}
+    <div class="pipeline-column" data-stage="{{ stage.name }}">
+        <div class="column-header" style="background: {{ stage.color }};">
+            <h3>{{ stage.name }}</h3>
+            <span class="column-count">{{ stage.count }}</span>
+        </div>
+        <div class="column-body" id="stage-{{ loop.index }}"
+             ondragover="handleDragOver(event)"
+             ondragleave="handleDragLeave(event)"
+             ondrop="handleDrop(event, '{{ stage.name }}')">
+            {% for lead in stage.leads %}
+            <div class="lead-card priority-{{ lead.priority }}"
+                 draggable="true"
+                 data-lead-id="{{ lead.id }}"
+                 ondragstart="handleDragStart(event, {{ lead.id }})">
+                <div class="lead-name">
+                    <a href="/intake/lead/{{ lead.id }}">{{ lead.first_name }} {{ lead.last_name }}</a>
+                </div>
+                {% if lead.email %}
+                <div class="lead-meta">{{ lead.email }}</div>
+                {% endif %}
+                {% if lead.phone %}
+                <div class="lead-meta">{{ lead.phone }}</div>
+                {% endif %}
+                {% if lead.case_type %}
+                <span class="lead-type">{{ lead.case_type }}</span>
+                {% endif %}
+                {% if lead.assigned_to %}
+                <div class="lead-assigned">Assigned: {{ lead.assigned_to }}</div>
+                {% endif %}
+                <div class="lead-time">
+                    {% if lead.created_at %}{{ lead.created_at.strftime('%b %d, %I:%M %p') }}{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Upcoming Consultations -->
+{% if consultations %}
+<div class="consult-panel">
+    <h3>Upcoming Consultations (Next 7 Days)</h3>
+    {% for c in consultations %}
+    <div class="consult-item">
+        <span class="consult-client">{{ c.first_name }} {{ c.last_name }}</span>
+        <span class="consult-time">{{ c.consultation_date.strftime('%b %d') }} at {{ c.start_time.strftime('%I:%M %p') }}</span>
+        <span>{{ c.attorney_name or 'Unassigned' }}</span>
+        <span class="consult-type">{{ c.consultation_type }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Add Lead Modal -->
+<div class="modal-overlay" id="addLeadModal">
+    <div class="modal-content">
+        <h2>Add New Lead</h2>
+        <form id="addLeadForm" onsubmit="submitNewLead(event)">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>First Name *</label>
+                    <input type="text" name="first_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Last Name *</label>
+                    <input type="text" name="last_name" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email">
+                </div>
+                <div class="form-group">
+                    <label>Phone</label>
+                    <input type="tel" name="phone">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Case Type</label>
+                    <select name="case_type">
+                        <option value="">Select...</option>
+                        <option value="DUI/DWI">DUI/DWI</option>
+                        <option value="Traffic">Traffic</option>
+                        <option value="Criminal Defense">Criminal Defense</option>
+                        <option value="Expungement">Expungement</option>
+                        <option value="License Reinstatement">License Reinstatement</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Source</label>
+                    <select name="source">
+                        <option value="phone">Phone Call</option>
+                        <option value="website">Website</option>
+                        <option value="referral">Referral</option>
+                        <option value="walk_in">Walk-in</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Assign To</label>
+                    <select name="assigned_to">
+                        <option value="">Unassigned</option>
+                        {% for atty in attorneys %}
+                        <option value="{{ atty }}">{{ atty }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select name="priority">
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea name="notes" rows="3"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeAddLeadModal()">Cancel</button>
+                <button type="submit" class="btn-save">Add Lead</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// ── Drag and Drop ──
+let draggedLeadId = null;
+
+function handleDragStart(event, leadId) {
+    draggedLeadId = leadId;
+    event.target.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragOver(event) {
+    event.preventDefault();
+    event.currentTarget.classList.add('drag-over');
+}
+
+function handleDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+function handleDrop(event, stageName) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('drag-over');
+
+    if (!draggedLeadId) return;
+
+    fetch(`/api/intake/lead/${draggedLeadId}/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage_name: stageName })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert('Failed to move lead: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => alert('Connection error'));
+
+    draggedLeadId = null;
+}
+
+document.addEventListener('dragend', function() {
+    document.querySelectorAll('.lead-card.dragging').forEach(c => c.classList.remove('dragging'));
+    document.querySelectorAll('.column-body.drag-over').forEach(c => c.classList.remove('drag-over'));
+});
+
+// ── Add Lead Modal ──
+function openAddLeadModal() {
+    document.getElementById('addLeadModal').classList.add('active');
+}
+
+function closeAddLeadModal() {
+    document.getElementById('addLeadModal').classList.remove('active');
+    document.getElementById('addLeadForm').reset();
+}
+
+function submitNewLead(event) {
+    event.preventDefault();
+    const form = event.target;
+    const data = {};
+    new FormData(form).forEach((v, k) => { if (v) data[k] = v; });
+
+    fetch('/api/intake/lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.success) {
+            window.location.reload();
+        } else {
+            alert('Failed to add lead: ' + (resp.error || 'Unknown error'));
+        }
+    })
+    .catch(() => alert('Connection error'));
+}
+
+// Close modal on backdrop click
+document.getElementById('addLeadModal').addEventListener('click', function(e) {
+    if (e.target === this) closeAddLeadModal();
+});
+</script>
+{% endblock %}

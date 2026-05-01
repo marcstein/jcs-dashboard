@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Intake Settings — LawMetrics.ai{% endblock %}
+
+{% block head %}
+<style>
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+@media (max-width: 900px) {
+    .settings-grid { grid-template-columns: 1fr; }
+}
+.settings-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.settings-card h3 {
+    margin: 0 0 16px;
+    color: #1B3A5C;
+    font-size: 16px;
+}
+.form-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+}
+.form-item:last-child { border-bottom: none; }
+.form-item .form-name { font-weight: 600; color: #333; }
+.form-item .form-token { font-family: monospace; font-size: 12px; color: #888; }
+.form-item .form-count { color: #2E5090; font-weight: 600; }
+
+.embed-code {
+    background: #f5f5f5;
+    border-radius: 6px;
+    padding: 12px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #333;
+    word-break: break-all;
+    margin-top: 8px;
+    cursor: pointer;
+    border: 1px solid #ddd;
+}
+.embed-code:hover { background: #eee; }
+
+.rule-item {
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+.rule-item:last-child { border-bottom: none; }
+.rule-name { font-weight: 600; color: #333; font-size: 14px; }
+.rule-meta { font-size: 12px; color: #888; margin-top: 4px; }
+.rule-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.rule-badge.active { background: #E8F5E9; color: #2E7D32; }
+.rule-badge.inactive { background: #f0f0f0; color: #888; }
+
+.stage-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+}
+.stage-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+}
+.btn-create {
+    background: #2E5090;
+    color: #fff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 12px;
+}
+.btn-create:hover { background: #1B3A5C; }
+.btn-back {
+    color: #2E5090;
+    text-decoration: none;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 16px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/intake" class="btn-back">&larr; Back to Pipeline</a>
+
+<div class="page-header">
+    <h1>Intake Settings</h1>
+</div>
+
+<div class="settings-grid">
+    <!-- Embeddable Forms -->
+    <div class="settings-card">
+        <h3>Embeddable Lead Capture Forms</h3>
+        {% if forms %}
+            {% for form in forms %}
+            <div class="form-item">
+                <div>
+                    <div class="form-name">{{ form.form_name }}</div>
+                    <div class="form-token">Token: {{ form.form_token }}</div>
+                </div>
+                <div class="form-count">{{ form.submissions_count }} submissions</div>
+            </div>
+            <div class="embed-code" onclick="copyEmbed(this)" title="Click to copy">
+                &lt;div id="lawmetrics-intake-form"&gt;&lt;/div&gt;
+                &lt;script src="{{ request.url.scheme }}://{{ request.headers.get('host', 'jcs.lawmetrics.ai') }}/api/intake/embed/{{ form.form_token }}.js"&gt;&lt;/script&gt;
+            </div>
+            <div style="margin-top:8px; margin-bottom:16px;">
+                <a href="/api/intake/form/{{ form.form_token }}" target="_blank"
+                   style="font-size:13px; color:#2E5090;">Preview form &rarr;</a>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="color:#888; font-size:14px;">No forms created yet.</p>
+        {% endif %}
+        <button class="btn-create" onclick="createForm()">+ Create Form</button>
+    </div>
+
+    <!-- Pipeline Stages -->
+    <div class="settings-card">
+        <h3>Pipeline Stages</h3>
+        {% for stage in stages %}
+        <div class="stage-item">
+            <div>
+                <span class="stage-color" style="background: {{ stage.color }};"></span>
+                {{ stage.stage_name }}
+                {% if stage.is_terminal %}<span style="font-size:11px;color:#888;">(terminal)</span>{% endif %}
+            </div>
+            {% if stage.auto_follow_up_hours %}
+            <span style="font-size:12px;color:#888;">Auto-follow: {{ stage.auto_follow_up_hours }}h</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Follow-Up Rules -->
+    <div class="settings-card" style="grid-column: 1 / -1;">
+        <h3>Automated Follow-Up Rules</h3>
+        {% if rules %}
+            {% for rule in rules %}
+            <div class="rule-item">
+                <div class="rule-name">
+                    {{ rule.rule_name }}
+                    <span class="rule-badge {{ 'active' if rule.is_active else 'inactive' }}">
+                        {{ 'Active' if rule.is_active else 'Inactive' }}
+                    </span>
+                </div>
+                <div class="rule-meta">
+                    Trigger: {{ rule.trigger_type }} on "{{ rule.trigger_stage or 'any' }}" stage
+                    &middot; Delay: {{ rule.delay_hours }}h
+                    &middot; Sent: {{ rule.send_count }} times
+                </div>
+                <div class="rule-meta">Subject: {{ rule.email_subject }}</div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="color:#888; font-size:14px;">No follow-up rules configured.</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function copyEmbed(el) {
+    navigator.clipboard.writeText(el.textContent.trim());
+    const orig = el.style.borderColor;
+    el.style.borderColor = '#2E7D32';
+    setTimeout(() => { el.style.borderColor = orig; }, 1000);
+}
+
+function createForm() {
+    const name = prompt('Form name:', 'Contact Form');
+    if (!name) return;
+
+    fetch('/api/intake/form', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ form_name: name })
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.success) window.location.reload();
+        else alert('Error: ' + (resp.error || 'Unknown'));
+    });
+}
+</script>
+{% endblock %}

@@ -16,6 +16,9 @@
             </a>
         </div>
         <div class="nav-links">
+            {% if role != 'attorney' %}
+            <a href="/intake" class="{% if '/intake' in request.url.path %}active{% endif %}">Intake</a>
+            {% endif %}
             {% if role != 'collections' %}
             <a href="/documents" class="{% if request.url.path == '/documents' %}active{% endif %}">Documents</a>
             {% endif %}

@@ -10,6 +10,7 @@ from dashboard.models.sop import SOPDataMixin
 from dashboard.models.phases import PhasesDataMixin
 from dashboard.models.trends import TrendsDataMixin
 from dashboard.models.revenue import RevenueDataMixin
+from dashboard.models.intake import IntakeDataMixin
 
 
 class DashboardData(
@@ -21,6 +22,7 @@ class DashboardData(
     PhasesDataMixin,
     TrendsDataMixin,
     RevenueDataMixin,
+    IntakeDataMixin,
 ):
     """
     Unified DashboardData class combining all domain-specific mixins.

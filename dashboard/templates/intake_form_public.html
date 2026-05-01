@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ form.form_name }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .form-container {
+            background: #fff;
+            border-radius: 12px;
+            padding: 32px;
+            width: 480px;
+            max-width: 100%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #1B3A5C;
+            margin-bottom: 8px;
+            font-size: 22px;
+        }
+        .form-subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 4px;
+            color: #333;
+        }
+        label .required { color: #C62828; }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 15px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #2E5090;
+            box-shadow: 0 0 0 3px rgba(46,80,144,0.1);
+        }
+        textarea { resize: vertical; min-height: 80px; }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        @media (max-width: 500px) {
+            .form-row { grid-template-columns: 1fr; }
+        }
+        .btn-submit {
+            width: 100%;
+            padding: 12px;
+            background: #2E5090;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: background 0.2s;
+        }
+        .btn-submit:hover { background: #1B3A5C; }
+        .btn-submit:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+        .success-msg {
+            text-align: center;
+            padding: 32px;
+        }
+        .success-msg .checkmark {
+            font-size: 48px;
+            color: #2E7D32;
+            margin-bottom: 16px;
+        }
+        .success-msg h3 {
+            color: #2E7D32;
+            margin-bottom: 8px;
+        }
+        .error-msg {
+            background: #FFEBEE;
+            color: #C62828;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            display: none;
+        }
+        .powered-by {
+            text-align: center;
+            margin-top: 16px;
+            font-size: 11px;
+            color: #ccc;
+        }
+        .powered-by a { color: #aaa; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="form-container" id="formContainer">
+        <h2>{{ form.form_name }}</h2>
+        <p class="form-subtitle">Fill out the form below and we'll get back to you shortly.</p>
+
+        <div class="error-msg" id="errorMsg"></div>
+
+        <form id="intakeForm" onsubmit="submitForm(event)">
+            {% set fields = form.fields if form.fields is iterable and form.fields is not string else [] %}
+            {% for field in fields %}
+                {% if field.name in ('first_name', 'last_name') and loop.index0 == 0 %}
+                <div class="form-row">
+                {% endif %}
+
+                <div class="form-group">
+                    <label>
+                        {{ field.label }}
+                        {% if field.required %}<span class="required">*</span>{% endif %}
+                    </label>
+                    {% if field.type == 'textarea' %}
+                    <textarea name="{{ field.name }}" {% if field.required %}required{% endif %}
+                              placeholder="{{ field.placeholder | default('') }}"></textarea>
+                    {% elif field.type == 'select' %}
+                    <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
+                        <option value="">Select...</option>
+                        {% for opt in field.options %}
+                        <option value="{{ opt }}">{{ opt }}</option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <input type="{{ field.type | default('text') }}" name="{{ field.name }}"
+                           {% if field.required %}required{% endif %}
+                           placeholder="{{ field.placeholder | default('') }}">
+                    {% endif %}
+                </div>
+
+                {% if field.name == 'last_name' %}
+                </div>
+                {% endif %}
+            {% endfor %}
+
+            <button type="submit" class="btn-submit" id="submitBtn">Send Message</button>
+        </form>
+
+        <div class="powered-by">
+            Powered by <a href="https://lawmetrics.ai" target="_blank">LawMetrics.ai</a>
+        </div>
+    </div>
+
+    <script>
+    function submitForm(e) {
+        e.preventDefault();
+        const btn = document.getElementById('submitBtn');
+        const errorEl = document.getElementById('errorMsg');
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        errorEl.style.display = 'none';
+
+        const data = {};
+        new FormData(e.target).forEach((v, k) => { data[k] = v; });
+
+        fetch(window.location.pathname + '/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+        .then(r => r.json())
+        .then(resp => {
+            if (resp.success) {
+                document.getElementById('formContainer').innerHTML =
+                    '<div class="success-msg">' +
+                    '<div class="checkmark">&#10003;</div>' +
+                    '<h3>' + (resp.message || 'Thank you!') + '</h3>' +
+                    '<p style="color:#666;">We will be in touch shortly.</p>' +
+                    '</div>';
+                if (resp.redirect_url) {
+                    setTimeout(() => { window.location.href = resp.redirect_url; }, 3000);
+                }
+            } else {
+                btn.disabled = false;
+                btn.textContent = 'Send Message';
+                errorEl.textContent = resp.error || 'Submission failed. Please try again.';
+                errorEl.style.display = 'block';
+            }
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.textContent = 'Send Message';
+            errorEl.textContent = 'Connection error. Please try again.';
+            errorEl.style.display = 'block';
+        });
+    }
+    </script>
+</body>
+</html>

@@ -29,6 +29,7 @@ def register_routes(app: FastAPI):
     from .trust import router as trust_router
     from .phone import router as phone_router
     from .revenue import router as revenue_router
+    from .intake import router as intake_router
 
     app.include_router(main_router)
     app.include_router(ar_router)
@@ -43,3 +44,4 @@ def register_routes(app: FastAPI):
     app.include_router(trust_router)
     app.include_router(phone_router)
     app.include_router(revenue_router)
+    app.include_router(intake_router)

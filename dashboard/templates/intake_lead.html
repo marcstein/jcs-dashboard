@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+{% block title %}{{ lead.first_name }} {{ lead.last_name }} — Intake — LawMetrics.ai{% endblock %}
+
+{% block head %}
+<style>
+.lead-detail-layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 24px;
+}
+@media (max-width: 900px) {
+    .lead-detail-layout { grid-template-columns: 1fr; }
+}
+
+.lead-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+.lead-header h1 { margin: 0; color: #1B3A5C; }
+.lead-header .lead-stage {
+    padding: 6px 16px;
+    border-radius: 20px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.detail-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.detail-card h3 {
+    margin: 0 0 12px;
+    color: #1B3A5C;
+    font-size: 15px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+.info-item label {
+    display: block;
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+.info-item .info-value {
+    font-size: 14px;
+    color: #333;
+    font-weight: 500;
+}
+.info-item .info-value a { color: #2E5090; }
+
+/* ── Stage Selector ── */
+.stage-selector {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.stage-btn {
+    padding: 6px 12px;
+    border: 2px solid #ddd;
+    border-radius: 20px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.stage-btn.active {
+    color: #fff;
+    border-color: transparent;
+}
+.stage-btn:hover:not(.active) {
+    background: #f0f0f0;
+}
+
+/* ── Activity Timeline ── */
+.activity-timeline {
+    position: relative;
+}
+.activity-timeline::before {
+    content: '';
+    position: absolute;
+    left: 16px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #eee;
+}
+.activity-item {
+    position: relative;
+    padding-left: 40px;
+    margin-bottom: 16px;
+}
+.activity-item::before {
+    content: '';
+    position: absolute;
+    left: 11px;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #4472C4;
+    border: 2px solid #fff;
+    z-index: 1;
+}
+.activity-item.stage_changed::before { background: #FF9800; }
+.activity-item.lead_created::before { background: #2E7D32; }
+.activity-item.call::before { background: #9C27B0; }
+.activity-item.email_sent::before { background: #2196F3; }
+.activity-item.consultation_booked::before { background: #E65100; }
+.activity-item .activity-desc {
+    font-size: 13px;
+    color: #333;
+}
+.activity-item .activity-meta {
+    font-size: 11px;
+    color: #999;
+    margin-top: 2px;
+}
+
+/* ── Quick Actions ── */
+.quick-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.quick-action-btn {
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    color: #555;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.quick-action-btn:hover { background: #f5f5f5; border-color: #2E5090; color: #2E5090; }
+
+.note-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 13px;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+}
+.btn-sm {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.btn-primary { background: #2E5090; color: #fff; }
+.btn-danger { background: #C62828; color: #fff; }
+.btn-back {
+    color: #2E5090;
+    text-decoration: none;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 16px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/intake" class="btn-back">&larr; Back to Pipeline</a>
+
+<div class="lead-header">
+    <h1>{{ lead.first_name }} {{ lead.last_name }}</h1>
+    <span class="lead-stage" style="background: {{ lead.stage_color or '#4472C4' }}">
+        {{ lead.stage_name }}
+    </span>
+</div>
+
+<!-- Stage Selector -->
+<div class="stage-selector">
+    {% for stage in stages %}
+    <button class="stage-btn {% if stage.stage_name == lead.stage_name %}active{% endif %}"
+            style="{% if stage.stage_name == lead.stage_name %}background: {{ stage.color }}; border-color: {{ stage.color }};{% endif %}"
+            onclick="changeStage('{{ stage.stage_name }}')">
+        {{ stage.stage_name }}
+    </button>
+    {% endfor %}
+</div>
+
+<div class="lead-detail-layout">
+    <!-- Left Column: Details + Activity -->
+    <div>
+        <div class="detail-card">
+            <h3>Contact Information</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Email</label>
+                    <div class="info-value">
+                        {% if lead.email %}<a href="mailto:{{ lead.email }}">{{ lead.email }}</a>{% else %}—{% endif %}
+                    </div>
+                </div>
+                <div class="info-item">
+                    <label>Phone</label>
+                    <div class="info-value">
+                        {% if lead.phone %}<a href="tel:{{ lead.phone }}">{{ lead.phone }}</a>{% else %}—{% endif %}
+                    </div>
+                </div>
+                <div class="info-item">
+                    <label>Case Type</label>
+                    <div class="info-value">{{ lead.case_type or '—' }}</div>
+                </div>
+                <div class="info-item">
+                    <label>Source</label>
+                    <div class="info-value">{{ lead.source or '—' }}</div>
+                </div>
+                <div class="info-item">
+                    <label>Assigned To</label>
+                    <div class="info-value">{{ lead.assigned_to or 'Unassigned' }}</div>
+                </div>
+                <div class="info-item">
+                    <label>Priority</label>
+                    <div class="info-value">{{ lead.priority or 'Normal' }}</div>
+                </div>
+                <div class="info-item">
+                    <label>Created</label>
+                    <div class="info-value">{{ lead.created_at.strftime('%b %d, %Y %I:%M %p') if lead.created_at else '—' }}</div>
+                </div>
+                <div class="info-item">
+                    <label>Last Contacted</label>
+                    <div class="info-value">{{ lead.last_contacted_at.strftime('%b %d, %Y') if lead.last_contacted_at else 'Never' }}</div>
+                </div>
+            </div>
+            {% if lead.notes %}
+            <div style="margin-top: 12px;">
+                <label style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Notes</label>
+                <div style="font-size:13px;color:#333;margin-top:4px;white-space:pre-wrap;">{{ lead.notes }}</div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Activity Timeline -->
+        <div class="detail-card">
+            <h3>Activity Timeline</h3>
+
+            <!-- Quick Actions -->
+            <div class="quick-actions">
+                <button class="quick-action-btn" onclick="logActivity('call')">📞 Log Call</button>
+                <button class="quick-action-btn" onclick="logActivity('email_sent')">📧 Log Email</button>
+                <button class="quick-action-btn" onclick="logActivity('sms_sent')">💬 Log SMS</button>
+                <button class="quick-action-btn" onclick="logActivity('meeting')">📅 Log Meeting</button>
+            </div>
+
+            <!-- Add Note -->
+            <div style="margin-bottom: 16px;">
+                <textarea class="note-input" id="noteInput" rows="2" placeholder="Add a note..."></textarea>
+                <button class="btn-sm btn-primary" onclick="addNote()">Add Note</button>
+            </div>
+
+            <div class="activity-timeline">
+                {% for act in activities %}
+                <div class="activity-item {{ act.activity_type }}">
+                    <div class="activity-desc">{{ act.description or act.activity_type }}</div>
+                    <div class="activity-meta">
+                        {{ act.performed_by or 'System' }} &middot;
+                        {{ act.created_at.strftime('%b %d, %Y %I:%M %p') if act.created_at else '' }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column: Actions Panel -->
+    <div>
+        <div class="detail-card">
+            <h3>Actions</h3>
+            {% if lead.stage_name not in ('Retained', 'Declined', 'Lost') %}
+            <button class="btn-sm btn-primary" style="width:100%;margin-bottom:8px;"
+                    onclick="changeStage('Retained')">Mark as Retained</button>
+            <button class="btn-sm" style="width:100%;margin-bottom:8px;background:#f0f0f0;"
+                    onclick="changeStage('Declined')">Mark as Declined</button>
+            {% endif %}
+            <button class="btn-sm btn-danger" style="width:100%;"
+                    onclick="archiveLead()">Archive Lead</button>
+        </div>
+
+        {% if lead.consultation_date %}
+        <div class="detail-card">
+            <h3>Consultation</h3>
+            <div class="info-item">
+                <label>Date/Time</label>
+                <div class="info-value">{{ lead.consultation_date.strftime('%b %d, %Y %I:%M %p') }}</div>
+            </div>
+            <div class="info-item" style="margin-top: 8px;">
+                <label>Type</label>
+                <div class="info-value">{{ lead.consultation_type or 'Phone' }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if lead.estimated_value %}
+        <div class="detail-card">
+            <h3>Estimated Value</h3>
+            <div style="font-size:24px;font-weight:700;color:#2E7D32;">
+                ${{ "{:,.0f}".format(lead.estimated_value) }}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+const leadId = {{ lead.id }};
+
+function changeStage(newStage) {
+    fetch(`/api/intake/lead/${leadId}/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage_name: newStage })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) window.location.reload();
+        else alert('Error: ' + (data.error || 'Unknown'));
+    });
+}
+
+function logActivity(type) {
+    const desc = prompt(`Enter ${type.replace('_', ' ')} details:`);
+    if (!desc) return;
+
+    fetch(`/api/intake/lead/${leadId}/activity`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: type, description: desc })
+    })
+    .then(r => r.json())
+    .then(() => window.location.reload());
+}
+
+function addNote() {
+    const note = document.getElementById('noteInput').value.trim();
+    if (!note) return;
+
+    fetch(`/api/intake/lead/${leadId}/activity`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'note', description: note })
+    })
+    .then(r => r.json())
+    .then(() => window.location.reload());
+}
+
+function archiveLead() {
+    if (!confirm('Archive this lead? It can be restored later.')) return;
+
+    fetch(`/api/intake/lead/${leadId}/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) window.location.href = '/intake';
+    });
+}
+</script>
+{% endblock %}
