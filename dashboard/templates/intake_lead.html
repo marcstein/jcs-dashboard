@@ -3,9 +3,12 @@
 
 {% block head %}
 <style>
+/* Scale up text for readability */
+.lead-header h1 { font-size: 28px; }
+
 .lead-detail-layout {
     display: grid;
-    grid-template-columns: 1fr 380px;
+    grid-template-columns: 1fr 400px;
     gap: 24px;
 }
 @media (max-width: 900px) {
@@ -24,7 +27,7 @@
     border-radius: 20px;
     color: #fff;
     font-weight: 700;
-    font-size: 14px;
+    font-size: 16px;
 }
 
 .detail-card {
@@ -37,7 +40,7 @@
 .detail-card h3 {
     margin: 0 0 12px;
     color: #1B3A5C;
-    font-size: 15px;
+    font-size: 17px;
     border-bottom: 1px solid #eee;
     padding-bottom: 8px;
 }
@@ -49,14 +52,14 @@
 }
 .info-item label {
     display: block;
-    font-size: 11px;
+    font-size: 17px;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 2px;
 }
 .info-item .info-value {
-    font-size: 14px;
+    font-size: 16px;
     color: #333;
     font-weight: 500;
 }
@@ -75,7 +78,7 @@
     border-radius: 20px;
     background: #fff;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 16px;
     font-weight: 600;
     transition: all 0.2s;
 }
@@ -135,7 +138,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 14px;
+    font-size: 16px;
     color: #E65100;
     font-weight: 600;
 }
@@ -150,9 +153,9 @@
 .conflict-card.unresolved { border-left: 3px solid #FF9800; }
 .conflict-card.cleared { border-left: 3px solid #4CAF50; opacity: 0.7; }
 .conflict-card.flagged { border-left: 3px solid #C62828; }
-.conflict-card .conflict-name { font-weight: 600; color: #333; font-size: 14px; }
-.conflict-card .conflict-detail { font-size: 12px; color: #666; margin-top: 2px; }
-.conflict-card .conflict-score { font-size: 11px; color: #999; }
+.conflict-card .conflict-name { font-weight: 600; color: #333; font-size: 16px; }
+.conflict-card .conflict-detail { font-size: 16px; color: #666; margin-top: 2px; }
+.conflict-card .conflict-score { font-size: 17px; color: #999; }
 .conflict-card .conflict-actions { margin-top: 6px; }
 .conflict-card .conflict-actions button {
     padding: 3px 10px;
@@ -160,7 +163,7 @@
     border: 1px solid #ddd;
     background: #fff;
     cursor: pointer;
-    font-size: 11px;
+    font-size: 17px;
     margin-right: 4px;
 }
 .conflict-card .conflict-actions .btn-clear { color: #2E7D32; border-color: #A5D6A7; }
@@ -175,18 +178,18 @@
     align-items: center;
     padding: 6px 0;
     border-bottom: 1px solid #f5f5f5;
-    font-size: 13px;
+    font-size: 17px;
 }
 .custom-field-item:last-child { border-bottom: none; }
-.custom-field-label { color: #888; font-size: 11px; text-transform: uppercase; }
+.custom-field-label { color: #888; font-size: 17px; text-transform: uppercase; }
 .custom-field-value { color: #333; font-weight: 500; cursor: pointer; }
 .custom-field-value:hover { color: #2E5090; }
 .activity-item .activity-desc {
-    font-size: 13px;
+    font-size: 17px;
     color: #333;
 }
 .activity-item .activity-meta {
-    font-size: 11px;
+    font-size: 17px;
     color: #999;
     margin-top: 2px;
 }
@@ -204,7 +207,7 @@
     border-radius: 6px;
     background: #fff;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 16px;
     color: #555;
     display: flex;
     align-items: center;
@@ -217,7 +220,7 @@
     padding: 8px 12px;
     border: 1px solid #ddd;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 17px;
     box-sizing: border-box;
     margin-bottom: 8px;
 }
@@ -225,7 +228,7 @@
     padding: 6px 12px;
     border: none;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 17px;
     cursor: pointer;
 }
 .btn-primary { background: #2E5090; color: #fff; }
@@ -233,7 +236,7 @@
 .btn-back {
     color: #2E5090;
     text-decoration: none;
-    font-size: 14px;
+    font-size: 16px;
     display: inline-flex;
     align-items: center;
     gap: 4px;

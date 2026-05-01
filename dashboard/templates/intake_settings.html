@@ -28,11 +28,11 @@
     align-items: center;
     padding: 10px 0;
     border-bottom: 1px solid #f0f0f0;
-    font-size: 14px;
+    font-size: 16px;
 }
 .form-item:last-child { border-bottom: none; }
 .form-item .form-name { font-weight: 600; color: #333; }
-.form-item .form-token { font-family: monospace; font-size: 12px; color: #888; }
+.form-item .form-token { font-family: monospace; font-size: 14px; color: #888; }
 .form-item .form-count { color: #2E5090; font-weight: 600; }
 
 .embed-code {
@@ -40,7 +40,7 @@
     border-radius: 6px;
     padding: 12px;
     font-family: monospace;
-    font-size: 12px;
+    font-size: 14px;
     color: #333;
     word-break: break-all;
     margin-top: 8px;
@@ -54,13 +54,13 @@
     border-bottom: 1px solid #f0f0f0;
 }
 .rule-item:last-child { border-bottom: none; }
-.rule-name { font-weight: 600; color: #333; font-size: 14px; }
-.rule-meta { font-size: 12px; color: #888; margin-top: 4px; }
+.rule-name { font-weight: 600; color: #333; font-size: 16px; }
+.rule-meta { font-size: 14px; color: #888; margin-top: 4px; }
 .rule-badge {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 10px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
 }
 .rule-badge.active { background: #E8F5E9; color: #2E7D32; }
@@ -72,7 +72,7 @@
     align-items: center;
     padding: 8px 12px;
     border-bottom: 1px solid #f0f0f0;
-    font-size: 14px;
+    font-size: 16px;
 }
 .stage-color {
     width: 12px;
@@ -88,7 +88,7 @@
     padding: 8px 16px;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     margin-top: 12px;
 }
@@ -96,7 +96,7 @@
 .btn-back {
     color: #2E5090;
     text-decoration: none;
-    font-size: 14px;
+    font-size: 16px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -131,11 +131,11 @@
             </div>
             <div style="margin-top:8px; margin-bottom:16px;">
                 <a href="/api/intake/form/{{ form.form_token }}" target="_blank"
-                   style="font-size:13px; color:#2E5090;">Preview form &rarr;</a>
+                   style="font-size:15px; color:#2E5090;">Preview form &rarr;</a>
             </div>
             {% endfor %}
         {% else %}
-            <p style="color:#888; font-size:14px;">No forms created yet.</p>
+            <p style="color:#888; font-size:16px;">No forms created yet.</p>
         {% endif %}
         <button class="btn-create" onclick="createForm()">+ Create Form</button>
     </div>
@@ -148,10 +148,10 @@
             <div>
                 <span class="stage-color" style="background: {{ stage.color }};"></span>
                 {{ stage.stage_name }}
-                {% if stage.is_terminal %}<span style="font-size:11px;color:#888;">(terminal)</span>{% endif %}
+                {% if stage.is_terminal %}<span style="font-size:13px;color:#888;">(terminal)</span>{% endif %}
             </div>
             {% if stage.auto_follow_up_hours %}
-            <span style="font-size:12px;color:#888;">Auto-follow: {{ stage.auto_follow_up_hours }}h</span>
+            <span style="font-size:14px;color:#888;">Auto-follow: {{ stage.auto_follow_up_hours }}h</span>
             {% endif %}
         </div>
         {% endfor %}
@@ -176,12 +176,12 @@
             </div>
             {% endfor %}
         {% else %}
-            <p style="color:#888; font-size:14px;">No custom fields defined.</p>
+            <p style="color:#888; font-size:16px;">No custom fields defined.</p>
         {% endif %}
         <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
             <input type="text" id="cfLabel" placeholder="Field label"
-                   style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;flex:1;min-width:120px;">
-            <select id="cfType" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                   style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:15px;flex:1;min-width:120px;">
+            <select id="cfType" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:15px;">
                 <option value="text">Text</option>
                 <option value="number">Number</option>
                 <option value="date">Date</option>
@@ -214,7 +214,7 @@
             </div>
             {% endfor %}
         {% else %}
-            <p style="color:#888; font-size:14px;">No follow-up rules configured.</p>
+            <p style="color:#888; font-size:16px;">No follow-up rules configured.</p>
         {% endif %}
     </div>
 </div>
