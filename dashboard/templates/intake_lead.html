@@ -4,7 +4,7 @@
 {% block head %}
 <style>
 /* Scale up text for readability */
-.lead-header h1 { font-size: 28px; }
+.lead-header h1 { font-size: 32px; }
 
 .lead-detail-layout {
     display: grid;
@@ -33,35 +33,39 @@
 .detail-card {
     background: #fff;
     border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 16px;
+    padding: 28px;
+    margin-bottom: 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 .detail-card h3 {
-    margin: 0 0 12px;
+    margin: 0 0 18px;
     color: #1B3A5C;
-    font-size: 17px;
+    font-size: 19px;
     border-bottom: 1px solid #eee;
-    padding-bottom: 8px;
+    padding-bottom: 10px;
 }
 
 .info-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 18px 24px;
+}
+.info-item {
+    padding: 6px 0;
 }
 .info-item label {
     display: block;
-    font-size: 17px;
+    font-size: 13px;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 2px;
+    margin-bottom: 6px;
 }
 .info-item .info-value {
-    font-size: 16px;
+    font-size: 18px;
     color: #333;
     font-weight: 500;
+    line-height: 1.4;
 }
 .info-item .info-value a { color: #2E5090; }
 
@@ -73,7 +77,7 @@
     margin-bottom: 16px;
 }
 .stage-btn {
-    padding: 6px 12px;
+    padding: 10px 18px;
     border: 2px solid #ddd;
     border-radius: 20px;
     background: #fff;
@@ -106,7 +110,8 @@
 .activity-item {
     position: relative;
     padding-left: 40px;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
+    line-height: 1.5;
 }
 .activity-item::before {
     content: '';
@@ -202,7 +207,7 @@
     margin-bottom: 16px;
 }
 .quick-action-btn {
-    padding: 6px 12px;
+    padding: 10px 16px;
     border: 1px solid #ddd;
     border-radius: 6px;
     background: #fff;
@@ -211,24 +216,25 @@
     color: #555;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
 }
 .quick-action-btn:hover { background: #f5f5f5; border-color: #2E5090; color: #2E5090; }
 
 .note-input {
     width: 100%;
-    padding: 8px 12px;
+    padding: 12px 14px;
     border: 1px solid #ddd;
     border-radius: 6px;
-    font-size: 17px;
+    font-size: 16px;
     box-sizing: border-box;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
+    min-height: 80px;
 }
 .btn-sm {
-    padding: 6px 12px;
+    padding: 10px 16px;
     border: none;
     border-radius: 6px;
-    font-size: 17px;
+    font-size: 16px;
     cursor: pointer;
 }
 .btn-primary { background: #2E5090; color: #fff; }
@@ -318,8 +324,8 @@
             </div>
             {% if lead.notes %}
             <div style="margin-top: 12px;">
-                <label style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Notes</label>
-                <div style="font-size:13px;color:#333;margin-top:4px;white-space:pre-wrap;">{{ lead.notes }}</div>
+                <label style="font-size:13px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Notes</label>
+                <div style="font-size:16px;color:#333;margin-top:6px;white-space:pre-wrap;line-height:1.5;">{{ lead.notes }}</div>
             </div>
             {% endif %}
         </div>
@@ -361,24 +367,24 @@
         <div class="detail-card">
             <h3>Actions</h3>
             {% if lead.stage_name not in ('Retained', 'Declined', 'Lost') %}
-            <button class="btn-sm btn-primary" style="width:100%;margin-bottom:8px;"
+            <button class="btn-sm btn-primary" style="width:100%;margin-bottom:12px;padding:14px 16px;font-size:17px;"
                     onclick="changeStage('Retained')">Mark as Retained</button>
-            <button class="btn-sm" style="width:100%;margin-bottom:8px;background:#f0f0f0;"
+            <button class="btn-sm" style="width:100%;margin-bottom:12px;background:#f0f0f0;padding:14px 16px;font-size:17px;"
                     onclick="changeStage('Declined')">Mark as Declined</button>
             {% endif %}
             {% if lead.stage_name == 'Retained' and not (lead.custom_fields or {}).get('mycase_case_id') %}
-            <button class="btn-sm btn-primary" style="width:100%;margin-bottom:8px;background:#1B5E20;"
+            <button class="btn-sm btn-primary" style="width:100%;margin-bottom:12px;background:#1B5E20;padding:14px 16px;font-size:17px;"
                     onclick="convertToMyCase()"
                     {% if has_unresolved_conflicts %}disabled title="Resolve conflicts first"{% endif %}>
                 ➜ Convert to MyCase Case
             </button>
             {% endif %}
             {% if (lead.custom_fields or {}).get('mycase_case_id') %}
-            <div style="background:#E8F5E9;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:13px;color:#2E7D32;">
+            <div style="background:#E8F5E9;padding:12px 16px;border-radius:6px;margin-bottom:12px;font-size:16px;color:#2E7D32;">
                 ✓ Converted — MyCase Case #{{ (lead.custom_fields or {}).get('mycase_case_id', 'N/A') }}
             </div>
             {% endif %}
-            <button class="btn-sm btn-danger" style="width:100%;"
+            <button class="btn-sm btn-danger" style="width:100%;padding:14px 16px;font-size:17px;"
                     onclick="archiveLead()">Archive Lead</button>
         </div>
 
