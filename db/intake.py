@@ -486,7 +486,7 @@ def get_pipeline_board(firm_id: str, include_archived: bool = False) -> Dict:
                 COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '30 days') as this_month,
                 COUNT(*) FILTER (WHERE stage_name = 'Retained') as retained,
                 COUNT(*) FILTER (WHERE stage_name IN ('Declined', 'Lost')) as lost
-            FROM intake_leads
+            FROM intake_leads l
             WHERE firm_id = %s {archive_filter}
         """, (firm_id,))
         stats_row = dict(cur.fetchone())
