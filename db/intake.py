@@ -7,6 +7,7 @@ embeddable forms, follow-up automation, and consultation scheduling.
 Equivalent to Clio Grow functionality, purpose-built for
 DUI and criminal defense firms.
 """
+import json
 import logging
 import uuid
 from datetime import datetime, date, timedelta
@@ -221,6 +222,67 @@ CREATE INDEX IF NOT EXISTS idx_intake_consultations_firm
     ON intake_consultations(firm_id, consultation_date);
 CREATE INDEX IF NOT EXISTS idx_intake_consultations_lead
     ON intake_consultations(lead_id);
+
+-- Consultation reminders (email + SMS)
+CREATE TABLE IF NOT EXISTS intake_consultation_reminders (
+    id SERIAL PRIMARY KEY,
+    firm_id VARCHAR(36) NOT NULL,
+    consultation_id INTEGER NOT NULL REFERENCES intake_consultations(id) ON DELETE CASCADE,
+    lead_id INTEGER NOT NULL REFERENCES intake_leads(id) ON DELETE CASCADE,
+    reminder_type TEXT NOT NULL,  -- '24h_email', '1h_email', '24h_sms', '1h_sms'
+    channel TEXT NOT NULL,        -- 'email' or 'sms'
+    scheduled_at TIMESTAMP NOT NULL,
+    sent_at TIMESTAMP,
+    status TEXT DEFAULT 'pending',  -- pending, sent, failed, cancelled
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_intake_reminders_pending
+    ON intake_consultation_reminders(firm_id, status, scheduled_at)
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_intake_reminders_consult
+    ON intake_consultation_reminders(consultation_id);
+
+-- Conflict checks
+CREATE TABLE IF NOT EXISTS intake_conflict_checks (
+    id SERIAL PRIMARY KEY,
+    firm_id VARCHAR(36) NOT NULL,
+    lead_id INTEGER NOT NULL REFERENCES intake_leads(id) ON DELETE CASCADE,
+    check_type TEXT NOT NULL,          -- 'name_match', 'phone_match', 'email_match'
+    matched_entity_type TEXT NOT NULL, -- 'client', 'lead', 'opposing_party'
+    matched_entity_id INTEGER,
+    matched_name TEXT,
+    matched_detail TEXT,               -- extra info (case number, role, etc.)
+    similarity_score NUMERIC(5,2),     -- 0-100
+    status TEXT DEFAULT 'unresolved',  -- unresolved, cleared, flagged
+    resolved_by TEXT,
+    resolved_at TIMESTAMP,
+    resolution_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_intake_conflicts_lead
+    ON intake_conflict_checks(lead_id);
+CREATE INDEX IF NOT EXISTS idx_intake_conflicts_firm
+    ON intake_conflict_checks(firm_id, status);
+
+-- Custom field definitions per firm
+CREATE TABLE IF NOT EXISTS intake_custom_fields (
+    id SERIAL PRIMARY KEY,
+    firm_id VARCHAR(36) NOT NULL,
+    field_key TEXT NOT NULL,
+    field_label TEXT NOT NULL,
+    field_type TEXT NOT NULL DEFAULT 'text',  -- text, number, date, select, checkbox, textarea
+    field_options JSONB DEFAULT '[]',         -- for select type
+    is_required BOOLEAN DEFAULT FALSE,
+    display_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    show_on_card BOOLEAN DEFAULT FALSE,       -- show on Kanban card
+    show_on_form BOOLEAN DEFAULT TRUE,        -- show on public forms
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(firm_id, field_key)
+);
+CREATE INDEX IF NOT EXISTS idx_intake_custom_fields_firm
+    ON intake_custom_fields(firm_id);
 """
 
 
@@ -346,6 +408,23 @@ def create_lead(firm_id: str, **kwargs) -> int:
                 (firm_id, lead_id, activity_type, description, performed_by)
             VALUES (%s, %s, 'lead_created', %s, %s)
         """, (firm_id, lead_id, f"Lead created from {fields['source']}", kwargs.get("created_by", "system")))
+
+    # Auto-run conflict check
+    try:
+        conflicts = run_conflict_check(
+            firm_id, lead_id,
+            fields["first_name"], fields["last_name"],
+            email=fields.get("email"),
+            phone=fields.get("phone"),
+        )
+        if conflicts:
+            log_activity(
+                firm_id, lead_id, "conflict_detected",
+                f"{len(conflicts)} potential conflict(s) found — review required",
+                performed_by="system"
+            )
+    except Exception as e:
+        logger.warning(f"Conflict check failed for lead {lead_id}: {e}")
 
     return lead_id
 
@@ -865,6 +944,16 @@ def book_consultation(firm_id: str, lead_id: int, attorney_name: str,
                      f"Consultation scheduled for {consultation_date} at {start_time} with {attorney_name}",
                      performed_by="system")
 
+    # Schedule reminders (email + SMS) — done outside the transaction
+    lead = get_lead(firm_id, lead_id)
+    if lead:
+        schedule_consultation_reminders(
+            firm_id, consult_id, lead_id,
+            consultation_date, start_time,
+            lead_email=lead.get("email"),
+            lead_phone=lead.get("phone"),
+        )
+
     return consult_id
 
 
@@ -1057,3 +1146,509 @@ def get_intake_trend(firm_id: str, weeks: int = 12) -> List[Dict]:
             ORDER BY w.week_start
         """, (weeks, firm_id))
         return [dict(row) for row in cur.fetchall()]
+
+
+# ============================================================
+# Consultation Reminders
+# ============================================================
+
+def schedule_consultation_reminders(firm_id: str, consultation_id: int,
+                                     lead_id: int,
+                                     consultation_date: date,
+                                     start_time: str,
+                                     lead_email: Optional[str] = None,
+                                     lead_phone: Optional[str] = None) -> int:
+    """Schedule email and SMS reminders for a consultation.
+
+    Creates up to 4 reminders:
+    - 24-hour email reminder
+    - 1-hour email reminder
+    - 24-hour SMS reminder
+    - 1-hour SMS reminder
+    """
+    consult_dt = datetime.combine(
+        consultation_date,
+        datetime.strptime(start_time, "%H:%M").time()
+    )
+    reminders = []
+    if lead_email:
+        reminders.append(("24h_email", "email", consult_dt - timedelta(hours=24)))
+        reminders.append(("1h_email", "email", consult_dt - timedelta(hours=1)))
+    if lead_phone:
+        reminders.append(("24h_sms", "sms", consult_dt - timedelta(hours=24)))
+        reminders.append(("1h_sms", "sms", consult_dt - timedelta(hours=1)))
+
+    count = 0
+    now = datetime.now()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for rtype, channel, scheduled_at in reminders:
+            if scheduled_at <= now:
+                continue  # Don't schedule reminders in the past
+            cur.execute("""
+                INSERT INTO intake_consultation_reminders
+                    (firm_id, consultation_id, lead_id, reminder_type,
+                     channel, scheduled_at, status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                ON CONFLICT DO NOTHING
+            """, (firm_id, consultation_id, lead_id, rtype,
+                  channel, scheduled_at))
+            count += 1
+    return count
+
+
+def get_pending_reminders(firm_id: str = None) -> List[Dict]:
+    """Get all reminders that are due to be sent now.
+
+    If firm_id is None, returns reminders across all firms (for worker).
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if firm_id:
+            cur.execute("""
+                SELECT r.*, l.first_name, l.last_name, l.email, l.phone,
+                       c.consultation_date, c.start_time, c.end_time,
+                       c.consultation_type, c.attorney_name, c.location,
+                       c.meeting_url, c.status as consult_status
+                FROM intake_consultation_reminders r
+                JOIN intake_leads l ON l.id = r.lead_id AND l.firm_id = r.firm_id
+                JOIN intake_consultations c ON c.id = r.consultation_id
+                    AND c.firm_id = r.firm_id
+                WHERE r.firm_id = %s
+                  AND r.status = 'pending'
+                  AND r.scheduled_at <= CURRENT_TIMESTAMP
+                  AND c.status = 'scheduled'
+                ORDER BY r.scheduled_at
+            """, (firm_id,))
+        else:
+            cur.execute("""
+                SELECT r.*, l.first_name, l.last_name, l.email, l.phone,
+                       c.consultation_date, c.start_time, c.end_time,
+                       c.consultation_type, c.attorney_name, c.location,
+                       c.meeting_url, c.status as consult_status
+                FROM intake_consultation_reminders r
+                JOIN intake_leads l ON l.id = r.lead_id AND l.firm_id = r.firm_id
+                JOIN intake_consultations c ON c.id = r.consultation_id
+                    AND c.firm_id = r.firm_id
+                WHERE r.status = 'pending'
+                  AND r.scheduled_at <= CURRENT_TIMESTAMP
+                  AND c.status = 'scheduled'
+                ORDER BY r.scheduled_at
+            """)
+        return [dict(row) for row in cur.fetchall()]
+
+
+def mark_reminder_sent(reminder_id: int, error_message: str = None):
+    """Mark a reminder as sent or failed."""
+    status = "failed" if error_message else "sent"
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE intake_consultation_reminders
+            SET status = %s, sent_at = CURRENT_TIMESTAMP,
+                error_message = %s
+            WHERE id = %s
+        """, (status, error_message, reminder_id))
+
+
+def cancel_consultation_reminders(consultation_id: int):
+    """Cancel all pending reminders for a cancelled consultation."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE intake_consultation_reminders
+            SET status = 'cancelled'
+            WHERE consultation_id = %s AND status = 'pending'
+        """, (consultation_id,))
+
+
+def get_reminder_stats(firm_id: str, days: int = 30) -> Dict:
+    """Get reminder statistics for a firm."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'sent') as sent,
+                COUNT(*) FILTER (WHERE status = 'failed') as failed,
+                COUNT(*) FILTER (WHERE status = 'pending') as pending,
+                COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
+                COUNT(*) FILTER (WHERE channel = 'email') as email_total,
+                COUNT(*) FILTER (WHERE channel = 'sms') as sms_total
+            FROM intake_consultation_reminders
+            WHERE firm_id = %s
+              AND created_at >= CURRENT_DATE - INTERVAL '%s days'
+        """, (firm_id, days))
+        return dict(cur.fetchone())
+
+
+# ============================================================
+# Conflict of Interest Checks
+# ============================================================
+
+def run_conflict_check(firm_id: str, lead_id: int,
+                       first_name: str, last_name: str,
+                       email: Optional[str] = None,
+                       phone: Optional[str] = None) -> List[Dict]:
+    """Run conflict of interest check against existing clients and leads.
+
+    Checks:
+    1. Name matches against cached_contacts and cached_clients
+    2. Name matches against other intake leads (opposing parties)
+    3. Email matches
+    4. Phone matches
+
+    Returns list of potential conflicts found.
+    """
+    conflicts = []
+    full_name = f"{first_name} {last_name}".strip()
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        # 1. Name match against existing clients (case-insensitive, partial)
+        cur.execute("""
+            SELECT id, name, email
+            FROM cached_clients
+            WHERE firm_id = %s
+              AND (
+                  LOWER(name) = LOWER(%s)
+                  OR LOWER(name) LIKE LOWER(%s)
+              )
+            LIMIT 20
+        """, (firm_id, full_name, f"%{last_name}%"))
+        for row in cur.fetchall():
+            row = dict(row)
+            score = 100.0 if row["name"].lower() == full_name.lower() else 70.0
+            conflicts.append({
+                "check_type": "name_match",
+                "matched_entity_type": "client",
+                "matched_entity_id": row["id"],
+                "matched_name": row["name"],
+                "matched_detail": f"Existing client (email: {row.get('email', 'N/A')})",
+                "similarity_score": score,
+            })
+
+        # 2. Name match against cached_contacts
+        cur.execute("""
+            SELECT id, name
+            FROM cached_contacts
+            WHERE firm_id = %s
+              AND (
+                  LOWER(name) = LOWER(%s)
+                  OR LOWER(name) LIKE LOWER(%s)
+              )
+            LIMIT 20
+        """, (firm_id, full_name, f"%{last_name}%"))
+        for row in cur.fetchall():
+            row = dict(row)
+            score = 100.0 if row["name"].lower() == full_name.lower() else 65.0
+            conflicts.append({
+                "check_type": "name_match",
+                "matched_entity_type": "contact",
+                "matched_entity_id": row["id"],
+                "matched_name": row["name"],
+                "matched_detail": "Existing contact in system",
+                "similarity_score": score,
+            })
+
+        # 3. Name match against other leads (could be opposing party)
+        cur.execute("""
+            SELECT id, first_name, last_name, case_type, stage_name
+            FROM intake_leads
+            WHERE firm_id = %s AND id != %s
+              AND (
+                  LOWER(first_name || ' ' || last_name) = LOWER(%s)
+                  OR LOWER(last_name) = LOWER(%s)
+              )
+              AND archived = FALSE
+            LIMIT 20
+        """, (firm_id, lead_id, full_name, last_name))
+        for row in cur.fetchall():
+            row = dict(row)
+            matched = f"{row['first_name']} {row['last_name']}"
+            score = 100.0 if matched.lower() == full_name.lower() else 60.0
+            conflicts.append({
+                "check_type": "name_match",
+                "matched_entity_type": "lead",
+                "matched_entity_id": row["id"],
+                "matched_name": matched,
+                "matched_detail": f"Intake lead — {row['case_type'] or 'Unknown'} ({row['stage_name']})",
+                "similarity_score": score,
+            })
+
+        # 4. Email match
+        if email:
+            cur.execute("""
+                SELECT id, name, email
+                FROM cached_clients
+                WHERE firm_id = %s AND LOWER(email) = LOWER(%s)
+                LIMIT 10
+            """, (firm_id, email))
+            for row in cur.fetchall():
+                row = dict(row)
+                conflicts.append({
+                    "check_type": "email_match",
+                    "matched_entity_type": "client",
+                    "matched_entity_id": row["id"],
+                    "matched_name": row["name"],
+                    "matched_detail": f"Same email: {row['email']}",
+                    "similarity_score": 95.0,
+                })
+
+            cur.execute("""
+                SELECT id, first_name, last_name, email
+                FROM intake_leads
+                WHERE firm_id = %s AND id != %s
+                  AND LOWER(email) = LOWER(%s) AND archived = FALSE
+                LIMIT 10
+            """, (firm_id, lead_id, email))
+            for row in cur.fetchall():
+                row = dict(row)
+                conflicts.append({
+                    "check_type": "email_match",
+                    "matched_entity_type": "lead",
+                    "matched_entity_id": row["id"],
+                    "matched_name": f"{row['first_name']} {row['last_name']}",
+                    "matched_detail": f"Same email: {row['email']}",
+                    "similarity_score": 95.0,
+                })
+
+        # 5. Phone match
+        if phone:
+            # Normalize: strip non-digits for comparison
+            phone_digits = ''.join(c for c in phone if c.isdigit())
+            if len(phone_digits) >= 7:
+                phone_pattern = f"%{phone_digits[-10:]}"  # last 10 digits
+                cur.execute("""
+                    SELECT id, name, phone
+                    FROM cached_clients
+                    WHERE firm_id = %s
+                      AND regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')
+                          LIKE %s
+                    LIMIT 10
+                """, (firm_id, phone_pattern))
+                for row in cur.fetchall():
+                    row = dict(row)
+                    conflicts.append({
+                        "check_type": "phone_match",
+                        "matched_entity_type": "client",
+                        "matched_entity_id": row["id"],
+                        "matched_name": row["name"],
+                        "matched_detail": f"Same phone: {row.get('phone', '')}",
+                        "similarity_score": 90.0,
+                    })
+
+        # Store conflicts in DB
+        for c in conflicts:
+            cur.execute("""
+                INSERT INTO intake_conflict_checks
+                    (firm_id, lead_id, check_type, matched_entity_type,
+                     matched_entity_id, matched_name, matched_detail,
+                     similarity_score)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (firm_id, lead_id, c["check_type"], c["matched_entity_type"],
+                  c.get("matched_entity_id"), c["matched_name"],
+                  c.get("matched_detail"), c.get("similarity_score")))
+
+    return conflicts
+
+
+def get_lead_conflicts(firm_id: str, lead_id: int) -> List[Dict]:
+    """Get all conflict check results for a lead."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM intake_conflict_checks
+            WHERE firm_id = %s AND lead_id = %s
+            ORDER BY similarity_score DESC, created_at DESC
+        """, (firm_id, lead_id))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def resolve_conflict(conflict_id: int, resolved_by: str,
+                     status: str = "cleared",
+                     notes: str = None):
+    """Resolve a conflict check (clear or flag)."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE intake_conflict_checks
+            SET status = %s, resolved_by = %s,
+                resolved_at = CURRENT_TIMESTAMP,
+                resolution_notes = %s
+            WHERE id = %s
+        """, (status, resolved_by, notes, conflict_id))
+
+
+def has_unresolved_conflicts(firm_id: str, lead_id: int) -> bool:
+    """Check if a lead has any unresolved conflicts."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM intake_conflict_checks
+            WHERE firm_id = %s AND lead_id = %s AND status = 'unresolved'
+        """, (firm_id, lead_id))
+        return dict(cur.fetchone())["cnt"] > 0
+
+
+# ============================================================
+# Lead → MyCase Conversion
+# ============================================================
+
+def mark_lead_converted(firm_id: str, lead_id: int,
+                        mycase_case_id: int = None,
+                        mycase_contact_id: int = None) -> bool:
+    """Mark a lead as converted to a MyCase case."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE intake_leads
+            SET stage_name = 'Retained',
+                retained_date = CURRENT_DATE,
+                custom_fields = custom_fields || %s::jsonb,
+                updated_at = CURRENT_TIMESTAMP,
+                last_activity_at = CURRENT_TIMESTAMP
+            WHERE firm_id = %s AND id = %s
+        """, (
+            json.dumps({
+                "mycase_case_id": mycase_case_id,
+                "mycase_contact_id": mycase_contact_id,
+                "converted_at": datetime.now().isoformat(),
+            }),
+            firm_id, lead_id
+        ))
+
+        log_activity(
+            firm_id, lead_id, "converted",
+            f"Lead converted to MyCase case (case_id={mycase_case_id}, contact_id={mycase_contact_id})",
+            performed_by="system"
+        )
+    return True
+
+
+def get_conversion_data(firm_id: str, lead_id: int) -> Optional[Dict]:
+    """Get lead data formatted for MyCase API case/contact creation."""
+    lead = get_lead(firm_id, lead_id)
+    if not lead:
+        return None
+
+    return {
+        "contact": {
+            "first_name": lead["first_name"],
+            "last_name": lead["last_name"],
+            "email": lead.get("email"),
+            "phone": lead.get("phone"),
+            "phone_alt": lead.get("phone_alt"),
+        },
+        "case": {
+            "name": f"{lead['first_name']} {lead['last_name']} - {lead.get('case_type', 'General')}",
+            "case_type": lead.get("case_type"),
+            "practice_area": lead.get("practice_area"),
+            "description": lead.get("notes", ""),
+            "source": f"Intake pipeline (lead #{lead_id})",
+        },
+        "lead": lead,
+    }
+
+
+# ============================================================
+# Custom Fields
+# ============================================================
+
+def get_custom_fields(firm_id: str, active_only: bool = True) -> List[Dict]:
+    """Get custom field definitions for a firm."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        active_filter = "AND is_active = TRUE" if active_only else ""
+        cur.execute(f"""
+            SELECT * FROM intake_custom_fields
+            WHERE firm_id = %s {active_filter}
+            ORDER BY display_order, id
+        """, (firm_id,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def create_custom_field(firm_id: str, field_key: str, field_label: str,
+                        field_type: str = "text",
+                        field_options: List[str] = None,
+                        is_required: bool = False,
+                        show_on_card: bool = False,
+                        show_on_form: bool = True) -> int:
+    """Create a custom field definition."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO intake_custom_fields
+                (firm_id, field_key, field_label, field_type,
+                 field_options, is_required, show_on_card, show_on_form)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+            ON CONFLICT (firm_id, field_key) DO UPDATE SET
+                field_label = EXCLUDED.field_label,
+                field_type = EXCLUDED.field_type,
+                field_options = EXCLUDED.field_options,
+                is_required = EXCLUDED.is_required,
+                show_on_card = EXCLUDED.show_on_card,
+                show_on_form = EXCLUDED.show_on_form,
+                is_active = TRUE
+            RETURNING id
+        """, (firm_id, field_key, field_label, field_type,
+              json.dumps(field_options or []),
+              is_required, show_on_card, show_on_form))
+        return cur.fetchone()["id"]
+
+
+def update_custom_field(field_id: int, **kwargs):
+    """Update a custom field definition."""
+    allowed = {"field_label", "field_type", "field_options", "is_required",
+               "display_order", "is_active", "show_on_card", "show_on_form"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    if not updates:
+        return
+
+    set_parts = []
+    values = []
+    for k, v in updates.items():
+        if k == "field_options":
+            set_parts.append(f"{k} = %s::jsonb")
+            values.append(json.dumps(v))
+        else:
+            set_parts.append(f"{k} = %s")
+            values.append(v)
+
+    values.append(field_id)
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"""
+            UPDATE intake_custom_fields
+            SET {', '.join(set_parts)}
+            WHERE id = %s
+        """, values)
+
+
+def delete_custom_field(field_id: int):
+    """Soft-delete a custom field."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE intake_custom_fields
+            SET is_active = FALSE
+            WHERE id = %s
+        """, (field_id,))
+
+
+def set_lead_custom_field(firm_id: str, lead_id: int,
+                          field_key: str, value) -> bool:
+    """Set a custom field value on a lead."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE intake_leads
+            SET custom_fields = jsonb_set(
+                COALESCE(custom_fields, '{}'),
+                %s, %s::jsonb
+            ),
+            updated_at = CURRENT_TIMESTAMP
+            WHERE firm_id = %s AND id = %s
+        """, (f'{{{field_key}}}', json.dumps(value), firm_id, lead_id))
+    return True

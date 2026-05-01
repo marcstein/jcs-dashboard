@@ -6,6 +6,10 @@ Provides intake pipeline data access for the dashboard:
 - Lead management
 - Intake metrics and funnel stats
 - Consultation scheduling
+- Appointment reminders
+- Conflict of interest checks
+- Lead → MyCase conversion
+- Custom fields
 """
 from typing import Dict, List, Optional
 
@@ -31,6 +35,24 @@ from db.intake import (
     seed_pipeline_stages,
     seed_default_follow_up_rules,
     ensure_intake_tables,
+    # Reminders
+    get_pending_reminders,
+    get_reminder_stats,
+    cancel_consultation_reminders,
+    # Conflict checks
+    run_conflict_check,
+    get_lead_conflicts,
+    resolve_conflict,
+    has_unresolved_conflicts,
+    # Lead conversion
+    get_conversion_data,
+    mark_lead_converted,
+    # Custom fields
+    get_custom_fields,
+    create_custom_field,
+    update_custom_field,
+    delete_custom_field,
+    set_lead_custom_field,
 )
 
 
@@ -98,6 +120,72 @@ class IntakeDataMixin:
     def get_intake_follow_up_rules(self) -> List[Dict]:
         """Get follow-up automation rules."""
         return get_follow_up_rules(self.firm_id)
+
+    # ---------- Reminders ----------
+
+    def get_intake_pending_reminders(self) -> List[Dict]:
+        """Get pending consultation reminders."""
+        return get_pending_reminders(self.firm_id)
+
+    def get_intake_reminder_stats(self, days: int = 30) -> Dict:
+        """Get reminder send statistics."""
+        return get_reminder_stats(self.firm_id, days)
+
+    def cancel_intake_consultation_reminders(self, consultation_id: int):
+        """Cancel reminders for a cancelled consultation."""
+        return cancel_consultation_reminders(consultation_id)
+
+    # ---------- Conflict Checks ----------
+
+    def get_intake_lead_conflicts(self, lead_id: int) -> List[Dict]:
+        """Get conflict check results for a lead."""
+        return get_lead_conflicts(self.firm_id, lead_id)
+
+    def resolve_intake_conflict(self, conflict_id: int, resolved_by: str,
+                                status: str = "cleared", notes: str = None):
+        """Resolve a conflict check."""
+        return resolve_conflict(conflict_id, resolved_by, status, notes)
+
+    def has_intake_unresolved_conflicts(self, lead_id: int) -> bool:
+        """Check if lead has unresolved conflicts."""
+        return has_unresolved_conflicts(self.firm_id, lead_id)
+
+    # ---------- Lead Conversion ----------
+
+    def get_intake_conversion_data(self, lead_id: int) -> Optional[Dict]:
+        """Get lead data formatted for MyCase conversion."""
+        return get_conversion_data(self.firm_id, lead_id)
+
+    def mark_intake_lead_converted(self, lead_id: int,
+                                    mycase_case_id: int = None,
+                                    mycase_contact_id: int = None) -> bool:
+        """Mark a lead as converted to MyCase case."""
+        return mark_lead_converted(self.firm_id, lead_id,
+                                    mycase_case_id, mycase_contact_id)
+
+    # ---------- Custom Fields ----------
+
+    def get_intake_custom_fields(self, active_only: bool = True) -> List[Dict]:
+        """Get custom field definitions."""
+        return get_custom_fields(self.firm_id, active_only)
+
+    def create_intake_custom_field(self, field_key: str, field_label: str,
+                                    **kwargs) -> int:
+        """Create a custom field."""
+        return create_custom_field(self.firm_id, field_key, field_label, **kwargs)
+
+    def update_intake_custom_field(self, field_id: int, **kwargs):
+        """Update a custom field definition."""
+        return update_custom_field(field_id, **kwargs)
+
+    def delete_intake_custom_field(self, field_id: int):
+        """Soft-delete a custom field."""
+        return delete_custom_field(field_id)
+
+    def set_intake_lead_custom_field(self, lead_id: int,
+                                      field_key: str, value) -> bool:
+        """Set a custom field value on a lead."""
+        return set_lead_custom_field(self.firm_id, lead_id, field_key, value)
 
     def ensure_intake_setup(self):
         """Ensure intake tables and default data exist."""

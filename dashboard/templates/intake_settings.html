@@ -157,6 +157,42 @@
         {% endfor %}
     </div>
 
+    <!-- Custom Fields -->
+    <div class="settings-card">
+        <h3>Custom Lead Fields</h3>
+        {% if custom_fields is defined and custom_fields %}
+            {% for field in custom_fields %}
+            <div class="form-item">
+                <div>
+                    <div class="form-name">{{ field.field_label }}</div>
+                    <div class="form-token">Key: {{ field.field_key }} · Type: {{ field.field_type }}
+                        {% if field.show_on_card %} · On Card{% endif %}
+                        {% if field.show_on_form %} · On Form{% endif %}
+                    </div>
+                </div>
+                <button onclick="deleteCustomField({{ field.id }})"
+                        style="border:none;background:none;color:#C62828;cursor:pointer;font-size:16px;"
+                        title="Delete field">&times;</button>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="color:#888; font-size:14px;">No custom fields defined.</p>
+        {% endif %}
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+            <input type="text" id="cfLabel" placeholder="Field label"
+                   style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;flex:1;min-width:120px;">
+            <select id="cfType" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="date">Date</option>
+                <option value="textarea">Long Text</option>
+                <option value="checkbox">Checkbox</option>
+                <option value="select">Dropdown</option>
+            </select>
+            <button class="btn-create" style="margin-top:0;" onclick="createCustomField()">+ Add</button>
+        </div>
+    </div>
+
     <!-- Follow-Up Rules -->
     <div class="settings-card" style="grid-column: 1 / -1;">
         <h3>Automated Follow-Up Rules</h3>
@@ -204,6 +240,52 @@ function createForm() {
     .then(resp => {
         if (resp.success) window.location.reload();
         else alert('Error: ' + (resp.error || 'Unknown'));
+    });
+}
+
+function createCustomField() {
+    const label = document.getElementById('cfLabel').value.trim();
+    const type = document.getElementById('cfType').value;
+    if (!label) { alert('Enter a field label'); return; }
+
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+
+    let options = null;
+    if (type === 'select') {
+        const optStr = prompt('Enter dropdown options (comma-separated):');
+        if (!optStr) return;
+        options = optStr.split(',').map(o => o.trim()).filter(Boolean);
+    }
+
+    fetch('/api/intake/custom-fields', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            field_key: key,
+            field_label: label,
+            field_type: type,
+            field_options: options,
+            show_on_card: false,
+            show_on_form: true,
+        })
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.success) window.location.reload();
+        else alert('Error: ' + (resp.error || 'Unknown'));
+    });
+}
+
+function deleteCustomField(fieldId) {
+    if (!confirm('Remove this custom field?')) return;
+
+    fetch(`/api/intake/custom-fields/${fieldId}/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.success) window.location.reload();
     });
 }
 </script>

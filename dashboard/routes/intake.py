@@ -26,6 +26,13 @@ from db.intake import (
     get_lead, get_pipeline_stages,
     ensure_intake_tables, seed_pipeline_stages,
     seed_default_follow_up_rules,
+    # Conflict checks
+    get_lead_conflicts, resolve_conflict, has_unresolved_conflicts,
+    # Conversion
+    get_conversion_data, mark_lead_converted,
+    # Custom fields
+    get_custom_fields, create_custom_field, update_custom_field,
+    delete_custom_field, set_lead_custom_field,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,12 +108,18 @@ async def intake_lead_detail(request: Request, lead_id: int):
 
     activities = data.get_intake_lead_activities(lead_id)
     stages = data.get_intake_stages()
+    conflicts = data.get_intake_lead_conflicts(lead_id)
+    has_conflicts = any(c["status"] == "unresolved" for c in conflicts)
+    custom_fields = data.get_intake_custom_fields()
 
     return templates.TemplateResponse("intake_lead.html", {
         "request": request,
         "lead": lead,
         "activities": activities,
         "stages": stages,
+        "conflicts": conflicts,
+        "has_unresolved_conflicts": has_conflicts,
+        "custom_fields": custom_fields,
         "username": request.session.get("username"),
         "role": role,
     })
@@ -128,12 +141,14 @@ async def intake_settings(request: Request):
     forms = data.get_intake_forms()
     rules = data.get_intake_follow_up_rules()
     stages = data.get_intake_stages()
+    custom_fields = data.get_intake_custom_fields()
 
     return templates.TemplateResponse("intake_settings.html", {
         "request": request,
         "forms": forms,
         "rules": rules,
         "stages": stages,
+        "custom_fields": custom_fields,
         "username": request.session.get("username"),
         "role": role,
     })
@@ -484,3 +499,195 @@ async def api_create_form(request: Request):
         redirect_url=body.get("redirect_url"),
     )
     return JSONResponse({"success": True, "form": form})
+
+
+# ─── Conflict Checks ─────────────────────────────────────────
+
+@router.get("/api/intake/lead/{lead_id}/conflicts")
+async def api_get_conflicts(request: Request, lead_id: int):
+    """Get conflict check results for a lead."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = result
+
+    conflicts = data.get_intake_lead_conflicts(lead_id)
+    return JSONResponse({"conflicts": conflicts, "count": len(conflicts)})
+
+
+@router.post("/api/intake/conflict/{conflict_id}/resolve")
+async def api_resolve_conflict(request: Request, conflict_id: int):
+    """Resolve a conflict (clear or flag)."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    body = await request.json()
+    resolve_conflict(
+        conflict_id,
+        resolved_by=request.session.get("username", "system"),
+        status=body.get("status", "cleared"),
+        notes=body.get("notes"),
+    )
+    return JSONResponse({"success": True})
+
+
+# ─── Lead → MyCase Conversion ────────────────────────────────
+
+@router.post("/api/intake/lead/{lead_id}/convert")
+async def api_convert_lead(request: Request, lead_id: int):
+    """Convert a retained lead to a MyCase case."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = result
+
+    # Check for unresolved conflicts
+    if has_unresolved_conflicts(data.firm_id, lead_id):
+        return JSONResponse({
+            "error": "Lead has unresolved conflicts. Please review conflicts before converting.",
+            "conflicts": True,
+        }, status_code=400)
+
+    conversion_data = get_conversion_data(data.firm_id, lead_id)
+    if not conversion_data:
+        return JSONResponse({"error": "Lead not found"}, status_code=404)
+
+    # Try to create in MyCase
+    mycase_case_id = None
+    mycase_contact_id = None
+    try:
+        from api_client import MyCaseAPI
+        api = MyCaseAPI()
+
+        # Create contact first
+        contact_payload = {
+            "contact": {
+                "first_name": conversion_data["contact"]["first_name"],
+                "last_name": conversion_data["contact"]["last_name"],
+                "email": conversion_data["contact"].get("email"),
+                "phone": conversion_data["contact"].get("phone"),
+                "type": "Person",
+            }
+        }
+        contact_resp = api.post("/contacts", data=contact_payload)
+        if contact_resp and "contact" in contact_resp:
+            mycase_contact_id = contact_resp["contact"].get("id")
+
+        # Create case
+        case_payload = {
+            "case": {
+                "name": conversion_data["case"]["name"],
+                "description": conversion_data["case"].get("description", ""),
+                "status": "Open",
+            }
+        }
+        case_resp = api.post("/cases", data=case_payload)
+        if case_resp and "case" in case_resp:
+            mycase_case_id = case_resp["case"].get("id")
+
+    except Exception as e:
+        logger.warning(f"MyCase API conversion failed: {e}")
+        # Still mark as converted even if API fails — user can link manually
+        pass
+
+    # Mark lead as converted
+    mark_lead_converted(data.firm_id, lead_id,
+                        mycase_case_id=mycase_case_id,
+                        mycase_contact_id=mycase_contact_id)
+
+    return JSONResponse({
+        "success": True,
+        "mycase_case_id": mycase_case_id,
+        "mycase_contact_id": mycase_contact_id,
+        "api_created": mycase_case_id is not None,
+    })
+
+
+# ─── Custom Fields ────────────────────────────────────────────
+
+@router.get("/api/intake/custom-fields")
+async def api_get_custom_fields(request: Request):
+    """Get custom field definitions."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = result
+
+    fields = data.get_intake_custom_fields()
+    return JSONResponse({"fields": fields})
+
+
+@router.post("/api/intake/custom-fields")
+async def api_create_custom_field(request: Request):
+    """Create a new custom field (admin only)."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if get_current_role(request) != "admin":
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+
+    data = get_data(request)
+    body = await request.json()
+
+    field_key = body.get("field_key", "").strip().lower().replace(" ", "_")
+    field_label = body.get("field_label", "").strip()
+
+    if not field_key or not field_label:
+        return JSONResponse({"error": "field_key and field_label required"}, status_code=400)
+
+    field_id = data.create_intake_custom_field(
+        field_key=field_key,
+        field_label=field_label,
+        field_type=body.get("field_type", "text"),
+        field_options=body.get("field_options"),
+        is_required=body.get("is_required", False),
+        show_on_card=body.get("show_on_card", False),
+        show_on_form=body.get("show_on_form", True),
+    )
+    return JSONResponse({"success": True, "id": field_id})
+
+
+@router.post("/api/intake/custom-fields/{field_id}/update")
+async def api_update_custom_field(request: Request, field_id: int):
+    """Update a custom field (admin only)."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if get_current_role(request) != "admin":
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+
+    data = get_data(request)
+    body = await request.json()
+    data.update_intake_custom_field(field_id, **body)
+    return JSONResponse({"success": True})
+
+
+@router.post("/api/intake/custom-fields/{field_id}/delete")
+async def api_delete_custom_field(request: Request, field_id: int):
+    """Soft-delete a custom field (admin only)."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if get_current_role(request) != "admin":
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+
+    data = get_data(request)
+    data.delete_intake_custom_field(field_id)
+    return JSONResponse({"success": True})
+
+
+@router.post("/api/intake/lead/{lead_id}/custom-field")
+async def api_set_lead_custom_field(request: Request, lead_id: int):
+    """Set a custom field value on a lead."""
+    result, role = _check_intake_access(request)
+    if isinstance(result, RedirectResponse):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = result
+
+    body = await request.json()
+    field_key = body.get("field_key")
+    value = body.get("value")
+
+    if not field_key:
+        return JSONResponse({"error": "field_key required"}, status_code=400)
+
+    data.set_intake_lead_custom_field(lead_id, field_key, value)
+    return JSONResponse({"success": True})

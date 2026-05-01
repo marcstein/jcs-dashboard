@@ -122,6 +122,65 @@
 .activity-item.call::before { background: #9C27B0; }
 .activity-item.email_sent::before { background: #2196F3; }
 .activity-item.consultation_booked::before { background: #E65100; }
+.activity-item.conflict_detected::before { background: #C62828; }
+.activity-item.converted::before { background: #1B5E20; }
+
+/* ── Conflict Banner ── */
+.conflict-banner {
+    background: #FFF3E0;
+    border: 1px solid #FF9800;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: #E65100;
+    font-weight: 600;
+}
+.conflict-banner .conflict-icon { font-size: 20px; }
+.conflict-card {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+}
+.conflict-card.unresolved { border-left: 3px solid #FF9800; }
+.conflict-card.cleared { border-left: 3px solid #4CAF50; opacity: 0.7; }
+.conflict-card.flagged { border-left: 3px solid #C62828; }
+.conflict-card .conflict-name { font-weight: 600; color: #333; font-size: 14px; }
+.conflict-card .conflict-detail { font-size: 12px; color: #666; margin-top: 2px; }
+.conflict-card .conflict-score { font-size: 11px; color: #999; }
+.conflict-card .conflict-actions { margin-top: 6px; }
+.conflict-card .conflict-actions button {
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    background: #fff;
+    cursor: pointer;
+    font-size: 11px;
+    margin-right: 4px;
+}
+.conflict-card .conflict-actions .btn-clear { color: #2E7D32; border-color: #A5D6A7; }
+.conflict-card .conflict-actions .btn-clear:hover { background: #E8F5E9; }
+.conflict-card .conflict-actions .btn-flag { color: #C62828; border-color: #EF9A9A; }
+.conflict-card .conflict-actions .btn-flag:hover { background: #FFEBEE; }
+
+/* ── Custom Fields ── */
+.custom-field-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 13px;
+}
+.custom-field-item:last-child { border-bottom: none; }
+.custom-field-label { color: #888; font-size: 11px; text-transform: uppercase; }
+.custom-field-value { color: #333; font-weight: 500; cursor: pointer; }
+.custom-field-value:hover { color: #2E5090; }
 .activity-item .activity-desc {
     font-size: 13px;
     color: #333;
@@ -203,6 +262,13 @@
     </button>
     {% endfor %}
 </div>
+
+{% if has_unresolved_conflicts %}
+<div class="conflict-banner">
+    <span class="conflict-icon">⚠️</span>
+    <span>{{ conflicts|selectattr('status', 'equalto', 'unresolved')|list|length }} potential conflict(s) found — review required before converting</span>
+</div>
+{% endif %}
 
 <div class="lead-detail-layout">
     <!-- Left Column: Details + Activity -->
@@ -297,9 +363,47 @@
             <button class="btn-sm" style="width:100%;margin-bottom:8px;background:#f0f0f0;"
                     onclick="changeStage('Declined')">Mark as Declined</button>
             {% endif %}
+            {% if lead.stage_name == 'Retained' and not (lead.custom_fields or {}).get('mycase_case_id') %}
+            <button class="btn-sm btn-primary" style="width:100%;margin-bottom:8px;background:#1B5E20;"
+                    onclick="convertToMyCase()"
+                    {% if has_unresolved_conflicts %}disabled title="Resolve conflicts first"{% endif %}>
+                ➜ Convert to MyCase Case
+            </button>
+            {% endif %}
+            {% if (lead.custom_fields or {}).get('mycase_case_id') %}
+            <div style="background:#E8F5E9;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:13px;color:#2E7D32;">
+                ✓ Converted — MyCase Case #{{ (lead.custom_fields or {}).get('mycase_case_id', 'N/A') }}
+            </div>
+            {% endif %}
             <button class="btn-sm btn-danger" style="width:100%;"
                     onclick="archiveLead()">Archive Lead</button>
         </div>
+
+        <!-- Conflict Checks -->
+        {% if conflicts %}
+        <div class="detail-card">
+            <h3>Conflict Checks ({{ conflicts|length }})</h3>
+            {% for c in conflicts %}
+            <div class="conflict-card {{ c.status }}">
+                <div class="conflict-name">{{ c.matched_name }}</div>
+                <div class="conflict-detail">{{ c.matched_detail or '' }}</div>
+                <div class="conflict-score">
+                    {{ c.check_type|replace('_', ' ')|title }} · Score: {{ "%.0f"|format(c.similarity_score or 0) }}%
+                    {% if c.status != 'unresolved' %}
+                    · <strong>{{ c.status|title }}</strong>
+                    {% if c.resolved_by %} by {{ c.resolved_by }}{% endif %}
+                    {% endif %}
+                </div>
+                {% if c.status == 'unresolved' %}
+                <div class="conflict-actions">
+                    <button class="btn-clear" onclick="resolveConflict({{ c.id }}, 'cleared')">✓ Clear</button>
+                    <button class="btn-flag" onclick="resolveConflict({{ c.id }}, 'flagged')">⚑ Flag</button>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
 
         {% if lead.consultation_date %}
         <div class="detail-card">
@@ -312,6 +416,25 @@
                 <label>Type</label>
                 <div class="info-value">{{ lead.consultation_type or 'Phone' }}</div>
             </div>
+        </div>
+        {% endif %}
+
+        <!-- Custom Fields -->
+        {% if custom_fields %}
+        <div class="detail-card">
+            <h3>Custom Fields</h3>
+            {% for field in custom_fields %}
+            <div class="custom-field-item">
+                <div>
+                    <div class="custom-field-label">{{ field.field_label }}</div>
+                    <div class="custom-field-value"
+                         onclick="editCustomField('{{ field.field_key }}', '{{ field.field_label }}', '{{ field.field_type }}')"
+                         title="Click to edit">
+                        {{ (lead.custom_fields or {}).get(field.field_key, '—') }}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
         </div>
         {% endif %}
 
@@ -378,6 +501,74 @@ function archiveLead() {
     .then(r => r.json())
     .then(data => {
         if (data.success) window.location.href = '/intake';
+    });
+}
+
+function resolveConflict(conflictId, status) {
+    const notes = status === 'flagged'
+        ? prompt('Reason for flagging this conflict:')
+        : null;
+
+    fetch(`/api/intake/conflict/${conflictId}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: status, notes: notes })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) window.location.reload();
+    });
+}
+
+function convertToMyCase() {
+    if (!confirm('Convert this lead to a MyCase case and contact? This will create records in MyCase.')) return;
+
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Converting...';
+
+    fetch(`/api/intake/lead/${leadId}/convert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            if (data.api_created) {
+                alert(`Lead converted! MyCase Case #${data.mycase_case_id} created.`);
+            } else {
+                alert('Lead marked as converted. MyCase API was unavailable — link the case manually.');
+            }
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+            btn.disabled = false;
+            btn.textContent = '➜ Convert to MyCase Case';
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.textContent = '➜ Convert to MyCase Case';
+    });
+}
+
+function editCustomField(fieldKey, fieldLabel, fieldType) {
+    let value;
+    if (fieldType === 'checkbox') {
+        value = confirm(`Set "${fieldLabel}" to checked?`);
+    } else {
+        value = prompt(`Enter value for "${fieldLabel}":`);
+        if (value === null) return;
+    }
+
+    fetch(`/api/intake/lead/${leadId}/custom-field`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_key: fieldKey, value: value })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) window.location.reload();
     });
 }
 </script>
