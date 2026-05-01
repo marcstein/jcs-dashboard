@@ -62,48 +62,12 @@
 }
 .btn-add-lead:hover { background: #1B3A5C; }
 
-/* ── Header row: uniform-height labels ── */
-.pipeline-headers {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 0;
-}
-.pipeline-header-cell {
-    flex: 1;
-    min-width: 0;
-    padding: 12px 8px;
-    border-radius: 8px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    gap: 5px;
-    min-height: 64px;  /* uniform height */
-}
-.pipeline-header-cell h3 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 700;
-    color: #fff;
-    line-height: 1.3;
-}
-.pipeline-header-cell .column-count {
-    background: rgba(255,255,255,0.3);
-    color: #fff;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 13px;
-    font-weight: 700;
-}
-
-/* ── Card area below headers ── */
+/* ── Pipeline Board — combined header + body ── */
 .pipeline-board {
     display: flex;
     gap: 6px;
     padding-bottom: 16px;
     min-height: 450px;
-    margin-top: 6px;
 }
 .pipeline-column {
     flex: 1;
@@ -112,7 +76,37 @@
     border-radius: 8px;
     display: flex;
     flex-direction: column;
+    transition: flex 0.3s ease;
+}
+/* Columns with leads expand to ~3x */
+.pipeline-column.has-leads {
+    flex: 3;
+}
+.column-header {
+    padding: 12px 8px;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    flex-direction: column;
     align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 5px;
+    min-height: 64px;
+}
+.column-header h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+}
+.column-count {
+    background: rgba(255,255,255,0.3);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
 }
 .column-body {
     padding: 10px;
@@ -121,12 +115,12 @@
     flex: 1;
     overflow-y: auto;
     max-height: 600px;
-    min-height: 100px;
+    min-height: 80px;
 }
 .column-body.drag-over {
     background: rgba(46,80,144,0.08);
     border: 2px dashed #2E5090;
-    border-radius: 8px;
+    border-radius: 0 0 8px 8px;
 }
 
 /* ── Lead Cards ── */
@@ -347,20 +341,14 @@
     </div>
 </div>
 
-<!-- Stage Header Row -->
-<div class="pipeline-headers">
-    {% for stage in stages %}
-    <div class="pipeline-header-cell" style="background: {{ stage.color }};">
-        <h3>{{ stage.name }}</h3>
-        <span class="column-count">{{ stage.count }}</span>
-    </div>
-    {% endfor %}
-</div>
-
 <!-- Kanban Board -->
 <div class="pipeline-board">
     {% for stage in stages %}
-    <div class="pipeline-column" data-stage="{{ stage.name }}">
+    <div class="pipeline-column {% if stage.leads %}has-leads{% endif %}" data-stage="{{ stage.name }}">
+        <div class="column-header" style="background: {{ stage.color }};">
+            <h3>{{ stage.name }}</h3>
+            <span class="column-count">{{ stage.count }}</span>
+        </div>
         <div class="column-body" id="stage-{{ loop.index }}"
              ondragover="handleDragOver(event)"
              ondragleave="handleDragLeave(event)"
