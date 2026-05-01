@@ -341,9 +341,11 @@
             <div class="lead-card priority-{{ lead.priority }}"
                  draggable="true"
                  data-lead-id="{{ lead.id }}"
-                 ondragstart="handleDragStart(event, {{ lead.id }})">
+                 ondragstart="handleDragStart(event, {{ lead.id }})"
+                 onclick="if(!this.classList.contains('dragging')) window.location='/intake/lead/{{ lead.id }}';"
+                 style="cursor:pointer;">
                 <div class="lead-name">
-                    <a href="/intake/lead/{{ lead.id }}">{{ lead.first_name }} {{ lead.last_name }}</a>
+                    <a href="/intake/lead/{{ lead.id }}" onclick="event.stopPropagation();">{{ lead.first_name }} {{ lead.last_name }}</a>
                 </div>
                 {% if lead.email %}
                 <div class="lead-meta">{{ lead.email }}</div>
