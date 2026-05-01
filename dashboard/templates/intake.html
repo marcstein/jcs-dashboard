@@ -83,19 +83,18 @@
     flex: 3;
 }
 .column-header {
-    padding: 12px 8px;
+    padding: 14px 10px;
     border-radius: 8px 8px 0 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    gap: 5px;
-    min-height: 64px;
+    gap: 6px;
 }
 .column-header h3 {
     margin: 0;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 700;
     color: #fff;
     line-height: 1.3;
@@ -564,5 +563,13 @@ function submitNewLead(event) {
 document.getElementById('addLeadModal').addEventListener('click', function(e) {
     if (e.target === this) closeAddLeadModal();
 });
+
+// Equalize column header heights
+(function() {
+    const headers = document.querySelectorAll('.column-header');
+    let maxH = 0;
+    headers.forEach(h => { h.style.minHeight = 'auto'; maxH = Math.max(maxH, h.offsetHeight); });
+    headers.forEach(h => { h.style.minHeight = maxH + 'px'; });
+})();
 </script>
 {% endblock %}
