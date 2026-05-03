@@ -125,13 +125,21 @@ async def debug_health():
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):
-    """Run the dashboard server."""
+    """Run the dashboard server.
+
+    timeout_graceful_shutdown bounds how long uvicorn waits for in-flight
+    connections after SIGTERM. Long-lived SSE streams (phone screen pop)
+    never close on their own, so without this systemd hits its 90s
+    TimeoutStopSec and SIGKILLs the process every restart. With 10s,
+    uvicorn cancels the streams (raising CancelledError, which the
+    generators handle), then runs FastAPI's shutdown event cleanly."""
     import uvicorn
     uvicorn.run(
         "dashboard.app:app",
         host=host,
         port=port,
         reload=reload,
+        timeout_graceful_shutdown=10,
     )
 
 
