@@ -5,9 +5,15 @@ Implements the skill pattern from Cowork's legal plugin:
 - Structured system prompts with domain expertise
 - GREEN/YELLOW/RED classification system
 - Escalation triggers and human review flags
+
+LLM transport: Anthropic SDK against AWS Bedrock (Opus 4.7 by default).
+Shares the AWS billing account with ClientShield. Requires AWS_ACCESS_KEY_ID,
+AWS_SECRET_ACCESS_KEY, and AWS_DEFAULT_REGION (us-east-1) in the environment.
+The legacy ANTHROPIC_API_KEY direct path is gated by LLM_PROVIDER=claude.
 """
 
 import json
+import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -15,6 +21,57 @@ from enum import Enum
 from typing import Any, Optional
 
 import anthropic
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Bedrock Model ID Mapping
+# ============================================================================
+# Mirrors ClientShield/core/llm_gateway.py BEDROCK_MODEL_MAP. Keep in sync.
+# 4.7 inference profiles dropped the version suffix; 4.6 still uses -v1.
+
+BEDROCK_MODEL_MAP = {
+    "claude-opus-4-7": "us.anthropic.claude-opus-4-7",
+    "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1",
+    "claude-sonnet-4-5": "us.anthropic.claude-sonnet-4-5-v2-20250929",
+    "claude-3-5-haiku": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+}
+
+
+def resolve_bedrock_model(model: str) -> str:
+    """Map a short Anthropic model name to its Bedrock cross-region inference ID.
+
+    Pass-through if the input already looks like a Bedrock ID."""
+    if "us." in model or "global." in model or "anthropic." in model:
+        return model
+    return BEDROCK_MODEL_MAP.get(model, model)
+
+
+def get_claude_client() -> anthropic.AnthropicBedrock | anthropic.Anthropic:
+    """Return a Claude client for the configured provider.
+
+    Default: AnthropicBedrock against us-east-1 using the AWS default credential
+    chain (env vars, IAM role, or AWS profile). Set LLM_PROVIDER=claude to fall
+    back to the direct Anthropic API (requires ANTHROPIC_API_KEY)."""
+    provider = os.environ.get("LLM_PROVIDER", "bedrock").lower()
+    if provider == "bedrock":
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        access_key = os.environ.get("AWS_ACCESS_KEY_ID", "")
+        secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+        kwargs = {"aws_region": region}
+        if access_key and secret_key:
+            kwargs["aws_access_key"] = access_key
+            kwargs["aws_secret_key"] = secret_key
+        logger.info(f"Initialized AnthropicBedrock client (region={region})")
+        return anthropic.AnthropicBedrock(**kwargs)
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "LLM_PROVIDER=claude but ANTHROPIC_API_KEY is not set. "
+            "Either set the API key or unset LLM_PROVIDER to use Bedrock."
+        )
+    return anthropic.Anthropic(api_key=api_key)
 
 
 class Classification(Enum):
@@ -64,7 +121,8 @@ class LegalSkill(ABC):
     """
     name: str
     description: str
-    model: str = "claude-sonnet-4-20250514"
+    # Bedrock by default — matches ClientShield. Override per-skill if needed.
+    model: str = "claude-opus-4-7"
     max_tokens: int = 2048
 
     # Standard disclaimer - should appear in all legal-adjacent skills
@@ -119,9 +177,13 @@ class SkillManager:
     """
 
     def __init__(self, api_key: Optional[str] = None):
-        self.client = anthropic.Anthropic(
-            api_key=api_key or os.getenv("ANTHROPIC_API_KEY")
-        )
+        # api_key kept for backwards compatibility but ignored when LLM_PROVIDER=bedrock
+        # (the default). To force the direct Anthropic API, set LLM_PROVIDER=claude
+        # and pass api_key here or set ANTHROPIC_API_KEY in the environment.
+        if api_key and os.environ.get("LLM_PROVIDER", "bedrock").lower() != "bedrock":
+            self.client = anthropic.Anthropic(api_key=api_key)
+        else:
+            self.client = get_claude_client()
         self.skills: dict[str, LegalSkill] = {}
 
     def register(self, skill: LegalSkill) -> None:
@@ -163,9 +225,14 @@ class SkillManager:
         else:
             user_content = str(input_data)
 
-        # Execute
+        # Execute — resolve to Bedrock inference profile ID when applicable
+        model_id = (
+            resolve_bedrock_model(skill.model)
+            if isinstance(self.client, anthropic.AnthropicBedrock)
+            else skill.model
+        )
         message = self.client.messages.create(
-            model=skill.model,
+            model=model_id,
             max_tokens=skill.max_tokens,
             system=skill.build_system_prompt(context),
             messages=[{"role": "user", "content": user_content}]
@@ -177,6 +244,7 @@ class SkillManager:
         result = skill.parse_response(response_text)
         result.raw_response = response_text
         result.metadata["model"] = skill.model
+        result.metadata["model_id_invoked"] = model_id
         result.metadata["skill"] = skill_name
 
         return result

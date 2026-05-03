@@ -556,6 +556,111 @@ async def api_dunning_export(request: Request, stage: int = None):
 
 
 # ============================================================================
+# LawPay Payment Webhook API
+# ============================================================================
+
+@router.post("/api/payments/webhook/{firm_id}")
+async def lawpay_webhook(firm_id: str, request: Request):
+    """
+    LawPay payment confirmation webhook.
+
+    Called by LawPay when a payment is completed on a hosted payment page.
+    Verifies HMAC-SHA256 signature, records the payment, and updates
+    the payment_links table.
+
+    This endpoint does NOT require session auth — it's called by LawPay's
+    servers. Authentication is via webhook signature verification.
+    """
+    import logging
+    wh_logger = logging.getLogger("lawpay.webhook")
+
+    try:
+        body = await request.body()
+        signature = request.headers.get("X-Affinipay-Signature", "")
+
+        if not signature:
+            wh_logger.warning("Webhook missing signature header (firm=%s)", firm_id)
+            return JSONResponse({"error": "Missing signature"}, status_code=401)
+
+        # Verify webhook signature
+        from payments.lawpay import verify_webhook_signature, process_payment_webhook
+
+        if not verify_webhook_signature(body, signature, firm_id):
+            wh_logger.warning("Webhook signature verification failed (firm=%s)", firm_id)
+            return JSONResponse({"error": "Invalid signature"}, status_code=403)
+
+        # Parse event data
+        event_data = json.loads(body)
+        wh_logger.info(
+            "Processing LawPay webhook: type=%s firm=%s",
+            event_data.get("type", "unknown"), firm_id
+        )
+
+        # Process the payment
+        success, message = process_payment_webhook(firm_id, event_data)
+
+        if success:
+            return JSONResponse({"status": "ok", "message": message})
+        else:
+            wh_logger.error("Webhook processing failed: %s", message)
+            return JSONResponse({"status": "error", "message": message}, status_code=500)
+
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    except Exception as e:
+        wh_logger.exception("Webhook handler error: %s", str(e))
+        return JSONResponse({"error": "Internal error"}, status_code=500)
+
+
+@router.get("/api/payments/link-click/{firm_id}/{invoice_id}")
+async def payment_link_click(firm_id: str, invoice_id: int, request: Request):
+    """
+    Payment link click-through tracker and redirector.
+
+    When a client clicks "Pay Now" in a dunning email, this endpoint
+    records the click for analytics and redirects to the LawPay payment page.
+    """
+    try:
+        from db.payments import record_link_click, get_existing_payment_link
+        record_link_click(firm_id, invoice_id)
+
+        link = get_existing_payment_link(firm_id, invoice_id)
+        if link and link.get('payment_url'):
+            from fastapi.responses import RedirectResponse as Redirect
+            return Redirect(url=link['payment_url'])
+        else:
+            return JSONResponse(
+                {"error": "Payment link expired or not found"},
+                status_code=404
+            )
+    except Exception as e:
+        logging_module = __import__('logging')
+        logging_module.getLogger("lawpay.click").error("Click tracking error: %s", str(e))
+        return JSONResponse({"error": "Internal error"}, status_code=500)
+
+
+@router.get("/api/payments/stats")
+async def payment_link_stats(request: Request):
+    """Get payment link statistics for the current firm."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    role = get_current_role(request)
+    if role not in ("admin", "collections"):
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    firm_id = request.session.get("firm_id", "")
+    days = int(request.query_params.get("days", 30))
+
+    try:
+        from db.payments import get_payment_link_stats
+        stats = get_payment_link_stats(firm_id, days=days)
+        return JSONResponse(stats)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ============================================================================
 # Aging Invoice Upload API
 # ============================================================================
 
@@ -961,16 +1066,25 @@ async def api_chat(request: Request):
         if not user_message:
             return JSONResponse({"error": "No message provided"})
 
-        # Initialize Anthropic client
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            return JSONResponse({"error": "AI service not configured. Set ANTHROPIC_API_KEY environment variable."})
+        # Initialize Claude client (Bedrock by default; ANTHROPIC_API_KEY direct
+        # path available via LLM_PROVIDER=claude). See skills/base.py for the
+        # shared client factory + model map.
+        from skills.base import get_claude_client, resolve_bedrock_model
+        try:
+            client = get_claude_client()
+        except RuntimeError as exc:
+            return JSONResponse({"error": f"AI service not configured: {exc}"})
 
-        client = anthropic.Anthropic(api_key=api_key)
+        model_short = "claude-opus-4-7"
+        model_id = (
+            resolve_bedrock_model(model_short)
+            if isinstance(client, anthropic.AnthropicBedrock)
+            else model_short
+        )
 
         # Call Claude to interpret the query
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=model_id,
             max_tokens=1024,
             system=CHAT_SYSTEM_PROMPT,
             messages=[

@@ -5,6 +5,16 @@ Automated SOP compliance monitoring system for JCS Law Firm using MyCase API int
 
 ## Architecture
 
+### LLM: AWS Bedrock + Claude Opus 4.7
+All Claude calls route through AWS Bedrock (cross-region inference profile `us.anthropic.claude-opus-4-7`). Shares the AWS billing account with ClientShield. Switched 2026-05-02 from the direct Anthropic API on `claude-sonnet-4-20250514`.
+
+- **Required env vars:** `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION=us-east-1`. Same credentials as the ClientShield droplet (single AWS account, single Bedrock bill).
+- **Shared client factory:** `skills/base.py::get_claude_client()` returns either `AnthropicBedrock` (default) or `Anthropic` (when `LLM_PROVIDER=claude`). Use it for ANY new Claude call. Don't instantiate `anthropic.Anthropic(...)` directly anywhere.
+- **Model resolution:** `skills/base.py::resolve_bedrock_model("claude-opus-4-7")` returns the inference profile ID. Mirrors ClientShield's `core/llm_gateway.BEDROCK_MODEL_MAP` — keep in sync.
+- **Fallback to direct Anthropic API:** still possible via `LLM_PROVIDER=claude` + `ANTHROPIC_API_KEY`. Used only for local dev without AWS credentials. Production uses Bedrock exclusively.
+- **Streaming required at high `max_tokens`.** Anthropic SDK refuses sync `messages.create()` when it estimates >10min runtime — empirically Opus trips this around `max_tokens >= ~10K`. Use `client.messages.stream(...)` with the context manager for any high-token calls. (See ClientShield's CLAUDE.md for the canonical streaming pattern.)
+- **4.7 not a drop-in upgrade.** `thinking.type` only supports `"adaptive"`. Re-run `tests/test_prelaunch_chat.py` (which still uses Anthropic-direct — should be migrated to Bedrock too) after model bumps.
+
 ### Database: PostgreSQL Only (No SQLite)
 All data storage uses PostgreSQL with multi-tenant isolation via `firm_id`. There is NO SQLite anywhere in the codebase. Every module connects through the shared `db/connection.py` pool.
 
