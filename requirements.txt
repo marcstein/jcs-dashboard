@@ -49,4 +49,6 @@ celery[redis]>=5.3.0
 redis>=5.0.0
 
 # AI/LLM
-anthropic>=0.30.0
+# [bedrock] extra pulls boto3 + botocore for AWS Bedrock support.
+# Without it, AnthropicBedrock import fails with "No module named 'botocore'".
+anthropic[bedrock]>=0.39.0
