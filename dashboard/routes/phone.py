@@ -212,6 +212,11 @@ async def phone_events_stream(request: Request):
                 try:
                     # Wait for events with a timeout for keepalive
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    # Shutdown sentinel from registry.close_all() — exit cleanly
+                    # so FastAPI/uvicorn shutdown doesn't have to wait for keepalive
+                    # timeout and systemd doesn't SIGKILL the worker.
+                    if event.get("type") == "_shutdown":
+                        break
                     yield format_sse_event(event["data"], event_type=event.get("type", "screen_pop"))
                 except asyncio.TimeoutError:
                     # Send keepalive comment to prevent connection timeout

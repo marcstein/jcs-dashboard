@@ -52,7 +52,14 @@ def _can_connect_to_db() -> bool:
         return False
 
 
-def _has_api_key() -> bool:
+def _has_llm_credentials() -> bool:
+    """Either Bedrock (default) or direct Anthropic API must be reachable."""
+    provider = os.environ.get("LLM_PROVIDER", "bedrock").lower()
+    if provider == "bedrock":
+        return bool(
+            os.environ.get("AWS_ACCESS_KEY_ID")
+            and os.environ.get("AWS_SECRET_ACCESS_KEY")
+        )
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
@@ -62,8 +69,8 @@ needs_db = pytest.mark.skipif(
 )
 
 needs_api = pytest.mark.skipif(
-    not _has_api_key(),
-    reason="ANTHROPIC_API_KEY not set"
+    not _has_llm_credentials(),
+    reason="No LLM credentials (set LLM_PROVIDER=bedrock + AWS_* or LLM_PROVIDER=claude + ANTHROPIC_API_KEY)"
 )
 
 
@@ -313,10 +320,19 @@ class TestChatE2E:
 
     @pytest.fixture(autouse=True)
     def setup_client(self):
-        """Set up Anthropic client."""
+        """Set up Claude client via the shared factory.
+
+        Uses Bedrock (Opus 4.7) by default. Set LLM_PROVIDER=claude to
+        force the direct Anthropic API. Mirrors prod's runtime behavior."""
         import anthropic
-        self.client = anthropic.Anthropic(
-            api_key=os.environ["ANTHROPIC_API_KEY"]
+        from skills.base import get_claude_client, resolve_bedrock_model
+
+        self.client = get_claude_client()
+        model_short = "claude-opus-4-7"
+        self.model_id = (
+            resolve_bedrock_model(model_short)
+            if isinstance(self.client, anthropic.AnthropicBedrock)
+            else model_short
         )
 
     def _ask_chat(self, question: str) -> dict:
@@ -325,9 +341,9 @@ class TestChatE2E:
         """
         from dashboard.routes.api import execute_chat_query, format_query_results, CHAT_SYSTEM_PROMPT
 
-        # Call Claude
+        # Call Claude (Bedrock or direct, transparent via shared factory)
         response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self.model_id,
             max_tokens=1024,
             system=CHAT_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": question}],

@@ -26,11 +26,24 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 try:
+    import anthropic
     from anthropic import Anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
+    anthropic = None
     Anthropic = None
+
+# Shared Bedrock client factory + model map. Lives in skills.base; imported here
+# so document_chat.py routes through the same Bedrock + Opus 4.7 path as the
+# rest of LawMetrics. Falls back to direct Anthropic when LLM_PROVIDER=claude.
+try:
+    from skills.base import get_claude_client, resolve_bedrock_model
+    SHARED_CLIENT_AVAILABLE = True
+except ImportError:
+    SHARED_CLIENT_AVAILABLE = False
+    get_claude_client = None
+    resolve_bedrock_model = None
 
 try:
     from docx import Document
@@ -1020,10 +1033,22 @@ class DocumentChatEngine:
 
         if not ANTHROPIC_AVAILABLE:
             raise RuntimeError("anthropic package is required")
-        if not self.api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY is required")
 
-        self.client = Anthropic(api_key=self.api_key)
+        # Default to Bedrock (LLM_PROVIDER=bedrock); fall back to direct Anthropic API
+        # when LLM_PROVIDER=claude is set explicitly. Mirrors skills/base.py.
+        provider = os.environ.get("LLM_PROVIDER", "bedrock").lower()
+        if provider == "bedrock" and SHARED_CLIENT_AVAILABLE:
+            self.client = get_claude_client()
+            # Default model for document generation. Resolved once per engine
+            # instance — every messages.create() call reuses self.model_id.
+            self.model_id = resolve_bedrock_model("claude-opus-4-7")
+        else:
+            if not self.api_key:
+                raise RuntimeError(
+                    "ANTHROPIC_API_KEY is required when LLM_PROVIDER!=bedrock"
+                )
+            self.client = Anthropic(api_key=self.api_key)
+            self.model_id = "claude-opus-4-7"
 
     def new_session(self) -> str:
         """Start a new document generation session."""
@@ -1563,7 +1588,7 @@ Respond with JSON:
 """
 
         response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self.model_id,
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -1728,7 +1753,7 @@ Respond with JSON array:
 Focus on the most important 5-10 variables."""
 
         response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self.model_id,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -1869,7 +1894,7 @@ Respond with JSON:
 Only include variables where you found a clear value. If unsure, don't include it."""
 
         response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self.model_id,
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -2695,7 +2720,7 @@ v.                                      )
 Use the exact formatting shown. Keep the document concise and professional."""
 
         response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self.model_id,
             max_tokens=4000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -2748,7 +2773,7 @@ What variable values should be changed? Respond with JSON:
 Only include variables that need to change."""
 
         response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self.model_id,
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
         )

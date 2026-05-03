@@ -28,6 +28,18 @@ app = FastAPI(
     version=config.APP_VERSION,
 )
 
+
+@app.on_event("shutdown")
+async def _close_sse_connections() -> None:
+    """Push shutdown sentinels to every open SSE connection so long-lived
+    event generators exit cleanly. Without this, systemctl stop hangs for
+    ~90s waiting on /api/phone/events/stream and then SIGKILLs the worker."""
+    try:
+        from phone.delivery import get_registry
+        await get_registry().close_all()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("close_all failed during shutdown: %s", e)
+
 # Session middleware for login state
 app.add_middleware(
     SessionMiddleware,

@@ -101,6 +101,32 @@ class SSEConnectionRegistry:
         async with self._lock:
             return list(self._connections.get(firm_id, {}).keys())
 
+    async def close_all(self) -> int:
+        """Push a shutdown sentinel to every active SSE queue.
+
+        Called from the FastAPI shutdown event so that long-lived event
+        generators exit promptly instead of holding the worker open until
+        systemd SIGKILLs it. Returns the number of queues notified."""
+        async with self._lock:
+            queues = []
+            for firm_users in self._connections.values():
+                queues.extend(firm_users.values())
+
+        notified = 0
+        for queue in queues:
+            try:
+                queue.put_nowait({"type": "_shutdown", "data": {}})
+                notified += 1
+            except asyncio.QueueFull:
+                # If the queue is full, the consumer is alive enough that
+                # the next .get() will see something — close enough for
+                # shutdown purposes.
+                pass
+
+        if notified:
+            logger.info("SSE close_all: notified %d active connections", notified)
+        return notified
+
 
 # Global singleton registry
 _registry = SSEConnectionRegistry()
