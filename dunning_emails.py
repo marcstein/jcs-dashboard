@@ -12,6 +12,7 @@ Multi-tenant PostgreSQL support via firm_id parameter.
 """
 import os
 import json
+import logging
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from pathlib import Path
 
 from db.cache import get_invoices, get_contacts
 from db.tracking import record_dunning_notice, get_last_dunning_level
+
+logger = logging.getLogger(__name__)
 
 # Load .env file if it exists
 from config import BASE_DIR
@@ -76,8 +79,52 @@ def get_stage_for_days(days_overdue: int) -> Optional[DunningStage]:
     return None
 
 
-def generate_notice_1_html(inv: DunningInvoice) -> str:
+def _payment_button_html(payment_url: str, stage: int = 1) -> str:
+    """Generate the 'Pay Now' button HTML block for dunning emails.
+
+    Returns an empty string if no payment_url is provided, so callers
+    can unconditionally embed it.  Button color escalates with stage.
+    """
+    if not payment_url:
+        return ""
+
+    colors = {
+        1: ("#2563eb", "#1d4ed8"),  # Blue
+        2: ("#d97706", "#b45309"),  # Amber
+        3: ("#dc2626", "#b91c1c"),  # Red
+        4: ("#1a1a1a", "#000000"),  # Black
+    }
+    bg, hover = colors.get(stage, colors[1])
+
+    return f"""
+        <div style="text-align: center; margin: 25px 0;">
+            <a href="{payment_url}"
+               style="display: inline-block; background: {bg}; color: #ffffff;
+                      font-size: 18px; font-weight: bold; padding: 14px 40px;
+                      text-decoration: none; border-radius: 6px;
+                      mso-padding-alt: 14px 40px;">
+                Pay Now Securely Online
+            </a>
+            <p style="margin-top: 10px; font-size: 12px; color: #6b7280;">
+                Secure payment powered by LawPay. Credit card, debit card, or eCheck accepted.
+            </p>
+        </div>
+"""
+
+
+def _payment_button_text(payment_url: str) -> str:
+    """Generate the plain-text payment link line for dunning emails."""
+    if not payment_url:
+        return ""
+    return f"""
+Pay securely online: {payment_url}
+(Credit card, debit card, or eCheck accepted via LawPay)
+"""
+
+
+def generate_notice_1_html(inv: DunningInvoice, payment_url: str = "") -> str:
     """Generate Notice 1: Friendly Reminder (5-7 days past due)."""
+    pay_button = _payment_button_html(payment_url, stage=1)
     return f"""
 <!DOCTYPE html>
 <html>
@@ -111,11 +158,12 @@ def generate_notice_1_html(inv: DunningInvoice) -> str:
             • Invoice Number: {inv.invoice_number}
         </div>
 
+        {pay_button}
+
         <div class="payment-methods">
-            <strong>You may submit payment by:</strong><br>
-            • Credit/Debit Card (call office)<br>
+            <strong>You may also submit payment by:</strong><br>
             • Check (payable to: JCS Law)<br>
-            • Online payment portal
+            • Credit/Debit Card (call office at (314) 561-9690)
         </div>
 
         <p>Please feel free to contact me if you have any questions or concerns.</p>
@@ -133,7 +181,7 @@ def generate_notice_1_html(inv: DunningInvoice) -> str:
 """
 
 
-def generate_notice_2_html(inv: DunningInvoice) -> str:
+def generate_notice_2_html(inv: DunningInvoice, payment_url: str = "") -> str:
     """Generate Notice 2: Formal Reminder (15-20 days past due)."""
     action_date = (date.today() + timedelta(days=10)).strftime('%B %d, %Y')
 
@@ -173,7 +221,9 @@ def generate_notice_2_html(inv: DunningInvoice) -> str:
             <em>Failure to respond may impact our ability to continue representation in your matter and could result in additional collection efforts.</em>
         </div>
 
-        <p>Payment can be made by check, credit card, or through our online portal. Please reference invoice #{inv.invoice_number} with your payment.</p>
+        {_payment_button_html(payment_url, stage=2)}
+
+        <p>Payment can also be made by check or credit card (call office). Please reference invoice #{inv.invoice_number} with your payment.</p>
 
         <p>Our office remains committed to resolving your legal matter successfully and hope we can quickly resolve this billing issue.</p>
 
@@ -190,7 +240,7 @@ def generate_notice_2_html(inv: DunningInvoice) -> str:
 """
 
 
-def generate_notice_3_html(inv: DunningInvoice) -> str:
+def generate_notice_3_html(inv: DunningInvoice, payment_url: str = "") -> str:
     """Generate Notice 3: Urgent Notice (30 days past due)."""
     deadline = (date.today() + timedelta(days=7)).strftime('%B %d, %Y')
     late_fee = inv.balance_due * 0.05  # Example 5% late fee
@@ -243,6 +293,8 @@ def generate_notice_3_html(inv: DunningInvoice) -> str:
             </ol>
         </div>
 
+        {_payment_button_html(payment_url, stage=3)}
+
         <p><strong>Payment Arrangements:</strong><br>
         If you are unable to pay the full amount immediately, contact our office no later than {deadline} to arrange a payment plan. This is your final opportunity to resolve this matter directly with our office before additional action is taken.</p>
 
@@ -264,7 +316,7 @@ def generate_notice_3_html(inv: DunningInvoice) -> str:
 """
 
 
-def generate_notice_4_html(inv: DunningInvoice) -> str:
+def generate_notice_4_html(inv: DunningInvoice, payment_url: str = "") -> str:
     """Generate Notice 4: Final Notice (45-60 days past due)."""
     deadline = (date.today() + timedelta(days=10)).strftime('%B %d, %Y')
     contact_deadline = (date.today() + timedelta(days=5)).strftime('%B %d, %Y')
@@ -316,10 +368,12 @@ def generate_notice_4_html(inv: DunningInvoice) -> str:
             Payment must be received by {deadline}
         </p>
 
+        {_payment_button_html(payment_url, stage=4)}
+
         <div class="payment-options">
             <strong>Final Payment Options:</strong>
             <ul>
-                <li>Pay in full immediately</li>
+                <li>Pay in full immediately using the secure link above</li>
                 <li>Contact our office by {contact_deadline} to arrange an acceptable payment plan with immediate down payment</li>
             </ul>
             <p style="margin-bottom: 0;"><em>Failure to respond or remit payment by {deadline} will result in automatic referral to collections without further notice.</em></p>
@@ -346,8 +400,10 @@ def generate_notice_4_html(inv: DunningInvoice) -> str:
 """
 
 
-def generate_notice_text(stage: int, inv: DunningInvoice) -> str:
+def generate_notice_text(stage: int, inv: DunningInvoice, payment_url: str = "") -> str:
     """Generate plain text version of the notice."""
+    pay_line = _payment_button_text(payment_url)
+
     if stage == 1:
         return f"""
 JCS Law Firm - Payment Reminder
@@ -363,7 +419,7 @@ Payment Details:
 - Amount Due: ${inv.balance_due:,.2f}
 - Original Due Date: {inv.due_date.strftime('%B %d, %Y')}
 - Invoice Number: {inv.invoice_number}
-
+{pay_line}
 Please contact our office if you have any questions.
 
 Best regards,
@@ -383,7 +439,7 @@ This letter serves as formal notice that your account remains past due.
 Outstanding Balance: ${inv.balance_due:,.2f}
 Original Due Date: {inv.due_date.strftime('%B %d, %Y')}
 Days Overdue: {inv.days_overdue}
-
+{pay_line}
 Please remit payment within 10 days or contact our office to discuss payment arrangements.
 
 Sincerely,
@@ -406,7 +462,7 @@ Despite previous correspondence, your account remains unpaid.
 Current Outstanding Balance: ${inv.balance_due:,.2f}
 Original Due Date: {inv.due_date.strftime('%B %d, %Y')}
 Days Overdue: {inv.days_overdue}
-
+{pay_line}
 Payment must be received by {deadline}.
 
 Continued non-payment may result in withdrawal from your case and referral to collections.
@@ -432,7 +488,7 @@ This is your final notice regarding your seriously delinquent balance.
 
 Outstanding Balance: ${inv.balance_due:,.2f}
 Days Overdue: {inv.days_overdue}
-
+{pay_line}
 Payment must be received by {deadline}.
 
 Failure to respond will result in:
@@ -637,6 +693,41 @@ class DunningEmailManager:
         except Exception as e:
             return False, str(e)
 
+    def _get_payment_url(self, inv: DunningInvoice, stage: int) -> str:
+        """
+        Create or retrieve a LawPay payment link for this invoice.
+
+        Returns the payment URL string, or empty string if LawPay is not
+        enabled or the API call fails. Failures are logged but never block
+        the dunning email from being sent.
+        """
+        try:
+            from payments.lawpay import is_lawpay_enabled, create_payment_link
+            if not is_lawpay_enabled(self.firm_id):
+                return ""
+
+            result = create_payment_link(
+                firm_id=self.firm_id,
+                invoice_id=inv.invoice_id,
+                invoice_number=inv.invoice_number,
+                amount_cents=int(inv.balance_due * 100),
+                client_name=inv.client_name,
+                client_email=inv.client_email,
+                case_name=inv.case_name,
+                dunning_stage=stage,
+            )
+            if result.success:
+                return result.payment_url or ""
+            else:
+                logger.warning(
+                    "LawPay link creation failed for invoice %s: %s",
+                    inv.invoice_number, result.error
+                )
+                return ""
+        except Exception as e:
+            logger.warning("LawPay integration error (non-fatal): %s", str(e))
+            return ""
+
     def send_dunning_notice(self, stage: int, inv: DunningInvoice) -> Tuple[bool, str]:
         """Send a dunning notice for the given stage and record to database."""
         stage_info = DUNNING_STAGES[stage - 1]
@@ -649,17 +740,20 @@ class DunningEmailManager:
         if self.test_mode:
             subject = f"[TEST] {subject}"
 
+        # Get payment link (empty string if LawPay not enabled or fails)
+        payment_url = self._get_payment_url(inv, stage)
+
         # Generate content
         if stage == 1:
-            html = generate_notice_1_html(inv)
+            html = generate_notice_1_html(inv, payment_url=payment_url)
         elif stage == 2:
-            html = generate_notice_2_html(inv)
+            html = generate_notice_2_html(inv, payment_url=payment_url)
         elif stage == 3:
-            html = generate_notice_3_html(inv)
+            html = generate_notice_3_html(inv, payment_url=payment_url)
         else:
-            html = generate_notice_4_html(inv)
+            html = generate_notice_4_html(inv, payment_url=payment_url)
 
-        text = generate_notice_text(stage, inv)
+        text = generate_notice_text(stage, inv, payment_url=payment_url)
 
         # Determine recipient
         recipient = self.test_email if self.test_mode else (inv.client_email or self.test_email)

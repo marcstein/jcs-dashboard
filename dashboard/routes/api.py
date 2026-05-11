@@ -1062,6 +1062,7 @@ async def api_chat(request: Request):
     try:
         body = await request.json()
         user_message = body.get("message", "").strip()
+        history = body.get("history", [])  # Previous messages for context
 
         if not user_message:
             return JSONResponse({"error": "No message provided"})
@@ -1082,14 +1083,22 @@ async def api_chat(request: Request):
             else model_short
         )
 
+        # Build messages list with conversation history for context
+        messages = []
+        if history and isinstance(history, list):
+            for msg in history[-10:]:  # Last 10 messages max
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_message})
+
         # Call Claude to interpret the query
         response = client.messages.create(
             model=model_id,
             max_tokens=1024,
             system=CHAT_SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": user_message}
-            ]
+            messages=messages,
         )
 
         # Parse Claude's response

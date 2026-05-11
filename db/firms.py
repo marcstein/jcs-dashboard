@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS firms (
     mycase_oauth_refresh TEXT,
     mycase_token_expires_at TIMESTAMP,
 
+    -- Practice Management System (PMS) type: 'mycase', 'clio', or NULL
+    pms_type VARCHAR(20),
+
+    -- Clio Manage integration
+    clio_client_id TEXT,
+    clio_client_secret TEXT,
+    clio_oauth_token TEXT,
+    clio_oauth_refresh TEXT,
+    clio_token_expires_at TIMESTAMP,
+    clio_connected BOOLEAN DEFAULT FALSE,
+
     -- Sync configuration
     sync_frequency_minutes INTEGER DEFAULT 240,
     next_sync_at TIMESTAMP,
@@ -151,6 +162,13 @@ _MIGRATION_COLUMNS = [
     ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
     ("subdomain", "VARCHAR(63) UNIQUE"),
     ("subdomain_verified", "BOOLEAN DEFAULT FALSE"),
+    ("pms_type", "VARCHAR(20)"),
+    ("clio_client_id", "TEXT"),
+    ("clio_client_secret", "TEXT"),
+    ("clio_oauth_token", "TEXT"),
+    ("clio_oauth_refresh", "TEXT"),
+    ("clio_token_expires_at", "TIMESTAMP"),
+    ("clio_connected", "BOOLEAN DEFAULT FALSE"),
 ]
 
 

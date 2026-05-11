@@ -106,6 +106,31 @@ class FirmSettings:
             "from_email": self._nc("smtp_from_email", ""),
         }
 
+    # ── LawPay (Online Payments) ────────────────────────────────
+
+    def get_lawpay_config(self) -> dict:
+        """Get LawPay payment gateway configuration."""
+        return {
+            "enabled": bool(self._nc("lawpay_enabled")),
+            "public_key": self._nc("lawpay_public_key", ""),
+            "secret_key": self._nc("lawpay_secret_key", ""),
+            "trust_account_id": self._nc("lawpay_trust_account_id", ""),
+            "operating_account_id": self._nc("lawpay_operating_account_id", ""),
+            "webhook_secret": self._nc("lawpay_webhook_secret", ""),
+        }
+
+    def is_lawpay_enabled(self) -> bool:
+        """Check if LawPay payment links are enabled and configured."""
+        return bool(
+            self._nc("lawpay_enabled")
+            and self._nc("lawpay_secret_key")
+            and self._nc("lawpay_trust_account_id")
+        )
+
+    def get_lawpay_trust_account_id(self) -> str:
+        """Get the IOLTA trust account ID for payment deposits."""
+        return self._nc("lawpay_trust_account_id", "")
+
     # ── MyCase Credentials ───────────────────────────────────────
 
     def get_mycase_credentials(self) -> dict:
@@ -122,6 +147,35 @@ class FirmSettings:
 
     def is_mycase_connected(self) -> bool:
         return bool(self._firm.get("mycase_connected"))
+
+    # ── Clio Manage Credentials ──────────────────────────────────
+
+    def get_clio_credentials(self) -> dict:
+        """Get Clio Manage OAuth credentials for this firm."""
+        return {
+            "client_id": self._firm.get("clio_client_id", ""),
+            "client_secret": self._firm.get("clio_client_secret", ""),
+            "oauth_token": self._firm.get("clio_oauth_token", ""),
+            "oauth_refresh": self._firm.get("clio_oauth_refresh", ""),
+            "token_expires_at": self._firm.get("clio_token_expires_at"),
+            "connected": bool(self._firm.get("clio_connected")),
+        }
+
+    def is_clio_connected(self) -> bool:
+        return bool(self._firm.get("clio_connected"))
+
+    # ── PMS Type ────────────────────────────────────────────────
+
+    @property
+    def pms_type(self) -> Optional[str]:
+        """Get the Practice Management System type: 'mycase', 'clio', or None."""
+        return self._firm.get("pms_type")
+
+    def is_mycase_firm(self) -> bool:
+        return self.pms_type == "mycase"
+
+    def is_clio_firm(self) -> bool:
+        return self.pms_type == "clio"
 
     # ── Firm Identity & Branding ─────────────────────────────────
 

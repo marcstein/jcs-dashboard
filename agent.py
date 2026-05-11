@@ -31,6 +31,7 @@ from commands.dashboard import dashboard_cmd
 from commands.firms import firms
 from commands.trust import trust
 from commands.phone import phone
+from commands.clio import clio_group
 
 # AI and Document Generation Commands
 from ai_commands import (
@@ -79,6 +80,7 @@ cli.add_command(dashboard_cmd, name="dashboard")
 cli.add_command(firms)
 cli.add_command(trust)
 cli.add_command(phone)
+cli.add_command(clio_group, name="clio")
 
 # ── Register AI / Document Generation groups ────────────────────────────
 

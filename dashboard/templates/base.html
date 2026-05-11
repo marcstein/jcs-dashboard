@@ -88,6 +88,7 @@
                 <span>AI Assistant</span>
             </div>
             <div class="chat-header-actions">
+                <button id="chatNewChat" class="chat-new-chat" title="New conversation" style="background:none;border:none;cursor:pointer;font-size:13px;color:#6b7280;padding:4px 8px;border-radius:4px;margin-right:4px;">New Chat</button>
                 <button id="chatExpand" class="chat-expand" title="Expand/Collapse">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="15 3 21 3 21 9"></polyline>
@@ -148,7 +149,7 @@
     </footer>
 
     <script>
-    // Chat functionality - Perplexity style
+    // Chat functionality - Perplexity style with session persistence
     document.addEventListener('DOMContentLoaded', function() {
         const chatToggle = document.getElementById('chatToggle');
         const chatSidebar = document.getElementById('chatSidebar');
@@ -161,6 +162,55 @@
         const chatMessages = document.getElementById('chatMessages');
         const chatWelcome = document.getElementById('chatWelcome');
         const suggestions = document.querySelectorAll('.chat-suggestion');
+
+        // ── Chat history persistence via sessionStorage ──
+        const CHAT_STORAGE_KEY = 'lawmetrics_chat_history';
+        const CHAT_OPEN_KEY = 'lawmetrics_chat_open';
+
+        function saveChatHistory() {
+            try {
+                const messages = [];
+                chatMessages.querySelectorAll('.chat-message').forEach(div => {
+                    const type = div.classList.contains('user') ? 'user' : 'assistant';
+                    const content = div.querySelector('.message-content');
+                    if (content) {
+                        messages.push({ type: type, html: content.innerHTML });
+                    }
+                });
+                sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+            } catch(e) { /* quota exceeded or private mode */ }
+        }
+
+        function restoreChatHistory() {
+            try {
+                const saved = sessionStorage.getItem(CHAT_STORAGE_KEY);
+                if (!saved) return;
+                const messages = JSON.parse(saved);
+                if (!messages.length) return;
+
+                // Hide welcome, show restored messages
+                if (chatWelcome) chatWelcome.style.display = 'none';
+                messages.forEach(msg => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'chat-message ' + msg.type;
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'message-content';
+                    contentDiv.innerHTML = msg.html;
+                    messageDiv.appendChild(contentDiv);
+                    chatMessages.appendChild(messageDiv);
+                });
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                // Restore open state
+                if (sessionStorage.getItem(CHAT_OPEN_KEY) === '1' && chatSidebar) {
+                    chatSidebar.classList.add('open');
+                    chatOverlay.classList.add('visible');
+                }
+            } catch(e) { /* parse error or private mode */ }
+        }
+
+        // Restore on page load
+        restoreChatHistory();
 
         // Speech Recognition setup
         let recognition = null;
@@ -236,6 +286,7 @@
                 chatSidebar.classList.add('open');
                 chatOverlay.classList.add('visible');
                 chatInput.focus();
+                sessionStorage.setItem(CHAT_OPEN_KEY, '1');
             });
 
             // Close chat completely
@@ -243,6 +294,7 @@
                 chatSidebar.classList.remove('open');
                 chatSidebar.classList.remove('expanded');
                 chatOverlay.classList.remove('visible');
+                sessionStorage.setItem(CHAT_OPEN_KEY, '0');
             }
 
             chatClose.addEventListener('click', closeChat);
@@ -308,10 +360,20 @@
                 chatMessages.scrollTop = chatMessages.scrollHeight;
 
                 try {
+                    // Build conversation history for context (last 10 exchanges)
+                    const historyMsgs = [];
+                    chatMessages.querySelectorAll('.chat-message').forEach(div => {
+                        const role = div.classList.contains('user') ? 'user' : 'assistant';
+                        const content = div.querySelector('.message-content');
+                        if (content) historyMsgs.push({ role: role, content: content.textContent.trim() });
+                    });
+                    // Send last 10 messages as context (skip the one we just added)
+                    const history = historyMsgs.slice(-11, -1).slice(-10);
+
                     const response = await fetch('/api/chat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: message })
+                        body: JSON.stringify({ message: message, history: history })
                     });
 
                     const data = await response.json();
@@ -388,6 +450,20 @@
                 messageDiv.appendChild(contentDiv);
                 chatMessages.appendChild(messageDiv);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
+                saveChatHistory();
+            }
+
+            // New Chat button — clear history and reset
+            const newChatBtn = document.getElementById('chatNewChat');
+            if (newChatBtn) {
+                newChatBtn.addEventListener('click', function() {
+                    chatMessages.innerHTML = '';
+                    if (chatWelcome) {
+                        chatMessages.appendChild(chatWelcome);
+                        chatWelcome.style.display = '';
+                    }
+                    sessionStorage.removeItem(CHAT_STORAGE_KEY);
+                });
             }
         }
     });
