@@ -842,6 +842,249 @@ async def api_aging_upload_history(request: Request):
 
 
 # ============================================================================
+# Trust Ledger Upload
+# ============================================================================
+
+def _normalize_trust_header(h: str) -> str:
+    """Map various trust ledger CSV column names to internal names."""
+    h = h.strip().lower().replace(' ', '_').replace('-', '_')
+    mapping = {
+        'case': 'case_number',
+        'case_no': 'case_number',
+        'case_num': 'case_number',
+        'case_number': 'case_number',
+        'matter': 'case_name',
+        'matter_name': 'case_name',
+        'case_name': 'case_name',
+        'case_description': 'case_name',
+        'client': 'client_name',
+        'client_name': 'client_name',
+        'contact': 'client_name',
+        'contact_name': 'client_name',
+        'balance': 'trust_balance',
+        'trust_balance': 'trust_balance',
+        'trust': 'trust_balance',
+        'trust_amount': 'trust_balance',
+        'amount': 'trust_balance',
+        'current_balance': 'trust_balance',
+        'account_balance': 'trust_balance',
+        'total': 'trust_balance',
+        'total_balance': 'trust_balance',
+    }
+    return mapping.get(h, h)
+
+
+@router.post("/api/trust-upload")
+async def api_trust_upload(request: Request, file: UploadFile = File(...)):
+    """Upload a trust account ledger CSV."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    role = get_current_role(request)
+    if role != 'admin':
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+
+    firm_id = request.session.get("firm_id")
+    if not firm_id:
+        return JSONResponse({"error": "No firm_id in session"}, status_code=400)
+
+    try:
+        content = await file.read()
+        text = content.decode('utf-8-sig')
+        reader = csv_mod.DictReader(io.StringIO(text))
+
+        if not reader.fieldnames:
+            return JSONResponse({"error": "CSV file has no headers"}, status_code=400)
+
+        header_map = {}
+        for h in reader.fieldnames:
+            header_map[h] = _normalize_trust_header(h)
+
+        batch_id = str(uuid.uuid4())
+        rows_imported = 0
+        rows_matched = 0
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build a lookup for matching: case_number -> case_id, name -> case_id
+            cursor.execute("""
+                SELECT id, case_number, name FROM cached_cases
+                WHERE firm_id = %s AND status = 'open'
+            """, (firm_id,))
+            case_by_number = {}
+            case_by_name = {}
+            for r in cursor.fetchall():
+                r = dict(r)
+                if r["case_number"]:
+                    case_by_number[r["case_number"].strip().lower()] = r["id"]
+                if r["name"]:
+                    case_by_name[r["name"].strip().lower()] = r["id"]
+
+            for row in reader:
+                mapped = {}
+                for orig_key, val in row.items():
+                    norm_key = header_map.get(orig_key, orig_key)
+                    mapped[norm_key] = val
+
+                trust_balance = _parse_currency(mapped.get('trust_balance'))
+                case_number = (mapped.get('case_number') or '').strip()
+                case_name = (mapped.get('case_name') or '').strip()
+                client_name = (mapped.get('client_name') or '').strip()
+
+                # Skip rows with no balance
+                if trust_balance is None or trust_balance == 0:
+                    continue
+
+                # Try to match to a case
+                case_id = None
+                match_method = None
+
+                if case_number:
+                    case_id = case_by_number.get(case_number.lower())
+                    if case_id:
+                        match_method = 'case_number'
+
+                if not case_id and case_name:
+                    case_id = case_by_name.get(case_name.lower())
+                    if case_id:
+                        match_method = 'case_name'
+
+                # Fuzzy match by client name in case name
+                if not case_id and client_name:
+                    client_lower = client_name.lower()
+                    for name, cid in case_by_name.items():
+                        if client_lower in name:
+                            case_id = cid
+                            match_method = 'client_name_fuzzy'
+                            break
+
+                cursor.execute("""
+                    INSERT INTO trust_ledger_uploads
+                        (firm_id, upload_batch_id, case_id, case_number,
+                         case_name, client_name, trust_balance, match_method)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    firm_id, batch_id, case_id, case_number or None,
+                    case_name or None, client_name or None,
+                    trust_balance, match_method,
+                ))
+                rows_imported += 1
+                if case_id:
+                    rows_matched += 1
+
+            conn.commit()
+
+        return JSONResponse({
+            "success": True,
+            "rows_imported": rows_imported,
+            "rows_matched": rows_matched,
+            "batch_id": batch_id,
+            "filename": file.filename,
+        })
+
+    except UnicodeDecodeError:
+        return JSONResponse({"error": "File is not a valid CSV (encoding error)"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": f"Upload failed: {str(e)}"}, status_code=500)
+
+
+@router.get("/api/trust-upload/history")
+async def api_trust_upload_history(request: Request):
+    """Get recent trust ledger upload history."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    firm_id = request.session.get("firm_id")
+    if not firm_id:
+        return JSONResponse({"error": "No firm_id in session"}, status_code=400)
+
+    try:
+        from db.trust import get_trust_upload_history
+        history = get_trust_upload_history(firm_id)
+        return JSONResponse({"history": [
+            {
+                "batch_id": h["upload_batch_id"],
+                "total_rows": h["total_rows"],
+                "matched_rows": h["matched_rows"],
+                "total_balance": float(h["total_balance"]) if h["total_balance"] else 0,
+                "uploaded_at": h["uploaded_at"].isoformat() if h["uploaded_at"] else "",
+            }
+            for h in history
+        ]})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/trust-confirm")
+async def api_trust_confirm(request: Request):
+    """Confirm all recommended transfers as completed."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    role = get_current_role(request)
+    if role != 'admin':
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+
+    firm_id = request.session.get("firm_id")
+    if not firm_id:
+        return JSONResponse({"error": "No firm_id in session"}, status_code=400)
+
+    try:
+        body = await request.json()
+        transfers = body.get("transfers", [])
+        if not transfers:
+            return JSONResponse({"error": "No transfers to confirm"}, status_code=400)
+
+        username = request.session.get("username", "unknown")
+        source_batch = body.get("source_upload_batch_id")
+
+        from db.trust import record_transfer_batch
+        batch_id = record_transfer_batch(
+            firm_id=firm_id,
+            transfers=transfers,
+            confirmed_by=username,
+            source_upload_batch_id=source_batch,
+        )
+
+        return JSONResponse({
+            "success": True,
+            "batch_id": batch_id,
+            "transfers_confirmed": len(transfers),
+        })
+
+    except Exception as e:
+        return JSONResponse({"error": f"Confirmation failed: {str(e)}"}, status_code=500)
+
+
+@router.get("/api/trust-transfers/history")
+async def api_trust_transfer_history(request: Request):
+    """Get recent transfer confirmation history."""
+    if not is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    firm_id = request.session.get("firm_id")
+    if not firm_id:
+        return JSONResponse({"error": "No firm_id in session"}, status_code=400)
+
+    try:
+        from db.trust import get_transfer_history
+        history = get_transfer_history(firm_id)
+        return JSONResponse({"history": [
+            {
+                "batch_id": h["batch_id"],
+                "case_count": h["case_count"],
+                "total_transferred": float(h["total_transferred"]) if h["total_transferred"] else 0,
+                "confirmed_by": h["confirmed_by"],
+                "confirmed_at": h["confirmed_at"].isoformat() if h["confirmed_at"] else "",
+            }
+            for h in history
+        ]})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ============================================================================
 # Chat API
 # ============================================================================
 

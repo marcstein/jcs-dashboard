@@ -29,6 +29,43 @@ CREATE TABLE IF NOT EXISTS trust_fee_schedules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tfs_firm ON trust_fee_schedules(firm_id);
+
+-- Trust ledger uploads: batch-based CSV uploads of trust account balances
+CREATE TABLE IF NOT EXISTS trust_ledger_uploads (
+    id SERIAL PRIMARY KEY,
+    firm_id VARCHAR(36) NOT NULL,
+    upload_batch_id VARCHAR(36) NOT NULL,
+    case_id INTEGER,
+    case_number TEXT,
+    case_name TEXT,
+    client_name TEXT,
+    trust_balance NUMERIC(12, 2),
+    match_method TEXT,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_tlu_firm ON trust_ledger_uploads(firm_id);
+CREATE INDEX IF NOT EXISTS idx_tlu_batch ON trust_ledger_uploads(upload_batch_id);
+CREATE INDEX IF NOT EXISTS idx_tlu_case ON trust_ledger_uploads(firm_id, case_id);
+
+-- Trust transfer confirmations: records when transfers were confirmed
+CREATE TABLE IF NOT EXISTS trust_transfers (
+    id SERIAL PRIMARY KEY,
+    firm_id VARCHAR(36) NOT NULL,
+    batch_id VARCHAR(36) NOT NULL,
+    case_id INTEGER NOT NULL,
+    case_name TEXT,
+    transfer_amount NUMERIC(12, 2) NOT NULL,
+    trust_balance_before NUMERIC(12, 2),
+    confirmed_by TEXT,
+    confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    source_upload_batch_id VARCHAR(36),
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tt_firm ON trust_transfers(firm_id);
+CREATE INDEX IF NOT EXISTS idx_tt_batch ON trust_transfers(batch_id);
+CREATE INDEX IF NOT EXISTS idx_tt_case ON trust_transfers(firm_id, case_id);
 """
 
 
@@ -164,3 +201,134 @@ def seed_default_schedules(firm_id: str) -> int:
 
     logger.info(f"Seeded {count} fee schedules for firm {firm_id}")
     return count
+
+
+# =============================================================================
+# Trust Ledger Uploads
+# =============================================================================
+
+def get_latest_trust_balances(firm_id: str) -> Dict:
+    """
+    Get trust balances from the latest upload batch.
+    Returns dict keyed by case_id -> {trust_balance, case_name, client_name, match_method}.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        # Find latest batch
+        cur.execute("""
+            SELECT upload_batch_id
+            FROM trust_ledger_uploads
+            WHERE firm_id = %s
+            GROUP BY upload_batch_id
+            ORDER BY MIN(uploaded_at) DESC
+            LIMIT 1
+        """, (firm_id,))
+        row = cur.fetchone()
+        if not row:
+            return {}
+
+        batch_id = dict(row)["upload_batch_id"]
+
+        cur.execute("""
+            SELECT case_id, case_name, client_name, trust_balance, match_method
+            FROM trust_ledger_uploads
+            WHERE firm_id = %s AND upload_batch_id = %s AND case_id IS NOT NULL
+        """, (firm_id, batch_id))
+
+        balances = {}
+        for r in cur.fetchall():
+            r = dict(r)
+            balances[r["case_id"]] = {
+                "trust_balance": float(r["trust_balance"]) if r["trust_balance"] else 0,
+                "case_name": r["case_name"],
+                "client_name": r["client_name"],
+                "match_method": r["match_method"],
+            }
+        return balances
+
+
+def get_trust_upload_history(firm_id: str, limit: int = 10) -> List[Dict]:
+    """Get recent trust ledger upload history."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT upload_batch_id,
+                   COUNT(*) as total_rows,
+                   COUNT(case_id) as matched_rows,
+                   SUM(trust_balance) as total_balance,
+                   MIN(uploaded_at) as uploaded_at
+            FROM trust_ledger_uploads
+            WHERE firm_id = %s
+            GROUP BY upload_batch_id
+            ORDER BY MIN(uploaded_at) DESC
+            LIMIT %s
+        """, (firm_id, limit))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_latest_upload_batch_id(firm_id: str) -> Optional[str]:
+    """Get the batch_id of the most recent trust ledger upload."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT upload_batch_id
+            FROM trust_ledger_uploads
+            WHERE firm_id = %s
+            GROUP BY upload_batch_id
+            ORDER BY MIN(uploaded_at) DESC
+            LIMIT 1
+        """, (firm_id,))
+        row = cur.fetchone()
+        return dict(row)["upload_batch_id"] if row else None
+
+
+# =============================================================================
+# Trust Transfer Confirmations
+# =============================================================================
+
+def record_transfer_batch(firm_id: str, transfers: List[Dict],
+                          confirmed_by: str, source_upload_batch_id: str = None) -> str:
+    """
+    Record a batch of confirmed transfers.
+    Each transfer dict: {case_id, case_name, transfer_amount, trust_balance_before}
+    Returns the batch_id.
+    """
+    import uuid
+    batch_id = str(uuid.uuid4())
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for t in transfers:
+            cur.execute("""
+                INSERT INTO trust_transfers
+                    (firm_id, batch_id, case_id, case_name, transfer_amount,
+                     trust_balance_before, confirmed_by, source_upload_batch_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                firm_id, batch_id, t["case_id"], t.get("case_name", ""),
+                t["transfer_amount"], t.get("trust_balance_before"),
+                confirmed_by, source_upload_batch_id,
+            ))
+        conn.commit()
+
+    logger.info(f"Recorded {len(transfers)} transfers in batch {batch_id} for firm {firm_id}")
+    return batch_id
+
+
+def get_transfer_history(firm_id: str, limit: int = 10) -> List[Dict]:
+    """Get recent transfer confirmation batches."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT batch_id,
+                   COUNT(*) as case_count,
+                   SUM(transfer_amount) as total_transferred,
+                   confirmed_by,
+                   MIN(confirmed_at) as confirmed_at
+            FROM trust_transfers
+            WHERE firm_id = %s
+            GROUP BY batch_id, confirmed_by
+            ORDER BY MIN(confirmed_at) DESC
+            LIMIT %s
+        """, (firm_id, limit))
+        return [dict(r) for r in cur.fetchall()]

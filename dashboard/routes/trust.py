@@ -39,6 +39,40 @@ async def trust_report_page(request: Request, attorney: str = None, phase: str =
     summary = report["summary"]
     schedules = report["schedules"]
 
+    # Load trust balances from latest upload
+    try:
+        from db.trust import get_latest_trust_balances, get_latest_upload_batch_id
+        trust_balances = get_latest_trust_balances(firm_id)
+        upload_batch_id = get_latest_upload_batch_id(firm_id)
+    except Exception:
+        trust_balances = {}
+        upload_batch_id = None
+
+    has_trust_data = len(trust_balances) > 0
+
+    # Attach trust balance to each line and compute transferable amount
+    for l in lines:
+        tb = trust_balances.get(l.case_id)
+        if tb:
+            l._trust_balance = tb["trust_balance"]
+            # Transferable = min(trust balance, earned) — can't transfer more than what's in trust
+            l._transferable = min(tb["trust_balance"], l.paid_to_date)
+        else:
+            l._trust_balance = None
+            l._transferable = None
+
+    # Recalculate summary with trust data
+    if has_trust_data:
+        summary["total_trust_balance"] = sum(
+            l._trust_balance for l in lines if l._trust_balance is not None
+        )
+        summary["total_transferable"] = sum(
+            l._transferable for l in lines if l._transferable is not None
+        )
+        summary["cases_with_trust"] = sum(
+            1 for l in lines if l._trust_balance is not None
+        )
+
     # Apply filters
     if attorney:
         lines = [l for l in lines if attorney.lower() in l.lead_attorney.lower()]
@@ -66,6 +100,8 @@ async def trust_report_page(request: Request, attorney: str = None, phase: str =
         "selected_attorney": attorney or "",
         "selected_phase": phase or "",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "has_trust_data": has_trust_data,
+        "upload_batch_id": upload_batch_id,
     })
 
 
@@ -85,22 +121,41 @@ async def trust_export_csv(request: Request):
 
     report = generate_trust_transfer_report(firm_id)
 
+    # Load trust balances
+    try:
+        from db.trust import get_latest_trust_balances
+        trust_balances = get_latest_trust_balances(firm_id)
+    except Exception:
+        trust_balances = {}
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
+    headers = [
         "Case ID", "Case Name", "Client", "Lead Attorney", "Case Type",
         "Schedule", "Current Phase",
-        "Total Fee", "Paid to Date", "% Paid", "Phase Target %",
-        "Billing Gap", "Outstanding Balance"
-    ])
+        "Total Fee", "Earned (Received)", "% Earned", "Pace Target %",
+        "Behind Pace", "Outstanding",
+    ]
+    if trust_balances:
+        headers.extend(["Trust Balance", "Transferable"])
+    writer.writerow(headers)
+
     for l in report["lines"]:
-        writer.writerow([
+        row = [
             l.case_id, l.case_name, l.client_name, l.lead_attorney,
             l.case_type, l.schedule_label, l.phase_label,
             f"${l.total_fee:,.2f}", f"${l.paid_to_date:,.2f}",
             f"{l.pct_paid:.1f}%", f"{l.phase_target_pct}%",
             f"${l.billing_gap:,.2f}", f"${l.outstanding_balance:,.2f}",
-        ])
+        ]
+        if trust_balances:
+            tb = trust_balances.get(l.case_id)
+            if tb:
+                row.append(f"${tb['trust_balance']:,.2f}")
+                row.append(f"${min(tb['trust_balance'], l.paid_to_date):,.2f}")
+            else:
+                row.extend(["", ""])
+        writer.writerow(row)
 
     output.seek(0)
     filename = f"trust_transfer_{datetime.now().strftime('%Y%m%d')}.csv"

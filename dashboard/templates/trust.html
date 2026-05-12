@@ -4,7 +4,7 @@
 
 {% block content %}
 <h1>Trust-to-Operating Transfer Report</h1>
-<p class="page-description">Earned fees (based on payments received) available for transfer from trust to operating. Phase targets shown as billing pace benchmarks. Generated {{ generated_at }}.</p>
+<p class="page-description">Earned fees (based on payments received) available for transfer from trust to operating. Generated {{ generated_at }}.</p>
 
 <!-- Summary Stats -->
 <div class="stats-grid">
@@ -18,17 +18,63 @@
     </div>
     <div class="stat-card stat-success">
         <div class="stat-value">${{ "{:,.0f}".format(summary.total_paid) }}</div>
-        <div class="stat-label">Earned / Fees Received ({{ summary.pct_paid }}%)</div>
+        <div class="stat-label">Earned / Received ({{ summary.pct_paid }}%)</div>
     </div>
-    <div class="stat-card {% if summary.total_billing_gap > 0 %}stat-warning{% endif %}">
-        <div class="stat-value">${{ "{:,.0f}".format(summary.total_billing_gap) }}</div>
-        <div class="stat-label">Behind Pace (Billing Gap)</div>
+    {% if has_trust_data %}
+    <div class="stat-card">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_trust_balance) }}</div>
+        <div class="stat-label">Trust Balance ({{ summary.cases_with_trust }} cases)</div>
     </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_transferable) }}</div>
+        <div class="stat-label">Recommended Transfer</div>
+    </div>
+    {% else %}
     <div class="stat-card">
         <div class="stat-value">${{ "{:,.0f}".format(summary.total_outstanding) }}</div>
-        <div class="stat-label">Remaining in Trust</div>
+        <div class="stat-label">Outstanding Balance</div>
     </div>
+    {% endif %}
 </div>
+
+<!-- Trust Ledger Upload -->
+<div class="section-header" style="margin-top: 24px;">
+    <h2>Trust Account Ledger</h2>
+</div>
+<div id="trustUploadArea" style="border: 2px dashed #d1d5db; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 20px; background: #f9fafb; cursor: pointer;"
+     ondragover="event.preventDefault(); this.style.borderColor='#3b82f6'; this.style.background='#eff6ff';"
+     ondragleave="this.style.borderColor='#d1d5db'; this.style.background='#f9fafb';"
+     ondrop="event.preventDefault(); this.style.borderColor='#d1d5db'; this.style.background='#f9fafb'; handleTrustUpload(event.dataTransfer.files[0]);"
+     onclick="document.getElementById('trustFileInput').click();">
+    <input type="file" id="trustFileInput" accept=".csv" style="display:none" onchange="handleTrustUpload(this.files[0])">
+    {% if has_trust_data %}
+    <p style="margin: 0; color: #059669; font-weight: 600;">Trust ledger uploaded</p>
+    <p style="margin: 4px 0 0; color: #6b7280; font-size: 13px;">Drop a new CSV to update, or click to browse</p>
+    {% else %}
+    <p style="margin: 0; color: #6b7280;">Drop trust ledger CSV here, or click to browse</p>
+    <p style="margin: 4px 0 0; color: #9ca3af; font-size: 12px;">Export from MyCase or Clio → Trust Account → Ledger/Balance Report</p>
+    {% endif %}
+</div>
+<div id="trustUploadStatus" style="display:none; margin-bottom: 16px; padding: 10px; border-radius: 6px; font-size: 13px;"></div>
+
+<!-- Upload History -->
+<div id="trustUploadHistory" style="margin-bottom: 20px; display: none;">
+    <p style="color: #6b7280; font-size: 13px; font-weight: 600; margin-bottom: 6px;">Recent uploads:</p>
+    <div id="trustHistoryList" style="font-size: 13px; color: #6b7280;"></div>
+</div>
+
+<!-- Confirm All Transfers -->
+{% if has_trust_data %}
+<div style="display: flex; gap: 12px; align-items: center; margin-bottom: 20px; padding: 14px; background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px;">
+    <div style="flex: 1;">
+        <strong style="color: #92400e;">Ready to transfer</strong>
+        <span style="color: #78350f; font-size: 13px;"> — {{ summary.cases_with_trust }} cases, ${{ "{:,.0f}".format(summary.total_transferable) }} recommended</span>
+    </div>
+    <button onclick="confirmAllTransfers()" class="btn" style="padding: 8px 18px; font-size: 13px; background: #f59e0b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+        Confirm All Transfers
+    </button>
+</div>
+{% endif %}
 
 <!-- Filters and Export -->
 <div style="display: flex; gap: 12px; align-items: center; margin: 20px 0; flex-wrap: wrap;">
@@ -62,8 +108,8 @@
             <th>Schedule</th>
             <th style="text-align:right">Cases</th>
             <th style="text-align:right">Total Fees</th>
-            <th style="text-align:right">Paid</th>
-            <th style="text-align:right">Billing Gap</th>
+            <th style="text-align:right">Earned</th>
+            <th style="text-align:right">Behind Pace</th>
         </tr>
     </thead>
     <tbody>
@@ -89,8 +135,8 @@
             <th>Phase</th>
             <th style="text-align:right">Cases</th>
             <th style="text-align:right">Total Fees</th>
-            <th style="text-align:right">Paid</th>
-            <th style="text-align:right">Billing Gap</th>
+            <th style="text-align:right">Earned</th>
+            <th style="text-align:right">Behind Pace</th>
         </tr>
     </thead>
     <tbody>
@@ -110,7 +156,7 @@
     </tbody>
 </table>
 
-<!-- Fee Schedules Reference -->
+<!-- Phase Pace Benchmarks -->
 <div class="section-header" style="margin-top: 24px;">
     <h2>Phase Pace Benchmarks</h2>
 </div>
@@ -156,12 +202,17 @@
             <th style="text-align:right">% Earned</th>
             <th style="text-align:right">Pace Target</th>
             <th style="text-align:right">Behind Pace</th>
+            {% if has_trust_data %}
+            <th style="text-align:right">Trust Bal.</th>
+            <th style="text-align:right">Transfer</th>
+            {% else %}
             <th style="text-align:right">Remaining</th>
+            {% endif %}
         </tr>
     </thead>
     <tbody>
         {% for l in lines %}
-        <tr>
+        <tr data-case-id="{{ l.case_id }}" data-case-name="{{ l.case_name }}" data-trust="{{ l._trust_balance if l._trust_balance is not none else '' }}" data-transferable="{{ l._transferable if l._transferable is not none else '' }}">
             <td title="{{ l.case_name }}">{{ l.case_name[:35] }}</td>
             <td>{{ l.client_name[:20] }}</td>
             <td>{{ l.lead_attorney[:18] }}</td>
@@ -172,7 +223,12 @@
             <td style="text-align:right; {% if l.pct_paid >= l.phase_target_pct %}color: #059669;{% elif l.pct_paid >= l.phase_target_pct * 0.7 %}color: #d97706;{% else %}color: #dc2626;{% endif %} font-weight: 600;">{{ "%.1f"|format(l.pct_paid) }}%</td>
             <td style="text-align:right">{{ l.phase_target_pct }}%</td>
             <td style="text-align:right; {% if l.billing_gap > 0 %}color: #d97706; font-weight: 600;{% endif %}">{% if l.billing_gap > 0 %}${{ "{:,.0f}".format(l.billing_gap) }}{% else %}<span style="color: #059669;">—</span>{% endif %}</td>
+            {% if has_trust_data %}
+            <td style="text-align:right">{% if l._trust_balance is not none %}${{ "{:,.0f}".format(l._trust_balance) }}{% else %}<span style="color: #d1d5db;">—</span>{% endif %}</td>
+            <td style="text-align:right; {% if l._transferable and l._transferable > 0 %}color: #f59e0b; font-weight: 600;{% endif %}">{% if l._transferable is not none and l._transferable > 0 %}${{ "{:,.0f}".format(l._transferable) }}{% elif l._trust_balance is not none %}$0{% else %}<span style="color: #d1d5db;">—</span>{% endif %}</td>
+            {% else %}
             <td style="text-align:right">${{ "{:,.0f}".format(l.outstanding_balance) }}</td>
+            {% endif %}
         </tr>
         {% endfor %}
     </tbody>
@@ -181,5 +237,131 @@
 {% else %}
 <p style="color: #6b7280; padding: 20px;">No cases match the current filters.</p>
 {% endif %}
+
+<!-- Transfer History -->
+<div class="section-header" style="margin-top: 24px;">
+    <h2>Transfer History</h2>
+</div>
+<div id="transferHistory" style="font-size: 13px; color: #6b7280;">Loading...</div>
+
+<script>
+async function handleTrustUpload(file) {
+    if (!file) return;
+    const status = document.getElementById('trustUploadStatus');
+    status.style.display = 'block';
+    status.style.background = '#eff6ff';
+    status.style.color = '#1e40af';
+    status.textContent = 'Uploading ' + file.name + '...';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const resp = await fetch('/api/trust-upload', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.success) {
+            status.style.background = '#ecfdf5';
+            status.style.color = '#065f46';
+            status.textContent = 'Uploaded ' + data.rows_imported + ' rows (' + data.rows_matched + ' matched to cases). Reloading...';
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            status.style.background = '#fef2f2';
+            status.style.color = '#991b1b';
+            status.textContent = 'Error: ' + data.error;
+        }
+    } catch (e) {
+        status.style.background = '#fef2f2';
+        status.style.color = '#991b1b';
+        status.textContent = 'Upload failed: ' + e.message;
+    }
+}
+
+async function confirmAllTransfers() {
+    if (!confirm('Confirm all recommended transfers have been moved from trust to operating?')) return;
+
+    const rows = document.querySelectorAll('tr[data-transferable]');
+    const transfers = [];
+    rows.forEach(row => {
+        const amt = parseFloat(row.dataset.transferable);
+        if (amt > 0) {
+            transfers.push({
+                case_id: parseInt(row.dataset.caseId),
+                case_name: row.dataset.caseName,
+                transfer_amount: amt,
+                trust_balance_before: parseFloat(row.dataset.trust) || null,
+            });
+        }
+    });
+
+    if (transfers.length === 0) {
+        alert('No transfers to confirm.');
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/trust-confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                transfers: transfers,
+                source_upload_batch_id: '{{ upload_batch_id or "" }}',
+            }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            alert('Confirmed ' + data.transfers_confirmed + ' transfers.');
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    } catch (e) {
+        alert('Confirmation failed: ' + e.message);
+    }
+}
+
+// Load transfer history
+async function loadTransferHistory() {
+    try {
+        const resp = await fetch('/api/trust-transfers/history');
+        const data = await resp.json();
+        const el = document.getElementById('transferHistory');
+        if (!data.history || data.history.length === 0) {
+            el.textContent = 'No transfers confirmed yet.';
+            return;
+        }
+        let html = '<table class="data-table" style="font-size: 13px;"><thead><tr><th>Date</th><th style="text-align:right">Cases</th><th style="text-align:right">Total Transferred</th><th>Confirmed By</th></tr></thead><tbody>';
+        data.history.forEach(h => {
+            const dt = new Date(h.confirmed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            html += '<tr><td>' + dt + '</td><td style="text-align:right">' + h.case_count + '</td><td style="text-align:right">$' + h.total_transferred.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</td><td>' + h.confirmed_by + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (e) {
+        document.getElementById('transferHistory').textContent = 'Could not load transfer history.';
+    }
+}
+
+// Load upload history
+async function loadUploadHistory() {
+    try {
+        const resp = await fetch('/api/trust-upload/history');
+        const data = await resp.json();
+        if (!data.history || data.history.length === 0) return;
+        const container = document.getElementById('trustUploadHistory');
+        container.style.display = 'block';
+        let html = '';
+        data.history.forEach(h => {
+            const dt = new Date(h.uploaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            html += '<span style="margin-right: 16px;">' + dt + ': ' + h.total_rows + ' rows (' + h.matched_rows + ' matched), $' + h.total_balance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</span>';
+        });
+        document.getElementById('trustHistoryList').innerHTML = html;
+    } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadTransferHistory();
+    loadUploadHistory();
+});
+</script>
 
 {% endblock %}
