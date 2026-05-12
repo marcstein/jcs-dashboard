@@ -89,17 +89,17 @@ async def trust_export_csv(request: Request):
     writer = csv.writer(output)
     writer.writerow([
         "Case ID", "Case Name", "Client", "Lead Attorney", "Case Type",
-        "Schedule", "Current Phase", "Earned %",
-        "Total Fee", "Earned Amount", "In Operating", "Recommended Transfer",
-        "Remaining in Trust"
+        "Schedule", "Current Phase",
+        "Total Fee", "Paid to Date", "% Paid", "Phase Target %",
+        "Billing Gap", "Outstanding Balance"
     ])
     for l in report["lines"]:
         writer.writerow([
             l.case_id, l.case_name, l.client_name, l.lead_attorney,
-            l.case_type, l.schedule_label, l.phase_label, f"{l.earned_pct}%",
-            f"${l.total_fee:,.2f}", f"${l.earned_amount:,.2f}",
-            f"${l.in_operating:,.2f}", f"${l.recommended_transfer:,.2f}",
-            f"${l.remaining_in_trust:,.2f}",
+            l.case_type, l.schedule_label, l.phase_label,
+            f"${l.total_fee:,.2f}", f"${l.paid_to_date:,.2f}",
+            f"{l.pct_paid:.1f}%", f"{l.phase_target_pct}%",
+            f"${l.billing_gap:,.2f}", f"${l.outstanding_balance:,.2f}",
         ])
 
     output.seek(0)

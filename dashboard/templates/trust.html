@@ -4,7 +4,7 @@
 
 {% block content %}
 <h1>Trust-to-Operating Transfer Report</h1>
-<p class="page-description">Phase-based calculation of earned fees for trust account management. Generated {{ generated_at }}.</p>
+<p class="page-description">Earned fees (based on payments received) available for transfer from trust to operating. Phase targets shown as billing pace benchmarks. Generated {{ generated_at }}.</p>
 
 <!-- Summary Stats -->
 <div class="stats-grid">
@@ -17,19 +17,15 @@
         <div class="stat-label">Total Flat Fees</div>
     </div>
     <div class="stat-card stat-success">
-        <div class="stat-value">${{ "{:,.0f}".format(summary.total_earned) }}</div>
-        <div class="stat-label">Total Earned ({{ summary.earned_pct }}%)</div>
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_paid) }}</div>
+        <div class="stat-label">Earned / Fees Received ({{ summary.pct_paid }}%)</div>
+    </div>
+    <div class="stat-card {% if summary.total_billing_gap > 0 %}stat-warning{% endif %}">
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_billing_gap) }}</div>
+        <div class="stat-label">Behind Pace (Billing Gap)</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">${{ "{:,.0f}".format(summary.total_in_operating) }}</div>
-        <div class="stat-label">Already in Operating</div>
-    </div>
-    <div class="stat-card {% if summary.total_to_transfer > 0 %}stat-warning{% endif %}">
-        <div class="stat-value">${{ "{:,.0f}".format(summary.total_to_transfer) }}</div>
-        <div class="stat-label">Recommended Transfer</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">${{ "{:,.0f}".format(summary.total_remaining_trust) }}</div>
+        <div class="stat-value">${{ "{:,.0f}".format(summary.total_outstanding) }}</div>
         <div class="stat-label">Remaining in Trust</div>
     </div>
 </div>
@@ -66,8 +62,8 @@
             <th>Schedule</th>
             <th style="text-align:right">Cases</th>
             <th style="text-align:right">Total Fees</th>
-            <th style="text-align:right">Earned</th>
-            <th style="text-align:right">To Transfer</th>
+            <th style="text-align:right">Paid</th>
+            <th style="text-align:right">Billing Gap</th>
         </tr>
     </thead>
     <tbody>
@@ -76,8 +72,8 @@
             <td><strong>{{ label }}</strong></td>
             <td style="text-align:right">{{ data.count }}</td>
             <td style="text-align:right">${{ "{:,.0f}".format(data.total_fee) }}</td>
-            <td style="text-align:right">${{ "{:,.0f}".format(data.earned) }}</td>
-            <td style="text-align:right; {% if data.to_transfer > 0 %}color: #d97706; font-weight: 600;{% endif %}">${{ "{:,.0f}".format(data.to_transfer) }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(data.paid) }}</td>
+            <td style="text-align:right; {% if data.billing_gap > 0 %}color: #d97706; font-weight: 600;{% endif %}">${{ "{:,.0f}".format(data.billing_gap) }}</td>
         </tr>
         {% endfor %}
     </tbody>
@@ -93,8 +89,8 @@
             <th>Phase</th>
             <th style="text-align:right">Cases</th>
             <th style="text-align:right">Total Fees</th>
-            <th style="text-align:right">Earned</th>
-            <th style="text-align:right">To Transfer</th>
+            <th style="text-align:right">Paid</th>
+            <th style="text-align:right">Billing Gap</th>
         </tr>
     </thead>
     <tbody>
@@ -106,8 +102,8 @@
             <td><strong>{{ label }}</strong></td>
             <td style="text-align:right">{{ data.count }}</td>
             <td style="text-align:right">${{ "{:,.0f}".format(data.total_fee) }}</td>
-            <td style="text-align:right">${{ "{:,.0f}".format(data.earned) }}</td>
-            <td style="text-align:right; {% if data.to_transfer > 0 %}color: #d97706; font-weight: 600;{% endif %}">${{ "{:,.0f}".format(data.to_transfer) }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(data.paid) }}</td>
+            <td style="text-align:right; {% if data.billing_gap > 0 %}color: #d97706; font-weight: 600;{% endif %}">${{ "{:,.0f}".format(data.billing_gap) }}</td>
         </tr>
         {% endif %}
         {% endfor %}
@@ -116,15 +112,15 @@
 
 <!-- Fee Schedules Reference -->
 <div class="section-header" style="margin-top: 24px;">
-    <h2>Fee Allocation Schedules</h2>
+    <h2>Phase Pace Benchmarks</h2>
 </div>
-<p style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">Percentage of flat fee earned at each phase. Cumulative — reaching a phase means all prior phases are also earned.</p>
+<p style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">Expected percentage of flat fee collected by each phase. Cases behind pace may need collection attention.</p>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
     {% for key, schedule in schedules.items() %}
     <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px;">
         <h3 style="margin: 0 0 8px 0; font-size: 14px;">{{ schedule.label }}</h3>
         <table style="width: 100%; font-size: 13px;">
-            <tr style="color: #6b7280;"><th style="text-align:left; padding: 2px 0;">Phase</th><th style="text-align:right; padding: 2px 0;">This</th><th style="text-align:right; padding: 2px 0;">Cumul.</th></tr>
+            <tr style="color: #6b7280;"><th style="text-align:left; padding: 2px 0;">Phase</th><th style="text-align:right; padding: 2px 0;">This</th><th style="text-align:right; padding: 2px 0;">Target</th></tr>
             {% set ns = namespace(cumul=0) %}
             {% for pc in phase_order %}
             {% set pct = schedule.phases.get(pc, 0) %}
@@ -156,11 +152,11 @@
             <th>Type</th>
             <th>Phase</th>
             <th style="text-align:right">Total Fee</th>
-            <th style="text-align:right">Earned %</th>
-            <th style="text-align:right">Earned $</th>
-            <th style="text-align:right">In Operating</th>
-            <th style="text-align:right">Transfer</th>
-            <th style="text-align:right">In Trust</th>
+            <th style="text-align:right">Earned</th>
+            <th style="text-align:right">% Earned</th>
+            <th style="text-align:right">Pace Target</th>
+            <th style="text-align:right">Behind Pace</th>
+            <th style="text-align:right">Remaining</th>
         </tr>
     </thead>
     <tbody>
@@ -172,11 +168,11 @@
             <td>{{ l.case_type[:14] if l.case_type else "" }}</td>
             <td>{{ l.phase_label }}</td>
             <td style="text-align:right">${{ "{:,.0f}".format(l.total_fee) }}</td>
-            <td style="text-align:right">{{ l.earned_pct }}%</td>
-            <td style="text-align:right">${{ "{:,.0f}".format(l.earned_amount) }}</td>
-            <td style="text-align:right">${{ "{:,.0f}".format(l.in_operating) }}</td>
-            <td style="text-align:right; {% if l.recommended_transfer > 0 %}color: #d97706; font-weight: 600;{% endif %}">{% if l.recommended_transfer > 0 %}${{ "{:,.0f}".format(l.recommended_transfer) }}{% else %}-{% endif %}</td>
-            <td style="text-align:right">${{ "{:,.0f}".format(l.remaining_in_trust) }}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(l.paid_to_date) }}</td>
+            <td style="text-align:right; {% if l.pct_paid >= l.phase_target_pct %}color: #059669;{% elif l.pct_paid >= l.phase_target_pct * 0.7 %}color: #d97706;{% else %}color: #dc2626;{% endif %} font-weight: 600;">{{ "%.1f"|format(l.pct_paid) }}%</td>
+            <td style="text-align:right">{{ l.phase_target_pct }}%</td>
+            <td style="text-align:right; {% if l.billing_gap > 0 %}color: #d97706; font-weight: 600;{% endif %}">{% if l.billing_gap > 0 %}${{ "{:,.0f}".format(l.billing_gap) }}{% else %}<span style="color: #059669;">—</span>{% endif %}</td>
+            <td style="text-align:right">${{ "{:,.0f}".format(l.outstanding_balance) }}</td>
         </tr>
         {% endfor %}
     </tbody>

@@ -2,12 +2,12 @@
 """
 Trust-to-Operating Transfer Report
 
-Generates a report showing how much of each flat-fee case's fee
-should be transferred from trust to operating, based on current case phase.
+Shows how much of each flat-fee case's fee has been earned (= fees received)
+and can be transferred from trust to operating.
 
-Phase-based fee allocation schedules define what percentage of the total
-flat fee is "earned" at each phase. The managing partner uses this report
-to maintain trust and operating accounts.
+Earned is based on actual payments received, NOT phase-based percentages.
+Phase schedules serve as billing pace benchmarks — expected collection %
+by each phase — to highlight cases where collections are behind.
 
 Fee schedules are loaded from the database (trust_fee_schedules table)
 per firm. If no DB schedules exist, falls back to hardcoded defaults.
@@ -192,11 +192,11 @@ class TrustTransferLine:
     current_phase: str
     phase_label: str
     total_fee: float
-    earned_pct: int
-    earned_amount: float
-    in_operating: float  # already transferred (= paid_amount as proxy)
-    recommended_transfer: float  # earned - already in operating
-    remaining_in_trust: float
+    paid_to_date: float        # actual payments received (from invoices)
+    pct_paid: float             # paid_to_date / total_fee * 100
+    phase_target_pct: int       # cumulative % expected by current phase (from schedule)
+    billing_gap: float          # dollar gap: (phase_target_pct - pct_paid) / 100 * total_fee
+    outstanding_balance: float  # total_fee - paid_to_date
     schedule_label: str
 
 
@@ -277,16 +277,19 @@ def generate_trust_transfer_report(firm_id: str) -> Dict:
         case_type = row["case_type"] or ""
         phase_code = row["phase_code"]
         total_fee = float(row["total_fee"])
-        total_paid = float(row["total_paid"])
+        paid_to_date = float(row["total_paid"])
 
         schedule = get_schedule_for_case_type(case_type, schedules, default_schedule)
-        earned_pct = cumulative_earned_pct(schedule, phase_code)
-        earned_amount = round(total_fee * earned_pct / 100, 2)
+        phase_target_pct = cumulative_earned_pct(schedule, phase_code)
 
-        # total_paid is our proxy for "already in operating"
-        in_operating = total_paid
-        recommended_transfer = max(0, round(earned_amount - in_operating, 2))
-        remaining_in_trust = max(0, round(total_fee - earned_amount, 2))
+        # Actual % paid vs total fee
+        pct_paid = round(paid_to_date / total_fee * 100, 1) if total_fee else 0
+
+        # Billing gap: how far behind the phase benchmark (positive = behind)
+        expected_amount = round(total_fee * phase_target_pct / 100, 2)
+        billing_gap = round(max(0, expected_amount - paid_to_date), 2)
+
+        outstanding_balance = round(total_fee - paid_to_date, 2)
 
         lines.append(TrustTransferLine(
             case_id=row["case_id"],
@@ -297,53 +300,51 @@ def generate_trust_transfer_report(firm_id: str) -> Dict:
             current_phase=phase_code,
             phase_label=PHASE_LABELS.get(phase_code, phase_code),
             total_fee=total_fee,
-            earned_pct=earned_pct,
-            earned_amount=earned_amount,
-            in_operating=in_operating,
-            recommended_transfer=recommended_transfer,
-            remaining_in_trust=remaining_in_trust,
+            paid_to_date=paid_to_date,
+            pct_paid=pct_paid,
+            phase_target_pct=phase_target_pct,
+            billing_gap=billing_gap,
+            outstanding_balance=outstanding_balance,
             schedule_label=schedule["label"],
         ))
 
     # Summary stats
     total_fees = sum(l.total_fee for l in lines)
-    total_earned = sum(l.earned_amount for l in lines)
-    total_in_operating = sum(l.in_operating for l in lines)
-    total_to_transfer = sum(l.recommended_transfer for l in lines)
-    total_remaining_trust = sum(l.remaining_in_trust for l in lines)
+    total_paid = sum(l.paid_to_date for l in lines)
+    total_billing_gap = sum(l.billing_gap for l in lines)
+    total_outstanding = sum(l.outstanding_balance for l in lines)
 
     # Breakdown by schedule type
     by_schedule = {}
     for l in lines:
         key = l.schedule_label
         if key not in by_schedule:
-            by_schedule[key] = {"count": 0, "total_fee": 0, "earned": 0, "to_transfer": 0}
+            by_schedule[key] = {"count": 0, "total_fee": 0, "paid": 0, "billing_gap": 0}
         by_schedule[key]["count"] += 1
         by_schedule[key]["total_fee"] += l.total_fee
-        by_schedule[key]["earned"] += l.earned_amount
-        by_schedule[key]["to_transfer"] += l.recommended_transfer
+        by_schedule[key]["paid"] += l.paid_to_date
+        by_schedule[key]["billing_gap"] += l.billing_gap
 
     # Breakdown by phase
     by_phase = {}
     for l in lines:
         key = l.phase_label
         if key not in by_phase:
-            by_phase[key] = {"count": 0, "total_fee": 0, "earned": 0, "to_transfer": 0}
+            by_phase[key] = {"count": 0, "total_fee": 0, "paid": 0, "billing_gap": 0}
         by_phase[key]["count"] += 1
         by_phase[key]["total_fee"] += l.total_fee
-        by_phase[key]["earned"] += l.earned_amount
-        by_phase[key]["to_transfer"] += l.recommended_transfer
+        by_phase[key]["paid"] += l.paid_to_date
+        by_phase[key]["billing_gap"] += l.billing_gap
 
     return {
         "lines": lines,
         "summary": {
             "case_count": len(lines),
             "total_fees": total_fees,
-            "total_earned": total_earned,
-            "total_in_operating": total_in_operating,
-            "total_to_transfer": total_to_transfer,
-            "total_remaining_trust": total_remaining_trust,
-            "earned_pct": round(total_earned / total_fees * 100, 1) if total_fees else 0,
+            "total_paid": total_paid,
+            "pct_paid": round(total_paid / total_fees * 100, 1) if total_fees else 0,
+            "total_billing_gap": total_billing_gap,
+            "total_outstanding": total_outstanding,
             "by_schedule": by_schedule,
             "by_phase": by_phase,
         },
@@ -365,15 +366,15 @@ def export_trust_report_csv(report: Dict, filepath: str):
         writer = csv.writer(f)
         writer.writerow([
             "Case ID", "Case Name", "Client", "Lead Attorney", "Case Type",
-            "Schedule", "Current Phase", "Earned %",
-            "Total Fee", "Earned Amount", "In Operating", "Recommended Transfer",
-            "Remaining in Trust"
+            "Schedule", "Current Phase",
+            "Total Fee", "Paid to Date", "% Paid", "Phase Target %",
+            "Billing Gap", "Outstanding Balance"
         ])
         for l in lines:
             writer.writerow([
                 l.case_id, l.case_name, l.client_name, l.lead_attorney,
-                l.case_type, l.schedule_label, l.phase_label, f"{l.earned_pct}%",
-                f"${l.total_fee:,.2f}", f"${l.earned_amount:,.2f}",
-                f"${l.in_operating:,.2f}", f"${l.recommended_transfer:,.2f}",
-                f"${l.remaining_in_trust:,.2f}",
+                l.case_type, l.schedule_label, l.phase_label,
+                f"${l.total_fee:,.2f}", f"${l.paid_to_date:,.2f}",
+                f"{l.pct_paid:.1f}%", f"{l.phase_target_pct}%",
+                f"${l.billing_gap:,.2f}", f"${l.outstanding_balance:,.2f}",
             ])

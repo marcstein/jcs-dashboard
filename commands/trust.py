@@ -2,8 +2,8 @@
 """
 Trust transfer report commands.
 
-Generates reports showing how much of each case's flat fee
-should be transferred from trust to operating, based on case phase.
+Shows how much of each case's flat fee has been earned (= fees received)
+and can be transferred from trust to operating.
 """
 import csv
 from datetime import datetime
@@ -45,7 +45,7 @@ def trust():
 @click.option("--phase", default=None, help="Filter by current phase code")
 @click.option("--limit", default=None, type=int, help="Limit number of rows")
 def trust_report(firm_id, export_csv, attorney, phase, limit):
-    """Generate trust-to-operating transfer report."""
+    """Generate trust-to-operating transfer report (earned = fees received)."""
     if not firm_id:
         import os
         firm_id = os.getenv("FIRM_ID")
@@ -79,10 +79,9 @@ def trust_report(firm_id, export_csv, attorney, phase, limit):
     summary_text = (
         f"Cases: [bold]{s['case_count']}[/bold]  |  "
         f"Total Fees: [bold]${s['total_fees']:,.0f}[/bold]  |  "
-        f"Earned: [bold green]${s['total_earned']:,.0f}[/bold green] ({s['earned_pct']}%)  |  "
-        f"In Operating: [bold]${s['total_in_operating']:,.0f}[/bold]  |  "
-        f"[bold yellow]Recommended Transfer: ${s['total_to_transfer']:,.0f}[/bold yellow]  |  "
-        f"Remaining Trust: ${s['total_remaining_trust']:,.0f}"
+        f"Earned (Received): [bold green]${s['total_paid']:,.0f}[/bold green] ({s['pct_paid']}%)  |  "
+        f"[bold yellow]Behind Pace: ${s['total_billing_gap']:,.0f}[/bold yellow]  |  "
+        f"Remaining: ${s['total_outstanding']:,.0f}"
     )
     console.print(Panel(summary_text, title="Summary", border_style="blue"))
 
@@ -91,16 +90,16 @@ def trust_report(firm_id, export_csv, attorney, phase, limit):
     sched_table.add_column("Schedule", style="cyan")
     sched_table.add_column("Cases", justify="right")
     sched_table.add_column("Total Fees", justify="right")
-    sched_table.add_column("Earned", justify="right")
-    sched_table.add_column("To Transfer", justify="right", style="yellow")
+    sched_table.add_column("Paid", justify="right")
+    sched_table.add_column("Billing Gap", justify="right", style="yellow")
 
     for label, data in s["by_schedule"].items():
         sched_table.add_row(
             label,
             str(data["count"]),
             f"${data['total_fee']:,.0f}",
-            f"${data['earned']:,.0f}",
-            f"${data['to_transfer']:,.0f}",
+            f"${data['paid']:,.0f}",
+            f"${data['billing_gap']:,.0f}",
         )
     console.print(sched_table)
     console.print()
@@ -110,8 +109,8 @@ def trust_report(firm_id, export_csv, attorney, phase, limit):
     phase_table.add_column("Phase", style="cyan")
     phase_table.add_column("Cases", justify="right")
     phase_table.add_column("Total Fees", justify="right")
-    phase_table.add_column("Earned", justify="right")
-    phase_table.add_column("To Transfer", justify="right", style="yellow")
+    phase_table.add_column("Paid", justify="right")
+    phase_table.add_column("Billing Gap", justify="right", style="yellow")
 
     for phase_label in PHASE_LABELS.values():
         if phase_label in s["by_phase"]:
@@ -120,8 +119,8 @@ def trust_report(firm_id, export_csv, attorney, phase, limit):
                 phase_label,
                 str(data["count"]),
                 f"${data['total_fee']:,.0f}",
-                f"${data['earned']:,.0f}",
-                f"${data['to_transfer']:,.0f}",
+                f"${data['paid']:,.0f}",
+                f"${data['billing_gap']:,.0f}",
             )
     console.print(phase_table)
     console.print()
@@ -134,14 +133,23 @@ def trust_report(firm_id, export_csv, attorney, phase, limit):
     detail.add_column("Type", max_width=12)
     detail.add_column("Phase", max_width=10)
     detail.add_column("Fee", justify="right")
-    detail.add_column("Earned %", justify="right")
-    detail.add_column("Earned $", justify="right")
-    detail.add_column("In Oper.", justify="right")
-    detail.add_column("Transfer", justify="right", style="bold yellow")
-    detail.add_column("In Trust", justify="right")
+    detail.add_column("Earned", justify="right")
+    detail.add_column("% Earned", justify="right")
+    detail.add_column("Pace Target", justify="right")
+    detail.add_column("Behind", justify="right", style="bold yellow")
+    detail.add_column("Remaining", justify="right")
 
     for l in lines:
-        transfer_style = "bold yellow" if l.recommended_transfer > 0 else ""
+        # Color code % paid vs target
+        if l.pct_paid >= l.phase_target_pct:
+            pct_style = "bold green"
+        elif l.pct_paid >= l.phase_target_pct * 0.7:
+            pct_style = "bold yellow"
+        else:
+            pct_style = "bold red"
+
+        pct_text = Text(f"{l.pct_paid:.1f}%", style=pct_style)
+
         detail.add_row(
             l.case_name[:30],
             l.client_name[:20],
@@ -149,11 +157,11 @@ def trust_report(firm_id, export_csv, attorney, phase, limit):
             l.case_type[:12] if l.case_type else "",
             l.phase_label,
             f"${l.total_fee:,.0f}",
-            f"{l.earned_pct}%",
-            f"${l.earned_amount:,.0f}",
-            f"${l.in_operating:,.0f}",
-            f"${l.recommended_transfer:,.0f}" if l.recommended_transfer > 0 else "-",
-            f"${l.remaining_in_trust:,.0f}",
+            f"${l.paid_to_date:,.0f}",
+            pct_text,
+            f"{l.phase_target_pct}%",
+            f"${l.billing_gap:,.0f}" if l.billing_gap > 0 else "-",
+            f"${l.outstanding_balance:,.0f}",
         )
 
     console.print(detail)
